@@ -4,9 +4,10 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-ansible = "*"
+ansible-core = "2.15.11"
+aos-sdk = {file = "https://svl-artifactory.juniper.net/artifactory/atom-generic-virtual/aos_sdk_5.0.0-RC1/aos_sdk-0.1.0-py3-none-any.whl"}
 
 [dev-packages]
 
 [requires]
-python_version = "3.12"
+python_version = "3.9"
