@@ -1,0 +1,18 @@
+namespace: "junipernetworks"
+name: "apstra"
+version: "0.1.0"
+readme: "README.md"
+authors:
+    - "Pratik Dave <pratikd@juniper.net>"
+    - "Edwin Jacques <ejacques@juniper.net>"
+    - "Nathan Veenker <nveenker@juniper.net>"
+dependencies:
+license:
+    - "MIT"
+tags:
+    - juniper
+    - junipernetworks
+    - apstra
+    - networking
+    - aos
+repository: "https://github.com/Juniper/apstra-ansible-collection"

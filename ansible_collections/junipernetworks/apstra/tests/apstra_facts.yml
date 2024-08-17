@@ -1,0 +1,12 @@
+---
+- name: Gather Apstra facts
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Run apstra_facts module
+      junipernetworks.apstra.apstra_facts:
+      register: apstra_facts_result
+
+    - name: Display gathered facts
+      debug:
+        var: apstra_facts_result.ansible_facts
