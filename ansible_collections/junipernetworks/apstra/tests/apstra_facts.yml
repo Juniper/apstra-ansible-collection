@@ -1,8 +1,8 @@
 ---
 - name: Gather Apstra facts
-  hosts: all
+  hosts: cloudlabs-apstra
   gather_facts: no
-  connection: junipernetworks.apstra.connection
+  connection: junipernetworks.apstra.connection.apstra
   tasks:
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:

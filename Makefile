@@ -1,6 +1,9 @@
 TOP := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 APSTRA_COLLECTION_ROOT := $(TOP)/ansible_collections/junipernetworks/apstra
 
+# Get all .py files in the APSTRA_COLLECTION_ROOT directory
+PY_FILES := $(shell find $(APSTRA_COLLECTION_ROOT) -name *.py)
+
 VERSION := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)
 
 APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
@@ -9,9 +12,7 @@ APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
 # Only do this for builds so we can control if developer tools get installed.
 export PIPENV_VENV_IN_PROJECT := 1
 
-.PHONY: setup build install clean
-
-build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
+.PHONY: setup build force-rebuild install clean
 
 # OS-specific settings
 OS := $(shell uname -s)
@@ -20,20 +21,16 @@ PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
 endif
 
 setup:
-	$(PYENV_INSTALL_PREFIX) pyenv install --force
+	pyenv uninstall
+	$(PYENV_INSTALL_PREFIX) pyenv install
 	pip install pipenv
+	rm -rf .venv
+	pipenv install
 
-install: build
-	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
+force-rebuild:
+	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
-test: install
-	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
-
-clean:
-	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt $(TOP)/junipernetworks-apstra-*.tar.gz
-
-# Get all .py files in the APSTRA_COLLECTION_ROOT directory
-PY_FILES := $(shell find $(APSTRA_COLLECTION_ROOT) -name *.py)
+build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
 $(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(PY_FILES)
 	rm -f $(TOP)/junipernetworks-apstra-*.tar.gz
@@ -45,3 +42,12 @@ $(APSTRA_COLLECTION_ROOT)/requirements.txt: $(TOP)/Pipfile
 	pipenv install
 	pipenv run pip freeze > $@
 	
+install: build
+	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
+
+test: install
+	pipenv run ansible-playbook -vvvvvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
+
+clean:
+	pipenv --rm
+	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt $(TOP)/junipernetworks-apstra-*.tar.gz
