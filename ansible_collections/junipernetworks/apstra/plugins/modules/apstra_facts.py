@@ -1,5 +1,4 @@
 from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.connection.apstra_connection import Connection
 import sys
 
 def main():

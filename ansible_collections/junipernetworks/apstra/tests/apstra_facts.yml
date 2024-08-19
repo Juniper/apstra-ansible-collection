@@ -2,6 +2,7 @@
 - name: Gather Apstra facts
   hosts: all
   gather_facts: no
+  connection: junipernetworks.apstra.connection
   tasks:
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:

@@ -74,14 +74,14 @@ The following tools are recommended for development of this collection:
 
 3. Run the following command to install pyenv:
    ```bash
-   brew install xz pyenv-virtualenv
+   brew install xz pyenv
    ```
 
 4. Add this to your ~/.zprofile and restart your shell:
     ```bash
     export PYENV_ROOT="$HOME/.pyenv"
     [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv virtualenv-init -)"
+    eval "$(pyenv init -)"
     ```
 
 #### Linux-based Systems
@@ -127,9 +127,10 @@ The following tools are recommended for development of this collection:
 
 ### Usage
 
-To use the development environment after setting everything up, simply run the command:
+To use the development environment after setting everything up, simply run the commands:
 
   ```bash
+  pipenv install --dev
   pipenv shell
   ```
 
