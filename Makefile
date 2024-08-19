@@ -6,6 +6,8 @@ PY_FILES := $(shell find $(APSTRA_COLLECTION_ROOT) -name *.py)
 
 VERSION := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)
 
+PY_VERSION := $(shell cat .python-version)
+
 APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
 
 # Set the PIPENV_VENV_IN_PROJECT environment variable to 1 to install the virtual environment in the project directory
@@ -21,8 +23,9 @@ PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
 endif
 
 setup:
-	pyenv uninstall
-	$(PYENV_INSTALL_PREFIX) pyenv install
+	pyenv uninstall --force $(PY_VERSION)
+	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
+	$(PYENV_INSTALL_PREFIX) pyenv install --force $(PY_VERSION)
 	pip install pipenv
 	rm -rf .venv
 	pipenv install
