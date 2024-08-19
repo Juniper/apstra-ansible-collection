@@ -55,45 +55,81 @@ If you would like to contribute to this project, please follow the guidelines ou
 ## Development Environment
 
 The following tools are recommended for development of this collection:
-1. [brew.sh](https://brew.sh/)
+1. [brew.sh](https://brew.sh/) -- Only needed for _Mac OS X_
 1. [pyenv](https://github.com/pyenv/pyenv/blob/master/README.md)
 2. [pipenv](https://github.com/pyenv/pyenv/blob/master/README.md)
 
 ### Setup
 
-1. If you don't have brew, install it: 
+#### Mac OS X
+
+1. If you're on a Mac and don't have brew, install it: 
     ```bash
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     ```
-2. Install the brew components needed for pyenv: 
-    ```bash
-    brew install xz pyenv
-    ```
-3. Optional: Follow documentation [(link)](https://pipenv.pypa.io/en/stable/shell.html#shell-completion) to set up shell completion.
-4. Add the following to you shell profile (usually `~/.zprofile` on OS X or `~/.bash_profile` on Ubuntu):
-    ```bash
+2. Make sure the following is in your ~/.zprofile:
+   ```bash
     eval "$(/opt/homebrew/bin/brew shellenv)"
+   ```
+
+3. Run the following command to install pyenv:
+   ```bash
+   brew install xz pyenv-virtualenv
+   ```
+
+4. Add this to your ~/.zprofile and restart your shell:
+    ```bash
     export PYENV_ROOT="$HOME/.pyenv"
-    [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH" eval "$(pyenv init -)"
+    [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv virtualenv-init -)"
     ```
-5. If you changed your shell profile in the last step, source it. For example: 
+
+#### Linux-based Systems
+
+1. Install pyenv: 
+
+    ```bash
+    curl https://pyenv.run | bash
+    ```
+
+2. Follow the instructions given on the screen to finish the installation. For example:
+   ```bash
+    WARNING: seems you still have not added 'pyenv' to the load path.
+
+    # Load pyenv automatically by appending
+    # the following to
+    # ~/.bash_profile if it exists, otherwise ~/.profile (for login shells)
+    # and ~/.bashrc (for interactive shells) :
+
+    export PYENV_ROOT="$HOME/.pyenv"
+    [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)"
+
+    # Restart your shell for the changes to take effect.
+
+    # Load pyenv-virtualenv automatically by adding
+    # the following to ~/.bashrc:
+
+    eval "$(pyenv virtualenv-init -)"
+   ```
+3. On _Ubuntu_, you'll need to install a package to build Python properly:
       ```bash
-      source ~/.zprofile
+      sudo apt -y install liblzma-dev
       ```
-6. Build proper version of python (version is specified in [.python-version](.python-version)): 
+#### All Systems
+
+1. Run the setup `make` target:
    ```bash
-   pyenv install
+   make setup
    ```
-7. Install pipenv in the new build of python: 
-   ```bash
-   pip install pipenv
-   ```
+
+2. Optional: Follow [pipenv command completion setup instructions](https://pipenv.pypa.io/en/stable/shell.html#shell-completion).
+
 ### Usage
 
-To use the development environment after setting everything up, simply run the commands:
+To use the development environment after setting everything up, simply run the command:
 
   ```bash
-  pipenv install --dev
   pipenv shell
   ```
 

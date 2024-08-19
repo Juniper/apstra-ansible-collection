@@ -9,9 +9,19 @@ APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
 # Only do this for builds so we can control if developer tools get installed.
 export PIPENV_VENV_IN_PROJECT := 1
 
-.PHONY: build install clean
+.PHONY: setup build install clean
 
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
+
+# OS-specific settings
+OS := $(shell uname -s)
+ifeq ($(OS),Darwin)
+PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
+endif
+
+setup:
+	$(PYENV_INSTALL_PREFIX) pyenv install --force
+	pip install pipenv
 
 install: build
 	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
