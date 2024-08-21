@@ -67,9 +67,13 @@ The following tools are recommended for development of this collection:
     ```bash
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     ```
-2. Make sure the following is in your ~/.zprofile:
+2. If you have an ARM-based Mac, make sure the following is in your ~/.zprofile:
    ```bash
     eval "$(/opt/homebrew/bin/brew shellenv)"
+   ```
+   For Intel-based Mac, you may have to add this to ~/.zprofile instead:
+   ```bash
+    eval "$(/usr/local/bin/brew shellenv)"
    ```
 
 3. Run the following command to install pyenv:
@@ -107,14 +111,14 @@ The following tools are recommended for development of this collection:
 
     # Restart your shell for the changes to take effect.
 
-    # Load pyenv-virtualenv automatically by adding
+    # Load pyenv automatically by adding
     # the following to ~/.bashrc:
 
-    eval "$(pyenv virtualenv-init -)"
+    eval "$(pyenv init -)"
    ```
 3. On _Ubuntu_, you'll need to install a package to build Python properly:
       ```bash
-      sudo apt -y install liblzma-dev
+      sudo apt -y install build-essential liblzma-dev libbz2-dev zlib1g zlib1g-dev libssl-dev libffi-dev
       ```
 #### All Systems
 
@@ -142,12 +146,15 @@ The following `make` targets are supported to build, install and test an ansible
 
 |Target|Purpose|
 |---|---|
-|setup|Setup the build/test execution environment|
-|build|Create package junipernetworks-apstra-$(VERSION).tar.gz|
-|force-rebuild|Force rebuilding the collection|
-|install|Install package junipernetworks-apstra-$(VERSION).tar.gz|
+|setup|Setup the build/test execution environment.|
+|build|Create package `junipernetworks-apstra-$(VERSION).tar.gz.`|
+|install|Install package `junipernetworks-apstra-$(VERSION).tar.gz.`|
 |test|Test the collection.|
 |clean|Clean up created files.|
+|force-rebuild|Force rebuilding the collection.|
+|pipenv|Setup the pipenv used for developement and execution.|
+|clean-pipenv|Clean the pipenv used for development and execution.|
+
 
 ## License
 
