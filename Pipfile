@@ -11,4 +11,4 @@ aos-sdk = {file = "https://svl-artifactory.juniper.net/artifactory/atom-generic-
 ansible-lint = "*"
 
 [requires]
-python_version = "3.11"
+python_version = "3.10"

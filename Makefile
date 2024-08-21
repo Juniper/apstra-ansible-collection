@@ -14,21 +14,29 @@ APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
 # Only do this for builds so we can control if developer tools get installed.
 export PIPENV_VENV_IN_PROJECT := 1
 
-.PHONY: setup build force-rebuild install clean
+.PHONY: setup build force-rebuild install clean clean-pipenv pipenv
 
 # OS-specific settings
 OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
 PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
+else
+# Latest 
+export LDFLAGS := -Wl,-rpath,$(shell brew --prefix openssl)/lib
+export CPPFLAGS := -I$(shell brew --prefix openssl)/include
+export CONFIGURE_OPTS := --with-openssl=$(shell brew --prefix openssl)
 endif
 
-setup:
+setup: clean-pipenv
 	pyenv uninstall --force $(PY_VERSION)
 	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
 	$(PYENV_INSTALL_PREFIX) pyenv install --force $(PY_VERSION)
 	pip install pipenv
-	rm -rf .venv
+	$(MAKE) pipenv
+
+pipenv:
 	pipenv install
+	PIPENV_VENV_IN_PROJECT= pipenv install --dev
 
 force-rebuild:
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
@@ -51,6 +59,10 @@ install: build
 test: install
 	pipenv run ansible-playbook -vvvvvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
 
-clean:
-	pipenv --rm
+clean-pipenv:
+	pipenv --rm || true
+	PIPENV_VENV_IN_PROJECT= pipenv --rm || true
+	rm -rf .venv
+
+clean: clean-pipenv
 	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt $(TOP)/junipernetworks-apstra-*.tar.gz
