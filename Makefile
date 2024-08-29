@@ -10,10 +10,6 @@ PY_VERSION := $(shell cat .python-version)
 
 APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
 
-# Set the PIPENV_VENV_IN_PROJECT environment variable to 1 to install the virtual environment in the project directory
-# Only do this for builds so we can control if developer tools get installed.
-export PIPENV_VENV_IN_PROJECT := 1
-
 .PHONY: setup build force-rebuild install clean clean-pipenv pipenv
 
 # OS-specific settings
@@ -35,8 +31,7 @@ setup: clean-pipenv
 	$(MAKE) pipenv
 
 pipenv:
-	pipenv install
-	PIPENV_VENV_IN_PROJECT= pipenv install --dev
+	pipenv install --dev
 
 force-rebuild:
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
@@ -52,6 +47,7 @@ $(APSTRA_COLLECTION_ROOT)/requirements.txt: $(TOP)/Pipfile
 	pipenv --rm &>/dev/null || true
 	pipenv install
 	pipenv run pip freeze > $@
+	pipenv install --dev
 	
 install: build
 	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)

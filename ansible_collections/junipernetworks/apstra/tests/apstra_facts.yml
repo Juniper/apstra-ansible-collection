@@ -1,11 +1,16 @@
 ---
 - name: Gather Apstra facts
-  hosts: cloudlabs-apstra
+  hosts: localhost
   gather_facts: no
-  connection: junipernetworks.apstra.connection.apstra
+  connection: local
   tasks:
+    - name: Connect to Apstra
+      junipernetworks.apstra.authenticate:
+      register: auth_response
+
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:
+        auth_token: "{{ auth_response }}"
       register: apstra_facts_result
 
     - name: Display gathered facts
