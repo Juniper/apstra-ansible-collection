@@ -1,7 +1,7 @@
 ---
 - name: Gather Apstra facts
   hosts: localhost
-  gather_facts: no
+  gather_facts: false
   connection: local
   tasks:
     - name: Connect to Apstra
@@ -14,5 +14,9 @@
       register: apstra_facts_result
 
     - name: Display gathered facts
-      debug:
+      ansible.builtin.debug:
         var: apstra_facts_result.ansible_facts
+
+    - name: Logout of Apstra
+      junipernetworks.apstra.authenticate:
+        logout: true

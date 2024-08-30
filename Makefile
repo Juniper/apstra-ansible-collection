@@ -53,7 +53,7 @@ install: build
 	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
 
 test: install
-	pipenv run ansible-playbook -vvvvvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
+	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
 
 clean-pipenv:
 	pipenv --rm || true

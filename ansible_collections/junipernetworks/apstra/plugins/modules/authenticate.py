@@ -28,16 +28,13 @@ def connect(module):
     if logout:
         # Add client to the play context (will clean up later)
         setattr(module, 'apstra_client', client)
+        module.exit_json(changed=True)
 
     # Saved to avoid logging in needlessly in the same playbook
     setattr(module, 'auth_token', auth_token)
 
     # Return the auth token
     module.exit_json(changed=True, response=auth_token)
-
-def close(client):
-    if client:
-        client.logout()
 
 def main():
     authenticate_args = dict(
@@ -62,6 +59,10 @@ def main():
         connect(module)
     except Exception as e:
         module.fail_json(msg=str(e), **result)
+    finally:
+        client = getattr(module, 'apstra_client')
+        if client:
+            client.logout()
 
     module.exit_json(**result)
 
