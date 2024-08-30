@@ -6,11 +6,12 @@
   tasks:
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
+        logout: false
       register: auth_response
 
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:
-        auth_token: "{{ auth_response }}"
+        auth_token: "{{ auth_response.auth_token }}"
       register: apstra_facts_result
 
     - name: Display gathered facts
