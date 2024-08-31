@@ -1,0 +1,23 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: Ansible Module",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "module": "plugins.modules.${fileBasenameNoExtension}",
+            "console": "integratedTerminal",
+            "args": [
+                "${workspaceFolder}/module_args/${fileBasenameNoExtension}.json"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/ansible_collections/junipernetworks/apstra"
+            },
+            "justMyCode": false
+        }
+    ]
+}

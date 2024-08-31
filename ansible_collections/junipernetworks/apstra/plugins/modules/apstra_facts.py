@@ -1,5 +1,5 @@
 from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import apstra_client_module_args, apstra_client
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import apstra_client_module_args, ApstraClientFactory
 
 def main():
     facts_module_args = dict(
@@ -8,7 +8,7 @@ def main():
         gather_subset=dict(type='list', elements='str', required=False, default=[]),
     )
     client_module_args = apstra_client_module_args()
-    module_args = facts_module_args | client_module_args
+    module_args = client_module_args | facts_module_args 
 
     result = dict(
         changed=False,
@@ -22,7 +22,8 @@ def main():
 
     try:
         # Instantiate the client
-        client = apstra_client(module.params)
+        client_factory = ApstraClientFactory.from_params(module.params)
+        client = client_factory.client()
         
         # Gather facts using the persistent connection
 
@@ -32,10 +33,11 @@ def main():
         # Get /api/blueprints
         blueprints = client.blueprints.list()
         blueprints_map = {blueprint['id']: blueprint for blueprint in blueprints}
+        bp = blueprints[0]
         
         # Get /api/blueprints/{blueprint_id}/routing-zone-constraints
         # for id, blueprint in blueprints_map.items():
-        #     routing_zone_constraints = client.blueprints[id].routing_zone_constraints.list()
+        #     routing_zone_constraints = client.blueprints[id].resource.routing_zone_constraints.list()
         #     for constraint in routing_zone_constraints:
         #         blueprint['routing_zone_constraints'][constraint[id]] = constraint
         

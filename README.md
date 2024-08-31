@@ -4,6 +4,21 @@
 
 This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra AOS platform.
 
+- [Juniper Apstra Ansible Collection](#juniper-apstra-ansible-collection)
+  - [Installation](#installation)
+  - [Usage](#usage)
+  - [Contributing](#contributing)
+  - [Development Environment](#development-environment)
+    - [Setup](#setup)
+      - [Mac OS X](#mac-os-x)
+      - [Linux-based Systems](#linux-based-systems)
+      - [All Systems](#all-systems)
+    - [Usage](#usage-1)
+    - [Test Configuration](#test-configuration)
+    - [Building/Testing](#buildingtesting)
+    - [Debugging](#debugging)
+  - [License](#license)
+
 ## Installation
 
 To install the Juniper Apstra Ansible Collection, you can use the following command:
@@ -140,7 +155,20 @@ To use the development environment after setting everything up, simply run the c
 
 This will start a new interactive prompt in which the known supported version of Ansible and required dependencies to use the Apstra SDK is installed.
 
-### Packaging
+### Test Configuration
+
+To run tests, you should have an Apstra 5.0 instance in the lab.
+
+At the root of your 'apstra-ansible-collection' repo, create a .env file. Put the authentication files you need in there. `pipenv` will set these when the pipenv is initialized. Here is an example.
+
+```bash
+APSTRA_API_URL="https://apstra-34d9c451-d688-408b-826d-581b963c086e.aws.apstra.com/api"
+APSTRA_USERNAME="admin"
+APSTRA_PASSWORD="TenaciousFlyingfish1#"
+APSTRA_VERIFY_CERTIFICATES=0
+```
+
+### Building/Testing
 
 The following `make` targets are supported to build, install and test an ansible galaxy package.
 
@@ -155,6 +183,23 @@ The following `make` targets are supported to build, install and test an ansible
 |pipenv|Setup the pipenv used for developement and execution.|
 |clean-pipenv|Clean the pipenv used for development and execution.|
 
+
+### Debugging
+
+Debugging Ansible modules in VSCode is easy. Simply use the `Debug: Ansible Module` debug configuration. To use it:
+
+1. Be sure to have a `.env` file as described in the [Test Configuration](#test-configuration) section.
+1. Open the code for the module you wish to debug in VS Code.
+2. Set your breakpoint as needed.
+3. _OPTIONAL:_ Create a `module_args/<your_module>.json` file with your (optional) additional parameters to debug. For example, here's a `module_args/authenticate.json` to debug the `authenticate` module: 
+    ```json
+    {
+      "ANSIBLE_MODULE_ARGS": {
+        "logout": false
+      }
+    }
+    ```
+4. Hit the green button!
 
 ## License
 

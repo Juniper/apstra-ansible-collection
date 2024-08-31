@@ -12,11 +12,11 @@
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:
         auth_token: "{{ auth_response.auth_token }}"
-      register: apstra_facts_result
+      register: apstra_facts
 
     - name: Display gathered facts
       ansible.builtin.debug:
-        var: apstra_facts_result.ansible_facts
+        var: apstra_facts.ansible_facts
 
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
