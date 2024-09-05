@@ -17,6 +17,8 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
     - [Test Configuration](#test-configuration)
     - [Building/Testing](#buildingtesting)
     - [Debugging](#debugging)
+    - [Using the Apstra SDK in the Ansible Collection](#using-the-apstra-sdk-in-the-ansible-collection)
+    - [Locking the Blueprint](#locking-the-blueprint)
   - [License](#license)
 
 ## Installation
@@ -200,6 +202,67 @@ Debugging Ansible modules in VSCode is easy. Simply use the `Debug: Ansible Modu
     }
     ```
 4. Hit the green button!
+
+### Using the Apstra SDK in the Ansible Collection
+
+Here's an example of how the Apstra SDK can be used to perform CRUD operations.
+
+```python
+        # Instantiate the client
+        client_factory = ApstraClientFactory.from_params(module.params)
+        client = client_factory.l3clos_client()
+        
+        # Gather facts using the persistent connection
+
+        # Get /api/version
+        version = client.version.get()
+        
+        # Get /api/blueprints
+        blueprints = client.blueprints
+        blueprints_list = blueprints.list()
+        blueprints_map = {blueprint['id']: blueprint for blueprint in blueprints_list}
+
+        # prepare the blueprint query
+        blueprint = client.blueprints['941660a1-2967-4550-ae3b-04d6d9fd71b4']
+        # get the blueprint data
+        bp_data = blueprint.get()
+        
+        # prepare the security zone query
+        security_zone = blueprint.security_zones['hJR2j7ExBhEHgWE2Cbg']
+        # get the security zone data
+        sz_data = security_zone.get()
+
+        # update the security zone data
+        sz_data['label'] = 'Default routing zone EDWIN WUZ HERE'
+        security_zone.update(sz_data)
+
+        # get the updated security zone data
+        sz_data_updated = security_zone.get()
+
+        # update the security zone data back to the original
+        sz_data['label'] = 'Default routing zone'
+        security_zone.update(sz_data)
+
+        # create a new security zone
+        Routing_Zone_Name = "Example_RZ"
+        new_sz = blueprint.security_zones.create(data={
+            "vrf_name": "{}".format(Routing_Zone_Name), 
+            # "vni_id": 90000, 
+            "vrf_description": "vrf desc for {}".format(Routing_Zone_Name), 
+            "sz_type": "evpn",
+            "label": "{}".format(Routing_Zone_Name)
+        })
+
+        # get the security zone
+        new_sz_check = blueprint.security_zones[new_sz['id']].get()
+        
+        # delete the security zone
+        blueprint.security_zones[new_sz['id']].delete()
+```
+
+### Locking the Blueprint
+
+The Terrform plugin implementation provides a model for how we will lock the blueprint during plays. See [Blueprint Mutex Documentation](https://github.com/Juniper/terraform-provider-apstra/blob/main/kb/blueprint_mutex.md)
 
 ## License
 
