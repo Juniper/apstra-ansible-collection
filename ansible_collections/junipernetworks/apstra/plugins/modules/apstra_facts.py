@@ -7,7 +7,7 @@ description:
     config templates, virtual networks, routing zone constraints, endpoint policies,
     and object policy application points.
 version_added: "1.0.0"
-author: "Your Name (@your_github_handle)"
+author: "Edwin Jacques (@edwinpjacques)"
 options:
   gather_network_resources:
     description:
@@ -22,7 +22,7 @@ options:
     type: bool
     default: false
 requirements:
-  - "python >= 3.6"
+  - "python >= 3.10"
   - "apstra-client >= 1.0.0"
 '''
 
