@@ -2,6 +2,7 @@ from aos.sdk.client import Client
 from aos.sdk.reference_design.two_stage_l3clos import Client as l3closClient
 from aos.sdk.reference_design.freeform.client import Client as freeformClient
 from aos.sdk.reference_design.extension.endpoint_policy import Client as endpointPolicyClient
+from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
 import os
 
 def apstra_client_module_args():
@@ -69,5 +70,10 @@ class ApstraClientFactory:
 
     def endpointpolicy_client(self):
         client = endpointPolicyClient(self.api_url, self.verify_certificates)
+        self._login(client)
+        return client
+
+    def tags_client(self):
+        client = tagsClient(self.api_url, self.verify_certificates)
         self._login(client)
         return client

@@ -137,12 +137,14 @@ def main():
         l3clos_client = client_factory.l3clos_client()
         freeform_client = client_factory.freeform_client()
         endpointpolicy_client = client_factory.endpointpolicy_client()
+        tags_client = client_factory.tags_client()
 
         # Map client to types. Dotted types are traversed.
         client_to_types = {
             freeform_client: ['config_templates'],
             l3clos_client: ['virtual_networks', 'routing_zone_constraints'],
             endpointpolicy_client: ['endpoint_policies', 'obj_policy_application_points'],
+            tags_client : ['tags'],
         }
 
         # Get the list of supported objects
