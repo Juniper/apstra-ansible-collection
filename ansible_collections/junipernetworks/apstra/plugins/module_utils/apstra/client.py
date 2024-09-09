@@ -24,6 +24,11 @@ class ApstraClientFactory:
         self.password = password
         self.logout = logout
         self.user_id = None
+        self.base_client = None
+        self.l3clos_client = None
+        self.freeform_client = None
+        self.endpointpolicy_client = None
+        self.tags_client = None
 
     @classmethod
     def from_params(cls, params):
@@ -42,8 +47,8 @@ class ApstraClientFactory:
 
     def __del__(self):
         if (self.logout):
-            client = self.client()
-            client.logout() 
+            base_client = self.get_base_client()
+            base_client.logout() 
 
     def _login(self, client):
         if (bool(self.auth_token)):
@@ -53,27 +58,25 @@ class ApstraClientFactory:
         else:
             raise Exception("Missing required parameters: api_url, auth_token or (username and password)")
 
-    def client(self):
-        client = Client(self.api_url, self.verify_certificates)
-        self._login(client)
-        return client
+    def _get_client(self, client_attr, client_class):
+        client_instance = getattr(self, client_attr)
+        if client_instance is None:
+            client_instance = client_class(self.api_url, self.verify_certificates)
+            setattr(self, client_attr, client_instance)
+        self._login(client_instance)
+        return client_instance
 
-    def l3clos_client(self):
-        client = l3closClient(self.api_url, self.verify_certificates)
-        self._login(client)
-        return client
+    def get_base_client(self):
+        return self._get_client('base_client', Client)
 
-    def freeform_client(self):
-        client = freeformClient(self.api_url, self.verify_certificates)
-        self._login(client)
-        return client
+    def get_l3clos_client(self):
+        return self._get_client('l3clos_client', l3closClient)
 
-    def endpointpolicy_client(self):
-        client = endpointPolicyClient(self.api_url, self.verify_certificates)
-        self._login(client)
-        return client
+    def get_freeform_client(self):
+        return self._get_client('freeform_client', freeformClient)
 
-    def tags_client(self):
-        client = tagsClient(self.api_url, self.verify_certificates)
-        self._login(client)
-        return client
+    def get_endpointpolicy_client(self):
+        return self._get_client('endpointpolicy_client', endpointPolicyClient)
+
+    def get_tags_client(self):
+        return self._get_client('tags_client', tagsClient)

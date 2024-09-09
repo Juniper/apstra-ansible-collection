@@ -133,11 +133,11 @@ def main():
     try:
         # Instantiate the client
         client_factory = ApstraClientFactory.from_params(module.params)
-        client = client_factory.client()
-        l3clos_client = client_factory.l3clos_client()
-        freeform_client = client_factory.freeform_client()
-        endpointpolicy_client = client_factory.endpointpolicy_client()
-        tags_client = client_factory.tags_client()
+        base_client = client_factory.get_base_client()
+        l3clos_client = client_factory.get_l3clos_client()
+        freeform_client = client_factory.get_freeform_client()
+        endpointpolicy_client = client_factory.get_endpointpolicy_client()
+        tags_client = client_factory.get_tags_client()
 
         # Map client to types. Dotted types are traversed.
         client_to_types = {
@@ -163,10 +163,10 @@ def main():
         # Gather facts using the persistent connection
 
         # Get /api/version
-        version = client.version.get()
+        version = base_client.version.get()
         
         # Get /api/blueprints, as it's a root for many objects
-        blueprints = client.blueprints.list()
+        blueprints = base_client.blueprints.list()
         blueprints_map = {blueprint['id']: blueprint for blueprint in blueprints}
 
         # Process the list of requested network resources

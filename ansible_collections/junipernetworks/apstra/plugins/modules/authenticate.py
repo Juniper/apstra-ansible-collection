@@ -98,9 +98,8 @@ def main():
         # If auth_token is already set, and we're not logging out, return the auth_token.
         if bool(client_factory.auth_token) and not client_factory.logout:
             module.exit_json(changed=False, auth_token=module.auth_token)
-            return
         
-        client = client_factory.client()
+        client_factory.get_base_client()
 
         if client_factory.logout:
             module.exit_json(changed=True)
