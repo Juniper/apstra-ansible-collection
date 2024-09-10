@@ -30,6 +30,32 @@ class ApstraClientFactory:
         self.endpointpolicy_client = None
         self.tags_client = None
 
+        # Map client members to client types
+        self.client_types = {
+            'base_client': Client,
+            'l3clos_client': l3closClient,
+            'freeform_client': freeformClient,
+            'endpointpolicy_client': endpointPolicyClient,
+            'tags_client': tagsClient,
+        }
+
+        # Map client to types. Dotted types are traversed.
+        self.client_to_types = {
+            'freeform_client': ['config_templates'],
+            'l3clos_client': ['virtual_networks', 'routing_zone_constraints'],
+            'endpointpolicy_client': ['endpoint_policies', 'obj_policy_application_points'],
+            'tags_client' : ['tags'],            
+        }
+
+        # Populate the list (and set) of supported objects
+        self.network_resources = []
+        self.network_resources_set = {}
+        for resource_client, resource_types in self.client_to_types.items():
+            for resource_type in resource_types:
+                self.network_resources.append(resource_type)
+                # Map the resource type to the client
+                self.network_resources_set[resource_type] = resource_client
+
     @classmethod
     def from_params(cls, params):
         api_url = params.get('api_url')
@@ -65,6 +91,15 @@ class ApstraClientFactory:
             setattr(self, client_attr, client_instance)
         self._login(client_instance)
         return client_instance
+
+    def get_client(self, resource_type):
+        client_attr = self.network_resources_set.get(resource_type)
+        if client_attr is None:
+            raise Exception("Unsupported resource type: {}".format(resource_type))
+        client_type = self.client_types.get(client_attr)
+        if client_type is None:
+            raise Exception("Unsupported client type: {}".format(client_attr))
+        return self._get_client(client_attr, client_type)
 
     def get_base_client(self):
         return self._get_client('base_client', Client)
