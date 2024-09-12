@@ -6,6 +6,9 @@ junipernetworks-apstra-*.gz
 # Make build marker
 .apstra-collection
 
+# Generated. We save Python state with the Pipfile and Pipefile.lock
+requirements.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
