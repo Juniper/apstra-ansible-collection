@@ -65,7 +65,7 @@ class ApstraClientFactory:
         # Map client to types. Dotted types are traversed.
         # Should be in topological order (e.g.-- blueprints before blueprints.config_templates)
         self.client_to_types = {
-            "base_client": ["blueprints"],
+            "base_client": ["blueprints", "blueprints.tasks"],
             "freeform_client": ["blueprints.config_templates"],
             "l3clos_client": [
                 "blueprints.virtual_networks",
@@ -74,7 +74,6 @@ class ApstraClientFactory:
             "endpointpolicy_client": [
                 "blueprints.endpoint_policies",
                 "blueprints.obj_policy_application_points",
-                "blueprints.obj_policy_export",
             ],
             "tags_client": ["blueprints.tags"],
         }
