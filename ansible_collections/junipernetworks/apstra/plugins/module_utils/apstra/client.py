@@ -74,6 +74,7 @@ class ApstraClientFactory:
             "endpointpolicy_client": [
                 "blueprints.endpoint_policies",
                 "blueprints.obj_policy_application_points",
+                "blueprints.obj_policy_export",
             ],
             "tags_client": ["blueprints.tags"],
         }
