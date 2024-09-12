@@ -102,9 +102,9 @@ def main():
         # Get /api/version
         version = base_client.version.get()
 
-        # Get /api/blueprints, as it's a root for many objects
-        blueprints = base_client.blueprints.list()
-        blueprints_map = {blueprint["id"]: blueprint for blueprint in blueprints}
+        # client_factory.network_resources is a list of supported network resources
+        # The resources are nested, like 'blueprints', 'blueprints.config_templates', etc.
+        # Need to get the list in topological sort order.
 
         # Process the list of requested network resources
         requested_network_resources = []
@@ -112,52 +112,19 @@ def main():
             if resource_type == "all":
                 requested_network_resources = client_factory.network_resources
                 break
-            elif resource_type == "blueprints":
-                # Already gathered
-                pass
             elif resource_type in client_factory.network_resources_set:
                 # Add resource type to set
                 requested_network_resources.append(resource_type)
             else:
                 module.fail_json(msg=f"Unsupported network resource '{resource_type}'")
 
-        # Get the resources
-        for resource_type in requested_network_resources:
-            client = client_factory.get_client(resource_type)
-            for blueprint in blueprints:
-                blueprint_id = blueprint["id"]
-
-                # Traverse nested resource_type
-                resource = client.blueprints[blueprint_id]
-                for attr in resource_type.split("."):
-                    resource = getattr(resource, attr, None)
-                    if resource is None:
-                        module.fail_json(
-                            msg=f"Resource type '{resource_type}' not found for blueprint {blueprint_id}"
-                        )
-
-                resources = None
-                if resource == None:
-                    # The resource does not exist for the blueprint
-                    pass
-                elif hasattr(resource, "list"):
-                    try:
-                        resources = resource.list()
-                    except TypeError as te:
-                        # Bug -- 404 results in None, which generated API blindly subscripts
-                        if te.args[0] == "'NoneType' object is not subscriptable":
-                            resources = None
-                else:
-                    # the resource does not support list, so get it
-                    resources = resource.get()
-
-                # Save the resource(s) in the blueprint map
-                blueprint[resource_type] = resources
+        # Iterate through the list of requested network resources and get everything.
+        resource_map = client_factory.list_all_resources(requested_network_resources)
 
         # Structure used for gathered facts
         facts = {
             "version": version,
-            "blueprints": blueprints_map,
+            "resources": resource_map,
         }
 
         # Set the gathered facts in the result
