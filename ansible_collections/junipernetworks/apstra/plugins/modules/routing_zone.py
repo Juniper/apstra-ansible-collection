@@ -75,7 +75,7 @@ EXAMPLES = r'''
     state: present
   register: routing_zone_response
 
-- name: Delete the VRF in blueprint name apstra
+- name: Delete the VRF in blueprint name apstra-bp 
   junipernetworks.apstra.blueprint:
     auth_token: "{{ auth_response.auth_token }}"
     blueprint_label: "apstra-bp"
