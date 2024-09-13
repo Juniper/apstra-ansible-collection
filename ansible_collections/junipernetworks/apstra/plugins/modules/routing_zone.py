@@ -66,7 +66,7 @@ EXAMPLES = r'''
     logout: false
   register: auth_response
 
-- name: Create VRF in bluprint name apstra
+- name: Create VRF in bluprint name apstra-bp
   junipernetworks.apstra.routing_zone:
     auth_token: "{{ auth_response.auth_token }}"
     blueprint_label: "apstra"
