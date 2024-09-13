@@ -1,0 +1,24 @@
+---
+- name: Gather Apstra facts
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Connect to Apstra
+      junipernetworks.apstra.authenticate:
+        verify_certificates: false
+        logout: false
+      register: auth_response
+
+    - name: Create VRF in bluprint name apstra
+      junipernetworks.apstra.routing_zone:
+        auth_token: "{{ auth_response.auth_token }}"
+        blueprint_label: "apstra"
+        routing_zone_name: "default3"
+        verify_certificates: false
+        state: present
+
+    - name: Logout of Apstra
+      junipernetworks.apstra.authenticate:
+        logout: true
+        verify_certificates: false
