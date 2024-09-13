@@ -22,7 +22,7 @@ options:
         type: str
     blueprint_label:
         description:
-          - name of the blueprint to be created
+          - name of the blueprint where the routing zone will be created
         required: true
         type: str
     routing_zone_name:
@@ -75,10 +75,11 @@ EXAMPLES = r'''
     state: present
   register: routing_zone_response
 
-- name: Delete the Apstra blueprint with name apstra-bp 
+- name: Delete the VRF in blueprint name apstra
   junipernetworks.apstra.blueprint:
     auth_token: "{{ auth_response.auth_token }}"
     blueprint_label: "apstra-bp"
+    routing_zone_name: "default3"
     state: absent
 '''
 
@@ -189,7 +190,7 @@ def run_module():
     client = client_factory.l3clos_client()
 
     
-# Check the status of a blueprint exists or not
+# Check the status of a VRF and Blueprint exists or not
     status = check_status(module.params['blueprint_label'],module.params['routing_zone_name'],client)
     if status == "BP Not exists":
         result['changed'] = False
@@ -203,7 +204,7 @@ def run_module():
         result['message'] = f"Routing Zone '{module.params['routing_zone_name']}' does not exist in Blueprint '{module.params['blueprint_label']}'."
         result['changed'] = False
     else:
-        result['changed'] = "Either Blueprint does not exist or state is not defined"
+        result['changed'] = "Either Blueprint/VRF does not exist or state is not defined"
 
     module.exit_json(**result)
 
