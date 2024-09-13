@@ -7,12 +7,12 @@ DOCUMENTATION = r'''
 ---
 module: design
 
-short_description: Manage Apstra Blueprints.
+short_description: Manage routing zones in Apstra
 
 version_added: "0.1.0"
 author: "Pratik Dave (@pratikd)"
 
-description: "This module will automate the management of Blueprints within Apstra."
+description: "This module will automate the management of routing zone in Apstra."
 
 options:
     auth_token:
