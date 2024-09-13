@@ -17,8 +17,6 @@
         routing_zone_name: "default3"
         verify_certificates: false
         state: present
-      register: 
-        blueprint
 
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
