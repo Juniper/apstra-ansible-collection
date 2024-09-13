@@ -169,7 +169,7 @@ def delete_routing_zone(blueprint_label,routing_zone_name,client):
 
 def run_module():
     
-    facts_module_args = dict(
+    create_routing_zone_module_args = dict(
         blueprint_label=dict(type='str', required=True),
         routing_zone_name=dict(type='str', required=True),
         vni_id=dict(type='int', required=False,default=100000),
@@ -178,7 +178,7 @@ def run_module():
         )
     
     client_module_args = apstra_client_module_args()
-    module_args = client_module_args | facts_module_args
+    module_args = client_module_args | create_routing_zone_module_args
    
     module = AnsibleModule(
         argument_spec=module_args,
