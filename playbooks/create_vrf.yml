@@ -1,0 +1,31 @@
+---
+- name: Gather Apstra facts
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  environment:
+    APSTRA_API_URL: "https://10.87.2.40/api"
+    APSTRA_USERNAME: "admin"
+    APSTRA_PASSWORD: "Apstramarvis@123"
+  vars:
+    namespace: "{{ ns }}"
+  tasks:
+    - name: Connect to Apstra
+      junipernetworks.apstra.authenticate:
+        verify_certificates: false
+        logout: false
+      register: auth_response
+
+    - name: Create VRF in bluprint name apstra
+      junipernetworks.apstra.routing_zone:
+        auth_token: "{{ auth_response.auth_token }}"
+        blueprint_label: "eda-bp"
+        routing_zone_name: "myvrf"
+        vni_id: 100001
+        verify_certificates: false
+        state: present
+
+    - name: Logout of Apstra
+      junipernetworks.apstra.authenticate:
+        logout: true
+        verify_certificates: false
