@@ -1,4 +1,8 @@
-from aos.sdk.client import Client
+import time
+from aos.sdk.client import (
+    Client,
+    ClientError,
+)
 from aos.sdk.reference_design.two_stage_l3clos import Client as l3closClient
 from aos.sdk.reference_design.freeform.client import Client as freeformClient
 from aos.sdk.reference_design.extension.endpoint_policy import (
@@ -6,7 +10,9 @@ from aos.sdk.reference_design.extension.endpoint_policy import (
 )
 from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
 import os
+import re
 
+DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
 
 def apstra_client_module_args():
     return dict(
@@ -153,7 +159,7 @@ class ApstraClientFactory:
     # The id is a dictionary including any required keys for the resource type.
     # For example, for blueprints.virtual_networks, the id would be {'blueprints': 'my_blueprint', 'virtual_networks': 'my_vn'}
     # If the leaf resource (e.g.- virtual_network) is not specified, all resources are returned (e.g. -- all virtual networks for a blueprint)
-    def resources_op(self, resource_type, op, id={}):
+    def resources_op(self, resource_type, op, id={}, data=None):
         client = self.get_client(resource_type)
 
         # Traverse nested resource_type
@@ -215,7 +221,10 @@ class ApstraClientFactory:
 
             # Call the op on the object
             try:
-                return op_attr()
+                if data is None:
+                    return op_attr()
+                else:
+                    return op_attr(data)
             except TypeError as te:
                 # Bug -- 404 results in None, which generated API blindly subscripts
                 if te.args[0] == "'NoneType' object is not subscriptable":
@@ -282,3 +291,50 @@ class ApstraClientFactory:
                         f"Internal error: invalid data in resource map for {resource_attr}: {resources}"
                     )
         return resources_map
+
+    # Get blueprint lock tag name
+    def _blueprint_lock_tag_name(self, blueprint_id):
+        return "blueprint {} locked".format(blueprint_id)
+    
+    def lock_blueprint(self, id, timeout = DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
+        tags_client = self.get_tags_client()
+        start_time = time.time()
+        locked_pattern = r"Tag with label '(.+)' already exists"
+
+        while True:
+            try:
+                tags_client.blueprints[id].tags.create(data={
+                    "label": self._blueprint_lock_tag_name(id),
+                    "description": "blueprint locked at {}".format(time.time())
+                })
+                break  # Exit the loop if the lock is successful
+            except ClientError as e:
+                error_message = str(e)
+                if re.search(locked_pattern, error_message):
+                    if time.time() - start_time > timeout:
+                        raise Exception(f"Failed to lock blueprint {id} within {timeout} seconds: {e}")
+                    time.sleep(5)  # Sleep for 5 seconds before retrying
+                else:
+                    raise Exception(f"Failed to lock blueprint {id}: {e}")
+
+    # Unlock the blueprint
+    def unlock_blueprint(self, id):
+        tags_client = self.get_tags_client()
+        tag_name = self._blueprint_lock_tag_name(id)
+
+        # Need to get look through all the tags
+        tags = tags_client.blueprints[id].tags.list()
+        for tag in tags:
+            if tag["label"] == tag_name:
+                tags_client.blueprints[id].tags[tag["id"]].delete()
+                return
+        
+        # Tag was not locked. This is exceptional.
+        raise Exception(f"Blueprint {id} is not locked")
+
+    # Ensure that the blueprint is locked
+    def check_blueprint_locked(self, id):
+        # Try to get the tag on the given blueprint
+        tags_client = self.get_tags_client()
+        tag = tags_client.blueprints[id].tags.get(label=self._blueprint_lock_tag_name(id))
+        return tag is not None

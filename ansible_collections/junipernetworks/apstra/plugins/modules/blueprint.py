@@ -1,13 +1,122 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# Copyright (c) 2024, Juniper Networks
+# BSD 3-Clause License
+
+DOCUMENTATION = '''
+---
+module: blueprint
+short_description: Manage Apstra blueprints
+description:
+    - This module allows you to create, lock, unlock, and delete Apstra blueprints.
+version_added: "1.0.0"
+author: "Edwin Jacques (@edwinpjacques)"
+options:
+    blueprint:
+        description:
+            - A dictionary representing the blueprint.
+        required: true
+        type: dict
+    lock:
+        description:
+            - Whether to lock the blueprint after creation or update.
+        required: false
+        type: bool
+        default: true
+    lock_timeout:
+        description:
+            - The timeout in seconds for locking the blueprint.
+        required: false
+        type: int
+        default: 60
+    unlock:
+        description:
+            - Whether to unlock the blueprint after the operation.
+        required: false
+        type: bool
+        default: true
+    state:
+        description:
+            - The desired state of the blueprint.
+        required: false
+        type: str
+        choices: ["present", "absent"]
+        default: "present"
+extends_documentation_fragment:
+    - junipernetworks.apstra.apstra_client
+'''
+
+EXAMPLES = '''
+# Create a new blueprint
+- name: Create blueprint
+  blueprint:
+    blueprint:
+      name: example_blueprint
+      design: l3clos
+    state: present
+
+# Delete a blueprint
+- name: Delete blueprint
+  blueprint:
+    blueprint:
+      id: blueprint-123
+    state: absent
+
+# Lock a blueprint
+- name: Lock blueprint
+  blueprint:
+    blueprint:
+      id: blueprint-123
+    lock: true
+    state: present
+
+# Unlock a blueprint
+- name: Unlock blueprint
+  blueprint:
+    blueprint:
+      id: blueprint-123
+    unlock: true
+    state: present
+'''
+
+RETURN = '''
+blueprint:
+    description: The blueprint object.
+    returned: always
+    type: dict
+    sample: {
+        "id": "blueprint-123",
+        "name": "example_blueprint",
+        "design": "l3clos"
+    }
+changed:
+    description: Whether the blueprint was changed.
+    returned: always
+    type: bool
+    sample: true
+msg:
+    description: A message describing the result.
+    returned: always
+    type: str
+    sample: "Blueprint created successfully"
+'''
+
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
     apstra_client_module_args,
     ApstraClientFactory,
+    DEFAULT_BLUEPRINT_LOCK_TIMEOUT
 )
-
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.resource import compare_and_update
 
 def main():
     blueprint_module_args = dict(
+        blueprint=dict(type="dict", required=True),
         lock=dict(type="bool", required=False, default=True),
+        lock_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_LOCK_TIMEOUT),
+        unlock=dict(type="bool", required=False, default=True),
+        state=dict(type="str", required=False, choices=["present", "absent"], default="present"),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | blueprint_module_args
@@ -20,78 +129,42 @@ def main():
     try:
         # Instantiate the client factory
         client_factory = ApstraClientFactory.from_params(module.params)
-        base_client = client_factory.get_base_client()
+        
+        # Get the id if specified
+        id = module.params["blueprint"].get("id", None)
+        blueprint = module.params["blueprint"]
+        state = module.params["state"]
+        lock_timeout = module.params["lock_timeout"]
 
-        # If requested, add the available network resources to the result
-        if module.params["available_network_resources"]:
-            result["available_network_resources"] = client_factory.network_resources
+        # Make the requested changes
+        if state == "present":
+            if id is None:
+                # Create the resource
+                created_blueprint = client_factory.resources_op("blueprints", "create", {}, blueprint)
+                id = created_blueprint["id"]
+                result["changed"] = True
+                result["blueprint"] = created_blueprint
+            
+            # Lock the resource if requested (even if it was just created)
+            if module.params["lock"]:
+                module.log("Locking blueprint")
+                client_factory.lock_blueprint(id=id, timeout=lock_timeout)
+            
+            # If id was specified, nothing to do since we can't update a blueprint.
+            if result.get("blueprint", None) is None:
+                raise Exception("Cannot update a blueprint object")
+        elif state == "absent":
+            # Delete the blueprint
+            client_factory.resources_op("blueprints", "delete", {"blueprints": id})
+            result["changed"] = True
 
-        # Gather facts using the persistent connection
-
-        # Get /api/version
-        version = base_client.version.get()
-
-        # Get /api/blueprints, as it's a root for many objects
-        blueprints = base_client.blueprints.list()
-        blueprints_map = {blueprint["id"]: blueprint for blueprint in blueprints}
-
-        # Process the list of requested network resources
-        requested_network_resources = []
-        for resource_type in module.params["gather_network_resources"]:
-            if resource_type == "all":
-                requested_network_resources = client_factory.network_resources
-                break
-            elif resource_type == "blueprints":
-                # Already gathered
-                pass
-            elif resource_type in client_factory.network_resources_set:
-                # Add resource type to set
-                requested_network_resources.append(resource_type)
+        # Unlock the blueprint if requested
+        if module.params["unlock"]:
+            if state == "present":
+                client_factory.unlock_blueprint(id=id, timeout=lock_timeout)
             else:
-                module.fail_json(msg=f"Unsupported network resource '{resource_type}'")
-
-        # Get the resources
-        for resource_type in requested_network_resources:
-            client = client_factory.get_client(resource_type)
-            for blueprint in blueprints:
-                blueprint_id = blueprint["id"]
-
-                # Traverse nested resource_type
-                resource = client.blueprints[blueprint_id]
-                for attr in resource_type.split("."):
-                    resource = getattr(resource, attr, None)
-                    if resource is None:
-                        module.fail_json(
-                            msg=f"Resource type '{resource_type}' not found for blueprint {blueprint_id}"
-                        )
-
-                resources = None
-                if resource == None:
-                    # The resource does not exist for the blueprint
-                    pass
-                elif hasattr(resource, "list"):
-                    try:
-                        resources = resource.list()
-                    except TypeError as te:
-                        # Bug -- 404 results in None, which generated API blindly subscripts
-                        if te.args[0] == "'NoneType' object is not subscriptable":
-                            resources = None
-                else:
-                    # the resource does not support list, so get it
-                    resources = resource.get()
-
-                # Save the resource(s) in the blueprint map
-                blueprint[resource_type] = resources
-
-        # Structure used for gathered facts
-        facts = {
-            "version": version,
-            "blueprints": blueprints_map,
-        }
-
-        # Set the gathered facts in the result
-        result["ansible_facts"] = facts
-
+                raise Exception("Cannot unlock a blueprint that is being deleted")
+        
     except Exception as e:
         module.fail_json(msg=str(e), **result)
 
