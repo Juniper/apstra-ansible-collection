@@ -187,7 +187,7 @@ def run_module():
         )
     
     client_factory = ApstraClientFactory.from_params(module.params)
-    client = client_factory.l3clos_client()
+    client = client_factory.get_l3clos_client()
 
     
 # Check the status of a VRF and Blueprint exists or not
