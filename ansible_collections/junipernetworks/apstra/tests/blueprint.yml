@@ -1,5 +1,5 @@
 ---
-- name: Gather Apstra facts
+- name: Test create/delete blueprint
   hosts: localhost
   gather_facts: false
   connection: local
@@ -9,18 +9,16 @@
         logout: false
       register: auth_response
 
-    - name: Run apstra_facts module
-      junipernetworks.apstra.apstra_facts:
+    - name: Create blueprint
+      junipernetworks.apstra.blueprint:
         auth_token: "{{ auth_response.auth_token }}"
-        gather_network_resources: 'all'
-        available_network_resources: true
+        lock: true
       register: apstra_facts
 
-    - name: Display gathered facts
+    - name: Delete blueprint
       ansible.builtin.debug:
         var: apstra_facts
 
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
-        auth_token: "{{ auth_response.auth_token }}"
         logout: true

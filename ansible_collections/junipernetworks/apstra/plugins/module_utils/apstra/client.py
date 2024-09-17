@@ -71,7 +71,7 @@ class ApstraClientFactory:
         # Map client to types. Dotted types are traversed.
         # Should be in topological order (e.g.-- blueprints before blueprints.config_templates)
         self.client_to_types = {
-            "base_client": ["blueprints", "blueprints.tasks"],
+            "base_client": ["blueprints"],
             "freeform_client": ["blueprints.config_templates"],
             "l3clos_client": [
                 "blueprints.virtual_networks",
@@ -83,6 +83,10 @@ class ApstraClientFactory:
             ],
             "tags_client": ["blueprints.tags"],
         }
+
+        # Map from plural to singular resource types
+        self.plural_to_singular = { 'ies': 'y', 'es' : 'e', 's': '' }
+        self.singular_to_plural = { plural: singular for singular, plural in self.plural_to_singular.items()}
 
         # Populate the list (and set) of supported objects
         self.network_resources = []
@@ -155,11 +159,27 @@ class ApstraClientFactory:
     def get_tags_client(self):
         return self._get_client("tags_client", tagsClient)
 
+    def get_singular_resource_type(self, resource_type):
+        # Get the singular form of the resource type
+        # This is used for the id in the resource
+        for plural, singular in self.plural_to_singular.items():
+            if resource_type.endswith(plural):
+                return resource_type[:-len(plural)] + singular
+        return resource_type
+
+    def get_plural_resource_type(self, resource_type):
+        # Get the plural form of the resource type
+        # This is used for the id in the resource
+        for singular, plural in self.singular_to_plural.items():
+            if resource_type.endswith(singular):
+                return resource_type[:-len(singular)] + plural
+        return resource_type
+
     # Call operatop op. If op is 'get', will get one resource, or all resources of that type.
     # The id is a dictionary including any required keys for the resource type.
-    # For example, for blueprints.virtual_networks, the id would be {'blueprints': 'my_blueprint', 'virtual_networks': 'my_vn'}
+    # For example, for blueprints.virtual_networks, the id would be {'blueprint': 'my_blueprint', 'virtual_network': 'my_vn'}
     # If the leaf resource (e.g.- virtual_network) is not specified, all resources are returned (e.g. -- all virtual networks for a blueprint)
-    def resources_op(self, resource_type, op, id={}, data=None):
+    def resources_op(self, resource_type, op='get', id={}, data=None):
         client = self.get_client(resource_type)
 
         # Traverse nested resource_type
@@ -177,16 +197,17 @@ class ApstraClientFactory:
 
             # Iterate to the next object
             id_value = None
-            if attr in id:
+            singular_attr = self.get_singular_resource_type(attr)
+            if singular_attr in id:
                 # Get the id value
-                id_value = id[attr]
+                id_value = id[singular_attr]
                 # Get the object
                 obj = resource[id_value]
             elif leaf_type:
                 obj = resource
             else:
                 raise Exception(
-                    f"Missing required id attribute '{attr}' for resource type '{resource_type}'"
+                    f"Missing required id attribute '{singular_attr}' for resource type '{resource_type}'"
                 )
 
             # Nothing else to do if this is not the leaf type
@@ -195,8 +216,8 @@ class ApstraClientFactory:
 
             op_attr = None
 
-            # If this is the leaf object, and the id is not specified, then this is a list operation
             if id_value is None:
+                # Try list then get if id is not specified
                 if op in ["list", "get"]:
                     try:
                         op_attr = getattr(obj, "list")
@@ -208,8 +229,12 @@ class ApstraClientFactory:
                                 f"Operation 'list' and 'get' not defined for resource type '{resource_type}'"
                             )
                 else:
-                    raise Exception(
-                        f"Invalid operation '{op}' for resource type '{resource_type}', id '{id}'"
+                    try:
+                        # Could be a create operation
+                        op_attr = getattr(obj, op)
+                    except AttributeError:
+                        raise Exception(
+                            f"Invalid operation '{op}' for resource type '{resource_type}', id '{id}'"
                     )
 
             if op_attr is None:
@@ -267,7 +292,8 @@ class ApstraClientFactory:
                 resources = r_map[resource_attr]
                 if isinstance(resources, dict) and hasattr(resources, "id"):
                     # Single resource, get the id and get the child resources
-                    id[resource_attr] = resources["id"]
+                    singular_resource_attr = self.get_singular_resource_type(resource_attr)
+                    id[singular_resource_attr] = resources["id"]
                     r_map = resources
                     r_map[next_resource_attr] = self.resources_op(
                         next_full_resource_type, "list", id
@@ -278,7 +304,8 @@ class ApstraClientFactory:
                         resources if isinstance(resources, list) else resources.values()
                     )
                     for resource in iterable:
-                        id[resource_attr] = resource["id"]
+                        singular_resource_attr = self.get_singular_resource_type(resource_attr)
+                        id[singular_resource_attr] = resource["id"]
                         r_map = resource
                         r_map[next_resource_attr] = self.resources_op(
                             next_full_resource_type, "list", id
@@ -299,7 +326,7 @@ class ApstraClientFactory:
     def lock_blueprint(self, id, timeout = DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
         tags_client = self.get_tags_client()
         start_time = time.time()
-        locked_pattern = r"Tag with label '(.+)' already exists"
+        locked_pattern = r"(Tag with label '(.+)' already exists|Blueprint is still being created\.)"
 
         while True:
             try:

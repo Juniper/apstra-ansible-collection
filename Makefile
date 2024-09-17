@@ -54,6 +54,7 @@ install: build
 
 test: install
 	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
+	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/blueprint.yml
 
 clean-pipenv:
 	pipenv --rm || true

@@ -13,29 +13,29 @@ description:
 version_added: "1.0.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
-    blueprint:
+    id:
         description:
-            - A dictionary representing the blueprint.
-        required: true
-        type: dict
-    lock:
-        description:
-            - Whether to lock the blueprint after creation or update.
+            - The ID of the blueprint.
         required: false
-        type: bool
-        default: true
+        type: dict
+    resource:
+        description:
+            - A dictionary representing the blueprint to create.
+        required: false
+        type: dict
+    lock_state:
+        description:
+            - Status to transition lock to. To "lock", must be in the "unlocked" state (and vice versa).
+        required: false
+        type: str
+        choices: ["locked", "unlocked", "ignore"]
+        default: "locked"
     lock_timeout:
         description:
             - The timeout in seconds for locking the blueprint.
         required: false
         type: int
         default: 60
-    unlock:
-        description:
-            - Whether to unlock the blueprint after the operation.
-        required: false
-        type: bool
-        default: true
     state:
         description:
             - The desired state of the blueprint.
@@ -51,32 +51,31 @@ EXAMPLES = '''
 # Create a new blueprint
 - name: Create blueprint
   blueprint:
-    blueprint:
+    resource:
       name: example_blueprint
-      design: l3clos
+      design: two_stage_l3clos
     state: present
 
 # Delete a blueprint
 - name: Delete blueprint
   blueprint:
-    blueprint:
-      id: blueprint-123
+    id:
+        blueprint: blueprint-123
     state: absent
 
 # Lock a blueprint
 - name: Lock blueprint
   blueprint:
-    blueprint:
-      id: blueprint-123
-    lock: true
+    id:
+        blueprint: blueprint-123
     state: present
 
 # Unlock a blueprint
 - name: Unlock blueprint
   blueprint:
-    blueprint:
-      id: blueprint-123
-    unlock: true
+    id:
+        blueprint: blueprint-123
+    lock_state: unlocked
     state: present
 '''
 
@@ -88,13 +87,18 @@ blueprint:
     sample: {
         "id": "blueprint-123",
         "name": "example_blueprint",
-        "design": "l3clos"
+        "design": "two_stage_l3clos"
     }
 changed:
     description: Whether the blueprint was changed.
     returned: always
     type: bool
     sample: true
+lock_state:
+    description: State of the blueprint lock.
+    returned: always
+    type: str
+    sample: "locked"
 msg:
     description: A message describing the result.
     returned: always
@@ -112,10 +116,11 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.reso
 
 def main():
     blueprint_module_args = dict(
-        blueprint=dict(type="dict", required=True),
-        lock=dict(type="bool", required=False, default=True),
+        id=dict(type="dict", required=False),
+        resource=dict(type="dict", required=False),
+        lock_state=dict(type="str", required=False, choices=["locked", "unlocked", "ignore"], default="locked"),
         lock_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_LOCK_TIMEOUT),
-        unlock=dict(type="bool", required=False, default=True),
+        unlock=dict(type="bool", required=False, default=False),
         state=dict(type="str", required=False, choices=["present", "absent"], default="present"),
     )
     client_module_args = apstra_client_module_args()
@@ -131,39 +136,44 @@ def main():
         client_factory = ApstraClientFactory.from_params(module.params)
         
         # Get the id if specified
-        id = module.params["blueprint"].get("id", None)
-        blueprint = module.params["blueprint"]
+        id = module.params.get("id", None)
+        resource = module.params.get("resource", None)
         state = module.params["state"]
+        lock_state = module.params["lock_state"]
         lock_timeout = module.params["lock_timeout"]
 
         # Make the requested changes
         if state == "present":
             if id is None:
+                if resource is None:
+                    raise ValueError("Must specify 'resource' to create a blueprint")
                 # Create the resource
-                created_blueprint = client_factory.resources_op("blueprints", "create", {}, blueprint)
+                created_blueprint = client_factory.resources_op("blueprints", "create", {}, resource)
                 id = created_blueprint["id"]
                 result["changed"] = True
                 result["blueprint"] = created_blueprint
             
-            # Lock the resource if requested (even if it was just created)
-            if module.params["lock"]:
-                module.log("Locking blueprint")
-                client_factory.lock_blueprint(id=id, timeout=lock_timeout)
+        # Lock the resource if requested
+        if lock_state == "locked":
+            module.log("Locking blueprint")
+            client_factory.lock_blueprint(id=id, timeout=lock_timeout)
             
-            # If id was specified, nothing to do since we can't update a blueprint.
-            if result.get("blueprint", None) is None:
-                raise Exception("Cannot update a blueprint object")
-        elif state == "absent":
+        if state == "absent":
+            if id is None:
+                raise ValueError("Cannot delete a blueprint without a resource id")
             # Delete the blueprint
-            client_factory.resources_op("blueprints", "delete", {"blueprints": id})
+            client_factory.resources_op("blueprints", "delete", {"blueprint": id})
             result["changed"] = True
 
         # Unlock the blueprint if requested
-        if module.params["unlock"]:
-            if state == "present":
-                client_factory.unlock_blueprint(id=id, timeout=lock_timeout)
-            else:
-                raise Exception("Cannot unlock a blueprint that is being deleted")
+        if lock_state == "unlocked":
+            client_factory.unlock_blueprint(id=id, timeout=lock_timeout)
+        elif state == "absent":
+            # If the blueprint is deleted, it will be unlocked (tag deleted)
+            lock_state = "unlocked"
+
+        # Always report the lock state
+        result["lock_state"] = lock_state
         
     except Exception as e:
         module.fail_json(msg=str(e), **result)
