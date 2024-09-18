@@ -1,4 +1,5 @@
 namespace: "junipernetworks"
+description: "This collection provides modules to interact with Apstra."
 name: "apstra"
 version: "0.1.0"
 readme: "README.md"
@@ -6,7 +7,6 @@ authors:
     - "Pratik Dave <pratikd@juniper.net>"
     - "Edwin Jacques <ejacques@juniper.net>"
     - "Nathan Veenker <nveenker@juniper.net>"
-dependencies:
 license:
     - "MIT"
 tags:

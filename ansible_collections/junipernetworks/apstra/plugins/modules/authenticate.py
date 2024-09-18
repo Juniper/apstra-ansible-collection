@@ -5,7 +5,7 @@ short_description: Authenticate with Apstra AOS and retrieve an auth token
 description:
   - This module authenticates with Apstra AOS and retrieves an authentication token.
   - It can also handle logout operations.
-version_added: "1.0.0"
+version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
   aos_ip:

@@ -6,7 +6,7 @@ description:
   - This module gathers facts from Apstra AOS, including information about
     config templates, virtual networks, routing zone constraints, endpoint policies,
     and object policy application points.
-version_added: "1.0.0"
+version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
   gather_network_resources:

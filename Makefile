@@ -63,7 +63,10 @@ test-blueprint: install
 test-virtual_network: install
 	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/virtual_network.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network
+test-routing_policy: install
+	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/routing_policy.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy
 
 clean-pipenv:
 	pipenv --rm || true

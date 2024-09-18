@@ -19,7 +19,7 @@ module: blueprint
 short_description: Manage Apstra blueprints
 description:
     - This module allows you to create, lock, unlock, and delete Apstra blueprints.
-version_added: "1.0.0"
+version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
     id:
@@ -125,7 +125,7 @@ msg:
     description: A message describing the result.
     returned: always
     type: str
-    sample: "Blueprint created successfully"
+    sample: "blueprint created successfully"
 '''
 
 def main():
@@ -188,13 +188,13 @@ def main():
             # Delete the blueprint
             client_factory.resources_op("blueprints", "delete", id)
             result["changed"] = True
-            result["msg"] = "Blueprint deleted successfully"
+            result["msg"] = "blueprint deleted successfully"
         
         if state == "committed":
             # Commit the blueprint
             client_factory.commit_blueprint(id=blueprint_id, timeout=commit_timeout)
             result["changed"] = True
-            result["msg"] = "Blueprint committed successfully"
+            result["msg"] = "blueprint committed successfully"
 
         # Unlock the blueprint if requested
         if state == "absent":

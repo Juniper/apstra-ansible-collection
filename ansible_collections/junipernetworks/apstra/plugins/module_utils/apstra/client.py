@@ -80,10 +80,10 @@ class ApstraClientFactory:
         # Should be in topological order (e.g.-- blueprints before blueprints.config_templates)
         self.client_to_types = {
             "base_client": ["blueprints"],
-            "freeform_client": ["blueprints.config_templates"],
             "l3clos_client": [
                 "blueprints.virtual_networks",
-                "blueprints.routing_zone_constraints",
+                "blueprints.security_zones",
+                "blueprints.routing_policies",
             ],
             "endpointpolicy_client": [
                 "blueprints.endpoint_policies",

@@ -1,0 +1,109 @@
+---
+- name: Test create/update/delete routing_policy
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Connect to Apstra
+      junipernetworks.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      junipernetworks.apstra.blueprint:
+        resource:
+          label: "test_blueprint"
+          design: "two_stage_l3clos"
+        lock_state: "locked"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    - name: Create routing_policy
+      junipernetworks.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        resource:
+          description: "Example routing policy"
+          expect_default_ipv4_route: true
+          expect_default_ipv6_route: true
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          import_policy: "all"
+          label: "example_policy"
+          policy_type: "user_defined"
+        auth_token: "{{ auth.token }}"
+      register: rp
+
+    - name: Show created routing policy
+      ansible.builtin.debug:
+        var: rp
+
+    - name: Modify routing_policy
+      junipernetworks.apstra.routing_policy:
+        id: "{{ rp.id }}"
+        resource:
+          description: "Example routing policy edwin wuz here"
+        auth_token: "{{ auth.token }}"
+      register: rp_modify
+
+    - name: Show modified routing policy
+      ansible.builtin.debug:
+        var: rp_modify
+
+    - name: Commit the blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "ignore"
+        state: committed
+        auth_token: "{{ auth.token }}"
+      register: blueprint_commit
+
+    - name: Show committed blueprint
+      ansible.builtin.debug:
+        var: blueprint_commit
+
+    - name: Delete the routing_policy
+      junipernetworks.apstra.routing_policy:
+        id: "{{ rp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: rp_delete
+
+    - name: Show deleted routing_policy
+      ansible.builtin.debug:
+        var: rp_delete
+
+    - name: Commit and unlock blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        state: committed
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    - name: Logout of Apstra
+      junipernetworks.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
