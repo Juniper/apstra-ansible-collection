@@ -80,9 +80,9 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-blueprint:
+resource:
     description: The blueprint object.
-    returned: always
+    returned: on create
     type: dict
     sample: {
         "id": "blueprint-123",
@@ -137,6 +137,7 @@ def main():
         
         # Get the id if specified
         id = module.params.get("id", None)
+        blueprint_id = id.get("blueprint", None) if id is not None else None
         resource = module.params.get("resource", None)
         state = module.params["state"]
         lock_state = module.params["lock_state"]
@@ -149,28 +150,35 @@ def main():
                     raise ValueError("Must specify 'resource' to create a blueprint")
                 # Create the resource
                 created_blueprint = client_factory.resources_op("blueprints", "create", {}, resource)
-                id = created_blueprint["id"]
+                blueprint_id = created_blueprint["id"]
+                id = {"blueprint": blueprint_id}
                 result["changed"] = True
-                result["blueprint"] = created_blueprint
+                result["resource"] = created_blueprint
+                result["msg"] = "Blueprint created successfully"
+
+        # If we still don't have an id, there's a problem
+        if id is None:
+            raise ValueError("Cannot manage a blueprint without a resource id")
             
         # Lock the resource if requested
-        if lock_state == "locked":
+        if lock_state == "locked" and state == "present":
             module.log("Locking blueprint")
-            client_factory.lock_blueprint(id=id, timeout=lock_timeout)
+            client_factory.lock_blueprint(id=blueprint_id, timeout=lock_timeout)
             
         if state == "absent":
             if id is None:
                 raise ValueError("Cannot delete a blueprint without a resource id")
             # Delete the blueprint
-            client_factory.resources_op("blueprints", "delete", {"blueprint": id})
+            client_factory.resources_op("blueprints", "delete", id)
             result["changed"] = True
+            result["msg"] = "Blueprint deleted successfully"
 
         # Unlock the blueprint if requested
-        if lock_state == "unlocked":
-            client_factory.unlock_blueprint(id=id, timeout=lock_timeout)
-        elif state == "absent":
+        if state == "absent":
             # If the blueprint is deleted, it will be unlocked (tag deleted)
             lock_state = "unlocked"
+        elif lock_state == "unlocked":
+            client_factory.unlock_blueprint(id=blueprint_id)
 
         # Always report the lock state
         result["lock_state"] = lock_state

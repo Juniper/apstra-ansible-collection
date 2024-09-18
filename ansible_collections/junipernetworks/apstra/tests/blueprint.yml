@@ -11,14 +11,42 @@
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
+        resource:
+          label: "test_blueprint"
+          design: "two_stage_l3clos"
+        lock_state: "locked"
         auth_token: "{{ auth_response.auth_token }}"
-        lock: true
-      register: apstra_facts
+      register: blueprint_create
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: blueprint_create
+
+    - name: Unlock blueprint
+      junipernetworks.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_create.resource.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth_response.auth_token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
 
     - name: Delete blueprint
+      junipernetworks.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_create.resource.id }}"
+        state: absent
+        auth_token: "{{ auth_response.auth_token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
       ansible.builtin.debug:
-        var: apstra_facts
+        var: blueprint_delete
 
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
         logout: true
+        auth_token: "{{ auth_response.auth_token }}"

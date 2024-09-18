@@ -1,4 +1,3 @@
-import time
 from aos.sdk.client import (
     Client,
     ClientError,
@@ -11,8 +10,16 @@ from aos.sdk.reference_design.extension.endpoint_policy import (
 from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
 import os
 import re
+import time
+from datetime import datetime
+
+import urllib3
+
+# Disable warnings about unverified HTTPS requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
+
 
 def apstra_client_module_args():
     return dict(
@@ -85,8 +92,10 @@ class ApstraClientFactory:
         }
 
         # Map from plural to singular resource types
-        self.plural_to_singular = { 'ies': 'y', 'es' : 'e', 's': '' }
-        self.singular_to_plural = { plural: singular for singular, plural in self.plural_to_singular.items()}
+        self.plural_to_singular = {"ies": "y", "es": "e", "s": ""}
+        self.singular_to_plural = {
+            plural: singular for singular, plural in self.plural_to_singular.items()
+        }
 
         # Populate the list (and set) of supported objects
         self.network_resources = []
@@ -164,7 +173,7 @@ class ApstraClientFactory:
         # This is used for the id in the resource
         for plural, singular in self.plural_to_singular.items():
             if resource_type.endswith(plural):
-                return resource_type[:-len(plural)] + singular
+                return resource_type[: -len(plural)] + singular
         return resource_type
 
     def get_plural_resource_type(self, resource_type):
@@ -172,14 +181,14 @@ class ApstraClientFactory:
         # This is used for the id in the resource
         for singular, plural in self.singular_to_plural.items():
             if resource_type.endswith(singular):
-                return resource_type[:-len(singular)] + plural
+                return resource_type[: -len(singular)] + plural
         return resource_type
 
     # Call operatop op. If op is 'get', will get one resource, or all resources of that type.
     # The id is a dictionary including any required keys for the resource type.
     # For example, for blueprints.virtual_networks, the id would be {'blueprint': 'my_blueprint', 'virtual_network': 'my_vn'}
     # If the leaf resource (e.g.- virtual_network) is not specified, all resources are returned (e.g. -- all virtual networks for a blueprint)
-    def resources_op(self, resource_type, op='get', id={}, data=None):
+    def resources_op(self, resource_type, op="get", id={}, data=None):
         client = self.get_client(resource_type)
 
         # Traverse nested resource_type
@@ -193,7 +202,7 @@ class ApstraClientFactory:
                 )
 
             # Check if this is the leaf type
-            leaf_type = (index + 1 == len(attrs))
+            leaf_type = index + 1 == len(attrs)
 
             # Iterate to the next object
             id_value = None
@@ -235,7 +244,7 @@ class ApstraClientFactory:
                     except AttributeError:
                         raise Exception(
                             f"Invalid operation '{op}' for resource type '{resource_type}', id '{id}'"
-                    )
+                        )
 
             if op_attr is None:
                 op_attr = getattr(obj, op)
@@ -277,7 +286,9 @@ class ApstraClientFactory:
 
                 # Make sure we got the parent resource
                 if not resource_attr in r_map:
-                    r_map[resource_attr] = self.resources_op(full_resource_type, "list", id)
+                    r_map[resource_attr] = self.resources_op(
+                        full_resource_type, "list", id
+                    )
 
                 leaf_type = index + 1 == len(resource_attrs)
                 if leaf_type:
@@ -292,7 +303,9 @@ class ApstraClientFactory:
                 resources = r_map[resource_attr]
                 if isinstance(resources, dict) and hasattr(resources, "id"):
                     # Single resource, get the id and get the child resources
-                    singular_resource_attr = self.get_singular_resource_type(resource_attr)
+                    singular_resource_attr = self.get_singular_resource_type(
+                        resource_attr
+                    )
                     id[singular_resource_attr] = resources["id"]
                     r_map = resources
                     r_map[next_resource_attr] = self.resources_op(
@@ -304,7 +317,9 @@ class ApstraClientFactory:
                         resources if isinstance(resources, list) else resources.values()
                     )
                     for resource in iterable:
-                        singular_resource_attr = self.get_singular_resource_type(resource_attr)
+                        singular_resource_attr = self.get_singular_resource_type(
+                            resource_attr
+                        )
                         id[singular_resource_attr] = resource["id"]
                         r_map = resource
                         r_map[next_resource_attr] = self.resources_op(
@@ -322,27 +337,42 @@ class ApstraClientFactory:
     # Get blueprint lock tag name
     def _blueprint_lock_tag_name(self, blueprint_id):
         return "blueprint {} locked".format(blueprint_id)
-    
-    def lock_blueprint(self, id, timeout = DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
+
+    def lock_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
         tags_client = self.get_tags_client()
         start_time = time.time()
-        locked_pattern = r"(Tag with label '(.+)' already exists|Blueprint is still being created\.)"
+        interval = 5
+        locked_pattern = (
+            r"(Tag with label '(.+)' already exists|Blueprint is still being created)"
+        )
 
         while True:
             try:
-                tags_client.blueprints[id].tags.create(data={
-                    "label": self._blueprint_lock_tag_name(id),
-                    "description": "blueprint locked at {}".format(time.time())
-                })
+                tags_client.blueprints[id].tags.create(
+                    data={
+                        "label": self._blueprint_lock_tag_name(id),
+                        "description": "blueprint locked at {}".format(
+                            datetime.now().isoformat()
+                        ),
+                    }
+                )
                 break  # Exit the loop if the lock is successful
-            except ClientError as e:
-                error_message = str(e)
+            except ClientError as ce:
+                error_message = str(ce)
                 if re.search(locked_pattern, error_message):
                     if time.time() - start_time > timeout:
-                        raise Exception(f"Failed to lock blueprint {id} within {timeout} seconds: {e}")
-                    time.sleep(5)  # Sleep for 5 seconds before retrying
+                        raise Exception(
+                            f"Failed to lock blueprint {id} within {timeout} seconds: {ce}"
+                        )
+                    time.sleep(interval)
                 else:
-                    raise Exception(f"Failed to lock blueprint {id}: {e}")
+                    raise Exception(
+                        f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {ce}"
+                    )
+            except Exception as e:
+                raise Exception(
+                    f"Unexpected Exception trying to lock blueprint {id} within {timeout} seconds: {e}"
+                )
 
     # Unlock the blueprint
     def unlock_blueprint(self, id):
@@ -355,7 +385,7 @@ class ApstraClientFactory:
             if tag["label"] == tag_name:
                 tags_client.blueprints[id].tags[tag["id"]].delete()
                 return
-        
+
         # Tag was not locked. This is exceptional.
         raise Exception(f"Blueprint {id} is not locked")
 
@@ -363,5 +393,7 @@ class ApstraClientFactory:
     def check_blueprint_locked(self, id):
         # Try to get the tag on the given blueprint
         tags_client = self.get_tags_client()
-        tag = tags_client.blueprints[id].tags.get(label=self._blueprint_lock_tag_name(id))
+        tag = tags_client.blueprints[id].tags.get(
+            label=self._blueprint_lock_tag_name(id)
+        )
         return tag is not None
