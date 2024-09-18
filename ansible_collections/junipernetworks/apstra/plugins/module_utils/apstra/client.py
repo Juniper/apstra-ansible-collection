@@ -167,7 +167,7 @@ class ApstraClientFactory:
 
     def get_tags_client(self):
         return self._get_client("tags_client", tagsClient)
-
+    
     def get_singular_resource_type(self, resource_type):
         # Get the singular form of the resource type
         # This is used for the id in the resource
@@ -183,6 +183,16 @@ class ApstraClientFactory:
             if resource_type.endswith(singular):
                 return resource_type[: -len(singular)] + plural
         return resource_type
+
+    def validate_id(self, resource_type, id):
+        # Traverse nested resource_type
+        attrs = resource_type.split(".")
+        missing = []
+        for attr in attrs:
+            singular_attr = self.get_singular_resource_type(attr)
+            if singular_attr not in id:
+                missing.append(singular_attr)
+        return missing 
 
     # Call operatop op. If op is 'get', will get one resource, or all resources of that type.
     # The id is a dictionary including any required keys for the resource type.
@@ -401,5 +411,12 @@ class ApstraClientFactory:
     # Commit the blueprint
     def commit_blueprint(self, id):
         base_client = self.get_base_client()
-        blueprint = base_client.blueprints[id].get()
+        start_time = time.time()
+        interval = 5
+        blueprint = None
+        while blueprint == None:
+            blueprint = base_client.blueprints[id].get()
+            if time.time() - start_time > DEFAULT_BLUEPRINT_LOCK_TIMEOUT:
+                raise Exception(f"Failed to commit blueprint {id} within {DEFAULT_BLUEPRINT_LOCK_TIMEOUT} seconds")
+            time.sleep(interval)
         return blueprint.commit()

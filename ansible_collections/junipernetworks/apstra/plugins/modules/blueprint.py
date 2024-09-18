@@ -154,7 +154,7 @@ def main():
                 id = {"blueprint": blueprint_id}
                 result["changed"] = True
                 result["resource"] = created_blueprint
-                result["msg"] = "Blueprint created successfully"
+                result["msg"] = "blueprint created successfully"
 
         # If we still don't have an id, there's a problem
         if id is None:
