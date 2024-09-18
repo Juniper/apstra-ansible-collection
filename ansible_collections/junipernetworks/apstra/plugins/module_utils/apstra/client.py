@@ -397,3 +397,9 @@ class ApstraClientFactory:
             label=self._blueprint_lock_tag_name(id)
         )
         return tag is not None
+
+    # Commit the blueprint
+    def commit_blueprint(self, id):
+        base_client = self.get_base_client()
+        blueprint = base_client.blueprints[id].get()
+        return blueprint.commit()

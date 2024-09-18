@@ -41,7 +41,7 @@ options:
             - The desired state of the blueprint.
         required: false
         type: str
-        choices: ["present", "absent"]
+        choices: ["present", "committed", "absent"]
         default: "present"
 extends_documentation_fragment:
     - junipernetworks.apstra.apstra_client
@@ -121,7 +121,7 @@ def main():
         lock_state=dict(type="str", required=False, choices=["locked", "unlocked", "ignore"], default="locked"),
         lock_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_LOCK_TIMEOUT),
         unlock=dict(type="bool", required=False, default=False),
-        state=dict(type="str", required=False, choices=["present", "absent"], default="present"),
+        state=dict(type="str", required=False, choices=["present", "committed", "absent"], default="present"),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | blueprint_module_args
@@ -144,7 +144,7 @@ def main():
         lock_timeout = module.params["lock_timeout"]
 
         # Make the requested changes
-        if state == "present":
+        if state != "absent":
             if id is None:
                 if resource is None:
                     raise ValueError("Must specify 'resource' to create a blueprint")
@@ -161,7 +161,7 @@ def main():
             raise ValueError("Cannot manage a blueprint without a resource id")
             
         # Lock the resource if requested
-        if lock_state == "locked" and state == "present":
+        if lock_state == "locked" and state != "absent":
             module.log("Locking blueprint")
             client_factory.lock_blueprint(id=blueprint_id, timeout=lock_timeout)
             
@@ -172,6 +172,12 @@ def main():
             client_factory.resources_op("blueprints", "delete", id)
             result["changed"] = True
             result["msg"] = "Blueprint deleted successfully"
+        
+        if state == "committed":
+            # Commit the blueprint
+            client_factory.commit_blueprint(id=blueprint_id)
+            result["changed"] = True
+            result["msg"] = "Blueprint committed successfully"
 
         # Unlock the blueprint if requested
         if state == "absent":

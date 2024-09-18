@@ -22,6 +22,19 @@
       ansible.builtin.debug:
         var: blueprint_create
 
+    - name: Commit the blueprint
+      junipernetworks.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_create.resource.id }}"
+        lock_state: "ignore"
+        state: committed
+        auth_token: "{{ auth_response.auth_token }}"
+      register: blueprint_commit
+
+    - name: Show committed blueprint
+      ansible.builtin.debug:
+        var: blueprint_commit
+
     - name: Unlock blueprint
       junipernetworks.apstra.blueprint:
         id:
