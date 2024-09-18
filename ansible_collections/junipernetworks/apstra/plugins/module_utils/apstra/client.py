@@ -168,7 +168,7 @@ class ApstraClientFactory:
     def get_tags_client(self):
         return self._get_client("tags_client", tagsClient)
     
-    def get_singular_resource_type(self, resource_type):
+    def singular_resource_type(self, resource_type):
         # Get the singular form of the resource type
         # This is used for the id in the resource
         for plural, singular in self.plural_to_singular.items():
@@ -176,7 +176,13 @@ class ApstraClientFactory:
                 return resource_type[: -len(plural)] + singular
         return resource_type
 
-    def get_plural_resource_type(self, resource_type):
+    def singular_leaf_resource_type(self, resource_type):
+        # Get the singular form of the leaf resource type
+        # This is used for the id in the resource
+        attrs = resource_type.split(".")
+        return self.singular_resource_type(attrs[-1])
+
+    def plural_resource_type(self, resource_type):
         # Get the plural form of the resource type
         # This is used for the id in the resource
         for singular, plural in self.singular_to_plural.items():
@@ -189,7 +195,7 @@ class ApstraClientFactory:
         attrs = resource_type.split(".")
         missing = []
         for attr in attrs:
-            singular_attr = self.get_singular_resource_type(attr)
+            singular_attr = self.singular_resource_type(attr)
             if singular_attr not in id:
                 missing.append(singular_attr)
         return missing 
@@ -216,7 +222,7 @@ class ApstraClientFactory:
 
             # Iterate to the next object
             id_value = None
-            singular_attr = self.get_singular_resource_type(attr)
+            singular_attr = self.singular_resource_type(attr)
             if singular_attr in id:
                 # Get the id value
                 id_value = id[singular_attr]
@@ -313,7 +319,7 @@ class ApstraClientFactory:
                 resources = r_map[resource_attr]
                 if isinstance(resources, dict) and hasattr(resources, "id"):
                     # Single resource, get the id and get the child resources
-                    singular_resource_attr = self.get_singular_resource_type(
+                    singular_resource_attr = self.singular_resource_type(
                         resource_attr
                     )
                     id[singular_resource_attr] = resources["id"]
@@ -327,7 +333,7 @@ class ApstraClientFactory:
                         resources if isinstance(resources, list) else resources.values()
                     )
                     for resource in iterable:
-                        singular_resource_attr = self.get_singular_resource_type(
+                        singular_resource_attr = self.singular_resource_type(
                             resource_attr
                         )
                         id[singular_resource_attr] = resource["id"]
