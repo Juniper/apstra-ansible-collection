@@ -7,11 +7,11 @@
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
         logout: false
-      register: auth_response
+      register: auth
 
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
         gather_network_resources: 'all'
         available_network_resources: true
       register: apstra_facts
@@ -22,5 +22,5 @@
 
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
         logout: true

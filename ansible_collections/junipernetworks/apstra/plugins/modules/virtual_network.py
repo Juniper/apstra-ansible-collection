@@ -80,6 +80,14 @@ resource:
   description: The virtual network resource details.
   type: dict
   returned: when state is present and changes are made
+id:
+  description: The ID of the created virtual network.
+  returned: on create
+  type: dict
+  sample: {
+      "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
+      "virtual_network": "AjAuUuVLylXCUgAqaQ"
+  }
 msg:
   description: The output message that the module generates.
   type: str
@@ -126,7 +134,8 @@ def main():
                 # Create the resource
                 created_resource = client_factory.resources_op(resource_type, "create", id, resource)
                 resource_id = created_resource["id"]
-                id = {singular_leaf_resource_type: resource_id}
+                id[singular_leaf_resource_type] = resource_id
+                result["id"] = id
                 result["changed"] = True
                 result["resource"] = created_resource
                 result["msg"] = f"{singular_leaf_resource_type} created successfully"

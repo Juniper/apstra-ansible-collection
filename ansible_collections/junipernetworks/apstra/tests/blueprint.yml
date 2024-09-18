@@ -7,7 +7,7 @@
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
         logout: false
-      register: auth_response
+      register: auth
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
@@ -15,7 +15,7 @@
           label: "test_blueprint"
           design: "two_stage_l3clos"
         lock_state: "locked"
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: blueprint_create
 
     - name: Show created blueprint
@@ -24,11 +24,10 @@
 
     - name: Commit the blueprint
       junipernetworks.apstra.blueprint:
-        id:
-          blueprint: "{{ blueprint_create.resource.id }}"
+        id: "{{ blueprint_create.id }}"
         lock_state: "ignore"
         state: committed
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: blueprint_commit
 
     - name: Show committed blueprint
@@ -37,10 +36,9 @@
 
     - name: Unlock blueprint
       junipernetworks.apstra.blueprint:
-        id:
-          blueprint: "{{ blueprint_create.resource.id }}"
+        id: "{{ blueprint_create.id }}"
         lock_state: "unlocked"
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: blueprint_unlock
 
     - name: Show unlocked blueprint
@@ -49,10 +47,9 @@
 
     - name: Delete blueprint
       junipernetworks.apstra.blueprint:
-        id:
-          blueprint: "{{ blueprint_create.resource.id }}"
+        id: "{{ blueprint_create.id }}"
         state: absent
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: blueprint_delete
 
     - name: Show deleted blueprint
@@ -62,4 +59,4 @@
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
         logout: true
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"

@@ -4,6 +4,15 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
+    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.resource import compare_and_update
+
 DOCUMENTATION = '''
 ---
 module: blueprint
@@ -35,7 +44,13 @@ options:
             - The timeout in seconds for locking the blueprint.
         required: false
         type: int
-        default: 60
+        default: {lock_timeout}
+    commit_timeout:
+        description:
+            - The timeout in seconds for committing the blueprint.
+        required: false
+        type: int
+        default: {commit_timeout}
     state:
         description:
             - The desired state of the blueprint.
@@ -45,7 +60,7 @@ options:
         default: "present"
 extends_documentation_fragment:
     - junipernetworks.apstra.apstra_client
-'''
+'''.format(lock_timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT, commit_timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT)
 
 EXAMPLES = '''
 # Create a new blueprint
@@ -99,6 +114,13 @@ lock_state:
     returned: always
     type: str
     sample: "locked"
+id:
+    description: The ID of the created blueprint.
+    returned: on create
+    type: dict
+    sample: {
+        "id": "blueprint-123"
+    }
 msg:
     description: A message describing the result.
     returned: always
@@ -106,20 +128,13 @@ msg:
     sample: "Blueprint created successfully"
 '''
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    DEFAULT_BLUEPRINT_LOCK_TIMEOUT
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.resource import compare_and_update
-
 def main():
     blueprint_module_args = dict(
         id=dict(type="dict", required=False),
         resource=dict(type="dict", required=False),
         lock_state=dict(type="str", required=False, choices=["locked", "unlocked", "ignore"], default="locked"),
         lock_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_LOCK_TIMEOUT),
+        commit_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT),
         unlock=dict(type="bool", required=False, default=False),
         state=dict(type="str", required=False, choices=["present", "committed", "absent"], default="present"),
     )
@@ -142,6 +157,7 @@ def main():
         state = module.params["state"]
         lock_state = module.params["lock_state"]
         lock_timeout = module.params["lock_timeout"]
+        commit_timeout = module.params["commit_timeout"]
 
         # Make the requested changes
         if state != "absent":
@@ -152,6 +168,7 @@ def main():
                 created_blueprint = client_factory.resources_op("blueprints", "create", {}, resource)
                 blueprint_id = created_blueprint["id"]
                 id = {"blueprint": blueprint_id}
+                result["id"] = id
                 result["changed"] = True
                 result["resource"] = created_blueprint
                 result["msg"] = "blueprint created successfully"
@@ -175,7 +192,7 @@ def main():
         
         if state == "committed":
             # Commit the blueprint
-            client_factory.commit_blueprint(id=blueprint_id)
+            client_factory.commit_blueprint(id=blueprint_id, timeout=commit_timeout)
             result["changed"] = True
             result["msg"] = "Blueprint committed successfully"
 

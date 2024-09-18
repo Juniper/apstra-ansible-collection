@@ -52,9 +52,18 @@ $(APSTRA_COLLECTION_ROOT)/requirements.txt: $(TOP)/Pipfile
 install: build
 	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
 
-test: install
+.PHONY: test-apstra_facts test-blueprint test-virtual_network
+
+test-apstra_facts: install
 	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
+
+test-blueprint: install
 	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/blueprint.yml
+
+test-virtual_network: install
+	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/virtual_network.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network
 
 clean-pipenv:
 	pipenv --rm || true

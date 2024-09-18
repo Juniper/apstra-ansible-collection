@@ -69,7 +69,7 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-auth_token:
+token:
   description: The authentication token retrieved from Apstra AOS.
   returned: when not logging out
   type: str
@@ -97,7 +97,7 @@ def main():
 
         # If auth_token is already set, and we're not logging out, return the auth_token.
         if bool(client_factory.auth_token) and not client_factory.logout:
-            module.exit_json(changed=False, auth_token=module.auth_token)
+            module.exit_json(changed=False, token=module.auth_token)
         
         client_factory.get_base_client()
 
@@ -105,7 +105,7 @@ def main():
             module.exit_json(changed=True)
 
         # Return the auth token
-        module.exit_json(changed=True, auth_token=client_factory.auth_token)
+        module.exit_json(changed=True, token=client_factory.auth_token)
     except Exception as e:
         module.fail_json(msg=str(e), **result)
 

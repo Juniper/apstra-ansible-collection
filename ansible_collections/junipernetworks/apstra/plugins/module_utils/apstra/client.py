@@ -19,6 +19,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
+DEFAULT_BLUEPRINT_COMMIT_TIMEOUT = 120
 
 
 def apstra_client_module_args():
@@ -415,14 +416,14 @@ class ApstraClientFactory:
         return tag is not None
 
     # Commit the blueprint
-    def commit_blueprint(self, id):
+    def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
         base_client = self.get_base_client()
         start_time = time.time()
         interval = 5
         blueprint = None
         while blueprint == None:
             blueprint = base_client.blueprints[id].get()
-            if time.time() - start_time > DEFAULT_BLUEPRINT_LOCK_TIMEOUT:
-                raise Exception(f"Failed to commit blueprint {id} within {DEFAULT_BLUEPRINT_LOCK_TIMEOUT} seconds")
+            if time.time() - start_time > timeout:
+                raise Exception(f"Failed to commit blueprint {id} within {timeout} seconds")
             time.sleep(interval)
         return blueprint.commit()

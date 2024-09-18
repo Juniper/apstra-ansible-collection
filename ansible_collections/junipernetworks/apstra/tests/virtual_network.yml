@@ -7,7 +7,7 @@
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
         logout: false
-      register: auth_response
+      register: auth
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
@@ -15,7 +15,7 @@
           label: "test_blueprint"
           design: "two_stage_l3clos"
         lock_state: "locked"
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: bp
 
     - name: Show created blueprint
@@ -24,32 +24,57 @@
 
     - name: Create virtual_network
       junipernetworks.apstra.virtual_network:
+        id: "{{ bp.id }}"
         resource:
-          blueprint: "{{ bp.resource.id }}"
           label: "test_virtual_network"
-          vni: 100
-          vlan: 100
-          gateway_ip: "
+          description: "test VN description"
+          ipv4_enabled: true
+          virtual_gateway_ipv4_enabled: true
+          vn_id: "16777214"
+          vn_type: "vxlan"
+        auth_token: "{{ auth.token }}"
+      register: vn
+
+    - name: Show created virtual_network
+      ansible.builtin.debug:
+        var: vn
+
+    - name: Modify virtual_network
+      junipernetworks.apstra.virtual_network:
+        id: "{{ vn.id }}"
+        resource:
+          description: "test VN description edwin wuz here"
+        auth_token: "{{ auth.token }}"
 
     - name: Commit the blueprint
       junipernetworks.apstra.blueprint:
-        id:
-          blueprint: "{{ blueprint_create.resource.id }}"
+        id: "{{ bp.id }}"
         lock_state: "ignore"
         state: committed
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: blueprint_commit
 
     - name: Show committed blueprint
       ansible.builtin.debug:
         var: blueprint_commit
 
-    - name: Unlock blueprint
+    - name: Delete the virtual_network
+      junipernetworks.apstra.virtual_network:
+        id: "{{ vn.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: vn_delete
+
+    - name: Show deleted virtual_network
+      ansible.builtin.debug:
+        var: vn_delete
+
+    - name: Commit and unlock blueprint
       junipernetworks.apstra.blueprint:
-        id:
-          blueprint: "{{ blueprint_create.resource.id }}"
+        id: "{{ bp.id }}"
         lock_state: "unlocked"
-        auth_token: "{{ auth_response.auth_token }}"
+        state: committed
+        auth_token: "{{ auth.token }}"
       register: blueprint_unlock
 
     - name: Show unlocked blueprint
@@ -58,10 +83,9 @@
 
     - name: Delete blueprint
       junipernetworks.apstra.blueprint:
-        id:
-          blueprint: "{{ blueprint_create.resource.id }}"
+        id: "{{ bp.id }}"
         state: absent
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
       register: blueprint_delete
 
     - name: Show deleted blueprint
@@ -71,4 +95,4 @@
     - name: Logout of Apstra
       junipernetworks.apstra.authenticate:
         logout: true
-        auth_token: "{{ auth_response.auth_token }}"
+        auth_token: "{{ auth.token }}"
