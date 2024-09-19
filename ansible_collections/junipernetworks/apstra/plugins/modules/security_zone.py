@@ -57,19 +57,18 @@ EXAMPLES = r"""
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
     resource:
-      routing_policy_id: "AjAuUuVLylXCUgAqaQ"
-      junos_evpn_irb_mode: "asymmetric"
-      vrf_name: "test_vrf"
-      vni_id: 16777214
-      vrf_description: "my test VRF"
-      sz_type: "evpn"
-      rt_policy:
-        import_RTs:
-          - "4097:4098"
-        export_RTs:
-          - "4098:4097"
-      label: "test-vrf-label"
-      vlan_id: 2048
+      description: "Example routing policy"
+      expect_default_ipv4_route: true
+      expect_default_ipv6_route: true
+      export_policy:
+        l2edge_subnets: true
+        loopbacks: true
+        spine_leaf_links: false
+        spine_superspine_links: false
+        static_routes: false
+      import_policy: "all"
+      label: "example_policy"
+      policy_type: "user_defined"
     state: present
 
 - name: Update a security zone
