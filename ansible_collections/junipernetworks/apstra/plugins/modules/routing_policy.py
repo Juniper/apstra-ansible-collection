@@ -114,7 +114,7 @@ msg:
 
 
 def main():
-    virtual_network_module_args = dict(
+    resource_module_args = dict(
         id=dict(type="dict", required=True),
         resource=dict(type="dict", required=False),
         state=dict(
@@ -122,7 +122,7 @@ def main():
         ),
     )
     client_module_args = apstra_client_module_args()
-    module_args = client_module_args | virtual_network_module_args
+    module_args = client_module_args | resource_module_args
 
     # values expected to get set: changed, blueprint, msg
     result = dict(changed=False)

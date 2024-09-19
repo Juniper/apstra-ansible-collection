@@ -1,0 +1,127 @@
+---
+- name: Test create/update/delete security_zone
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Connect to Apstra
+      junipernetworks.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      junipernetworks.apstra.blueprint:
+        resource:
+          template_id: "L2_Virtual_EVPN"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+        lock_state: "locked"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    - name: Create routing_policy
+      junipernetworks.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        resource:
+          description: "Example routing policy"
+          expect_default_ipv4_route: true
+          expect_default_ipv6_route: true
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          import_policy: "all"
+          label: "example_policy"
+          policy_type: "user_defined"
+        auth_token: "{{ auth.token }}"
+      register: rp
+
+    - name: Show created routing policy
+      ansible.builtin.debug:
+        var: rp
+
+    - name: Create security_zone
+      junipernetworks.apstra.security_zone:
+        id: "{{ bp.id }}"
+        resource:
+          routing_policy_id: "{{ rp.id.routing_policy }}"
+          junos_evpn_irb_mode: "asymmetric"
+          l3_mtu: 9170
+          vrf_name: "test_vrf"
+          vni_id: 16777214
+          vrf_description: "my test VRF"
+          sz_type: "evpn"
+          route_target: "7000:1"
+          label: "test-vrf-label"
+          vlan_id: 2048
+        auth_token: "{{ auth.token }}"
+      register: sz
+
+    - name: Modify security_zone
+      junipernetworks.apstra.security_zone:
+        id: "{{ sz.id }}"
+        resource:
+          vrf_description: "Example security zone edwin wuz here"
+        auth_token: "{{ auth.token }}"
+      register: sz_modify
+
+    - name: Show modified security_zone
+      ansible.builtin.debug:
+        var: sz_modify
+
+    - name: Commit the blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "ignore"
+        state: committed
+        auth_token: "{{ auth.token }}"
+      register: blueprint_commit
+
+    - name: Show committed blueprint
+      ansible.builtin.debug:
+        var: blueprint_commit
+
+    - name: Delete the security_zone
+      junipernetworks.apstra.security_zone:
+        id: "{{ sz.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: sz_delete
+
+    - name: Show deleted security_zone
+      ansible.builtin.debug:
+        var: sz_delete
+
+    - name: Commit and unlock blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        state: committed
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    - name: Logout of Apstra
+      junipernetworks.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"

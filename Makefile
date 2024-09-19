@@ -52,7 +52,12 @@ $(APSTRA_COLLECTION_ROOT)/requirements.txt: $(TOP)/Pipfile
 install: build
 	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
 
-.PHONY: test-apstra_facts test-blueprint test-virtual_network
+.PHONY: test \
+	test-apstra_facts \
+	test-blueprint \
+	test-virtual_network \
+	test-routing_policy \
+	test-security_zone
 
 test-apstra_facts: install
 	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
@@ -66,7 +71,10 @@ test-virtual_network: install
 test-routing_policy: install
 	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/routing_policy.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy
+test-security_zone: install
+	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/security_zone.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone
 
 clean-pipenv:
 	pipenv --rm || true

@@ -79,8 +79,8 @@ class ApstraClientFactory:
         # Map client to types. Dotted types are traversed.
         # Should be in topological order (e.g.-- blueprints before blueprints.config_templates)
         self.client_to_types = {
-            "base_client": ["blueprints"],
             "l3clos_client": [
+                "blueprints",
                 "blueprints.virtual_networks",
                 "blueprints.security_zones",
                 "blueprints.routing_policies",
@@ -417,12 +417,12 @@ class ApstraClientFactory:
 
     # Commit the blueprint
     def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
-        base_client = self.get_base_client()
+        blueprint_client = self.get_client("blueprints")
         start_time = time.time()
         interval = 5
         blueprint = None
         while blueprint == None:
-            blueprint = base_client.blueprints[id].get()
+            blueprint = blueprint_client.blueprints[id].get()
             if time.time() - start_time > timeout:
                 raise Exception(f"Failed to commit blueprint {id} within {timeout} seconds")
             time.sleep(interval)
