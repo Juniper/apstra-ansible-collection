@@ -1,5 +1,5 @@
 ---
-- name: Test create/update/delete security_zone
+- name: Test create/update/delete virtual_network
   hosts: localhost
   gather_facts: false
   connection: local
@@ -67,17 +67,36 @@
       ansible.builtin.debug:
         var: sz
 
-    - name: Modify security_zone
-      junipernetworks.apstra.security_zone:
-        id: "{{ sz.id }}"
+    - name: Create virtual_network
+      junipernetworks.apstra.virtual_network:
+        id: "{{ bp.id }}"
         resource:
-          vrf_description: "Example security zone edwin wuz here"
+          label: "test_virtual_network"
+          description: "test VN description"
+          ipv4_enabled: true
+          virtual_gateway_ipv4_enabled: true
+          vn_id: "16777213"
+          vn_type: "vxlan"
+          security_zone_id: "{{ sz.resource.id }}"
         auth_token: "{{ auth.token }}"
-      register: sz_modify
+      register: vn
 
-    - name: Show modified security_zone
+    - name: Show created virtual_network
       ansible.builtin.debug:
-        var: sz_modify
+        var: vn
+
+    - name: Get endpoint_policy
+      junipernetworks.apstra.apstra_facts:
+        id: "{{ bp.id }}"
+        gather_network_resources:
+          - blueprints.endpoint_policies
+          - blueprints.endpoint_policies.application_points
+        auth_token: "{{ auth.token }}"
+      register: ep
+
+    - name: Show endpoint policies
+      ansible.builtin.debug:
+        var: ep
 
     - name: Commit the blueprint
       junipernetworks.apstra.blueprint:
@@ -91,16 +110,16 @@
       ansible.builtin.debug:
         var: blueprint_commit
 
-    - name: Delete the security_zone
-      junipernetworks.apstra.security_zone:
-        id: "{{ sz.id }}"
+    - name: Delete the virtual_network
+      junipernetworks.apstra.virtual_network:
+        id: "{{ vn.id }}"
         state: absent
         auth_token: "{{ auth.token }}"
-      register: sz_delete
+      register: vn_delete
 
-    - name: Show deleted security_zone
+    - name: Show deleted virtual_network
       ansible.builtin.debug:
-        var: sz_delete
+        var: vn_delete
 
     - name: Commit and unlock blueprint
       junipernetworks.apstra.blueprint:

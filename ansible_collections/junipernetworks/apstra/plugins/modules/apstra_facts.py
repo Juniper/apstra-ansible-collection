@@ -4,8 +4,8 @@ module: apstra_facts
 short_description: Gather facts from Apstra AOS
 description:
   - This module gathers facts from Apstra AOS, including information about
-    config templates, virtual networks, routing zone constraints, endpoint policies,
-    and object policy application points.
+    blueprints, virtual networks, security zones, endpoint policies,
+    and application points.
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
@@ -16,6 +16,11 @@ options:
     type: list
     elements: str
     required: true
+  id:
+    description:
+      - Dictionary containing identifiers to focus us.
+    required: false
+    type: dict
   available_network_resources:
     description:
       - If set to true, the module will return a list of available network resources.
@@ -33,12 +38,13 @@ EXAMPLES = """
     gather_network_resources:
       - all
 
-# Gather facts about specific network resources
+# Gather facts about specific network resources for a blueprint
 - name: Gather specific Apstra facts
   apstra_facts:
     gather_network_resources:
-      - config_templates
       - virtual_networks
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
 
 # Get the list of available network resources
 - name: List available Apstra network resources
@@ -53,17 +59,19 @@ available_network_resources:
   description: List of available network resources that can be gathered.
   returned: when available_network_resources is true
   type: list
-  sample: ['config_templates', 'virtual_networks', 'routing_zone_constraints', 'endpoint_policies', 'obj_policy_application_points']
+  sample: ['blueprint.virtual_networks', 'blueprint.security_zones', 'blueprint.endpoint_policies', 'blueprint.endpoint_policies.application_points']
 facts:
   description: Dictionary containing the gathered facts.
   returned: always
   type: dict
   sample: {
-    "config_templates": {...},
-    "virtual_networks": {...},
-    "routing_zone_constraints": {...},
-    "endpoint_policies": {...},
-    "obj_policy_application_points": {...}
+    "blueprints": {
+      "virtual_networks": {...},
+      "routing_zone_constraints": {...},
+      "endpoint_policies": {
+        "application_points": {...}
+      }
+    }
   }
 """
 
@@ -76,6 +84,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
 
 def main():
     facts_module_args = dict(
+        id=dict(type="dict", required=False, default={}),
         available_network_resources=dict(type="bool", required=False, default=False),
         gather_network_resources=dict(
             type="list", elements="str", required=False, default=["blueprints"]
@@ -119,7 +128,7 @@ def main():
                 module.fail_json(msg=f"Unsupported network resource '{resource_type}'")
 
         # Iterate through the list of requested network resources and get everything.
-        resource_map = client_factory.list_all_resources(requested_network_resources)
+        resource_map = client_factory.list_all_resources(requested_network_resources, module.params.get("id", {}))
 
         # Structure used for gathered facts
         facts = {

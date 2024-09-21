@@ -8,6 +8,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
     apstra_client_module_args,
     ApstraClientFactory,
+    singular_leaf_resource_type
 )
 from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.resource import (
     compare_and_update,
@@ -77,7 +78,7 @@ EXAMPLES = r"""
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
       security_zone: "AjAuUuVLylXCUgAqaQ"
     resource:
-      description: "test VN description UPDATE"
+      description: "example routing zone UPDATE"
       import_policy: "extra_only"
     state: present
 
@@ -134,9 +135,7 @@ def main():
         client_factory = ApstraClientFactory.from_params(module.params)
 
         resource_type = "blueprints.routing_policies"
-        singular_leaf_resource_type = client_factory.singular_leaf_resource_type(
-            resource_type
-        )
+        leaf_resource_type = singular_leaf_resource_type(resource_type)
 
         # Validate params
         id = module.params["id"]
@@ -148,28 +147,28 @@ def main():
         if len(missing_id) > 1 or (
             len(missing_id) == 1
             and state == "absent"
-            and missing_id[0] != singular_leaf_resource_type
+            and missing_id[0] != leaf_resource_type
         ):
             raise ValueError(f"Invalid id: {id} for desired state of {state}.")
-        resource_id = id.get(singular_leaf_resource_type, None)
+        resource_id = id.get(leaf_resource_type, None)
 
         # Make the requested changes
         if state == "present":
             if resource_id is None:
                 if resource is None:
                     raise ValueError(
-                        f"Must specify 'resource' to create a {singular_leaf_resource_type}"
+                        f"Must specify 'resource' to create a {leaf_resource_type}"
                     )
                 # Create the resource
                 created_resource = client_factory.resources_op(
                     resource_type, "create", id, resource
                 )
                 resource_id = created_resource["id"]
-                id[singular_leaf_resource_type] = resource_id
+                id[leaf_resource_type] = resource_id
                 result["id"] = id
                 result["changed"] = True
                 result["resource"] = created_resource
-                result["msg"] = f"{singular_leaf_resource_type} created successfully"
+                result["msg"] = f"{leaf_resource_type} created successfully"
             else:
                 # Update the resource
                 current_resource = client_factory.resources_op(resource_type, "get", id)
@@ -181,20 +180,20 @@ def main():
                     result["changed"] = True
                     result["resource"] = updated_resource
                     result["msg"] = (
-                        f"{singular_leaf_resource_type} updated successfully"
+                        f"{leaf_resource_type} updated successfully"
                     )
 
         # If we still don't have an id, there's a problem
         if id is None:
             raise ValueError(
-                f"Cannot manage a {singular_leaf_resource_type} without a resource id"
+                f"Cannot manage a {leaf_resource_type} without a resource id"
             )
 
         if state == "absent":
             # Delete the blueprint
             client_factory.resources_op(resource_type, "delete", id)
             result["changed"] = True
-            result["msg"] = f"{singular_leaf_resource_type} deleted successfully"
+            result["msg"] = f"{leaf_resource_type} deleted successfully"
 
     except Exception as e:
         module.fail_json(msg=str(e), **result)

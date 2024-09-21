@@ -59,22 +59,27 @@ install: build
 	test-routing_policy \
 	test-security_zone
 
+ANSIBLE_FLAGS ?= -v
+
 test-apstra_facts: install
-	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
 
 test-blueprint: install
-	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/blueprint.yml
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint.yml
 
 test-virtual_network: install
-	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/virtual_network.yml
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/virtual_network.yml
 
 test-routing_policy: install
-	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/routing_policy.yml
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/routing_policy.yml
 
 test-security_zone: install
-	pipenv run ansible-playbook -vvv $(APSTRA_COLLECTION_ROOT)/tests/security_zone.yml
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/security_zone.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone
+test-endpoint_policy: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/endpoint_policy.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy
 
 clean-pipenv:
 	pipenv --rm || true
