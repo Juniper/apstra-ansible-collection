@@ -62,7 +62,7 @@ EXAMPLES = r"""
 
 RETURN = r"""
 changed:
-  description: Indicates whether the module has made any changes.
+  description: Indicates whether the module has made any changes. True if successful.
   type: bool
   returned: always
 msg:
@@ -93,8 +93,8 @@ def main():
         # Instantiate the client factory
         client_factory = ApstraClientFactory.from_params(module.params)
 
-        object_type = "blueprints.obj_policy_application_points"
-        singular_leaf_object_type = client_factory.singular_leaf_object_type(
+        object_type = "blueprints.endpoint_policies.application_points"
+        singular_leaf_object_type = singular_leaf_object_type(
             object_type
         )
 
@@ -104,53 +104,18 @@ def main():
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
-        if len(missing_id) > 1 (
-        ):
+        if len(missing_id) > 1:
             raise ValueError(f"Invalid id: {id}.")
-        object_id = id.get(singular_leaf_object_type, None)
+        object_id = id.get('endpoint_policy')
+        if object_id is None:
+            raise ValueError(f"Cannot manage a {singular_leaf_object_type} without an endpoint policy id")
 
         # Make the requested changes
-        if state == "present":
-            if object_id is None:
-                if body is None:
-                    raise ValueError(
-                        f"Must specify 'body' to create a {singular_leaf_object_type}"
-                    )
-                # Create the object
-                created_object = client_factory.object_request(
-                    object_type, "create", id, body
-                )
-                object_id = created_object["id"]
-                id[singular_leaf_object_type] = object_id
-                result["id"] = id
-                result["changed"] = True
-                result["response"] = created_object
-                result["msg"] = f"{singular_leaf_object_type} created successfully"
-            else:
-                # Update the object
-                current_object = client_factory.object_request(object_type, "get", id)
-                changes = {}
-                if compare_and_update(current_object, body, changes):
-                    updated_object = client_factory.object_request(
-                        object_type, "patch", id, changes
-                    )
-                    result["changed"] = True
-                    result["response"] = updated_object
-                    result["msg"] = (
-                        f"{singular_leaf_object_type} updated successfully"
-                    )
 
-        # If we still don't have an id, there's a problem
-        if id is None:
-            raise ValueError(
-                f"Cannot manage a {singular_leaf_object_type} without a object id"
-            )
-
-        if state == "absent":
-            # Delete the blueprint
-            client_factory.object_request(object_type, "delete", id)
-            result["changed"] = True
-            result["msg"] = f"{singular_leaf_object_type} deleted successfully"
+        # Update the object
+        updated_object = client_factory.object_request(object_type, "patch", id, body)
+        result["changed"] = True
+        result["response"] = updated_object
 
     except Exception as e:
         module.fail_json(msg=str(e), **result)
