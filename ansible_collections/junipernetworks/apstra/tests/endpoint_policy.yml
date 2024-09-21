@@ -11,7 +11,7 @@
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
-        resource:
+        body:
           template_id: "L2_Virtual_EVPN"
           design: "two_stage_l3clos"
           init_type: "template_reference"
@@ -26,7 +26,7 @@
     - name: Create routing_policy
       junipernetworks.apstra.routing_policy:
         id: "{{ bp.id }}"
-        resource:
+        body:
           description: "Example routing policy"
           expect_default_ipv4_route: true
           expect_default_ipv6_route: true
@@ -49,7 +49,7 @@
     - name: Create security_zone
       junipernetworks.apstra.security_zone:
         id: "{{ bp.id }}"
-        resource:
+        body:
           routing_policy_id: "{{ rp.id.routing_policy }}"
           junos_evpn_irb_mode: "asymmetric"
           l3_mtu: 9170
@@ -70,14 +70,14 @@
     - name: Create virtual_network
       junipernetworks.apstra.virtual_network:
         id: "{{ bp.id }}"
-        resource:
+        body:
           label: "test_virtual_network"
           description: "test VN description"
           ipv4_enabled: true
           virtual_gateway_ipv4_enabled: true
           vn_id: "16777213"
           vn_type: "vxlan"
-          security_zone_id: "{{ sz.resource.id }}"
+          security_zone_id: "{{ sz.id.security_zone }}"
         auth_token: "{{ auth.token }}"
       register: vn
 
@@ -88,7 +88,7 @@
     - name: Get endpoint_policy
       junipernetworks.apstra.apstra_facts:
         id: "{{ bp.id }}"
-        gather_network_resources:
+        gather_network_facts:
           - blueprints.endpoint_policies
           - blueprints.endpoint_policies.application_points
         auth_token: "{{ auth.token }}"

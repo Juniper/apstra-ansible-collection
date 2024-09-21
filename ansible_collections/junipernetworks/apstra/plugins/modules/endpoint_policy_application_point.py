@@ -33,7 +33,7 @@ options:
       - Dictionary containing the blueprint, endpoint policy and application point IDs.
     required: true
     type: dict
-  resource:
+  body:
     description:
       - Dictionary containing the endpoint policy application point resource details.
     required: false
@@ -58,9 +58,8 @@ EXAMPLES = r"""
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
       endpoint_policy: "AjAuUuVLylXCUgAqaQ"
       application_point: "ABCuVLylXCUgA777"
-    resource:
-      description: "test VN description UPDATE"
-      import_policy: "extra_only"
+    response:
+      description: "test endpoint policy application point UPDATE"
     state: present
 
 - name: Delete a endpoint policy application point
@@ -76,29 +75,33 @@ changed:
   description: Indicates whether the module has made any changes.
   type: bool
   returned: always
-resource:
-  description: The endpoint policy application point resource details.
-  type: dict
-  returned: when state is present and changes are made
 id:
   description: The ID of the created endpoint policy application point.
   returned: on create
   type: dict
   sample: {
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
-      "endpoint_policy_application_point": "AjAuUuVLylXCUgAqaQ"
+      "endpoint_policy": "1c8894c0-0d73-462b-a60e-59351cb42bba",
+      "application_point": "AjAuUuVLylXCUgAqaQ"
   }
 msg:
   description: The output message that the module generates.
   type: str
   returned: always
+response:
+    description: The response from the Apstra API.
+    returned: on create
+    type: dict
+    sample: {
+        "id": "1c8894c0-0d73-462b-a60e-59351cb42bba",
+    }
 """
 
 
 def main():
     resource_module_args = dict(
         id=dict(type="dict", required=True),
-        resource=dict(type="dict", required=False),
+        body=dict(type="dict", required=False),
         state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
         ),
@@ -122,7 +125,7 @@ def main():
 
         # Validate params
         id = module.params["id"]
-        resource = module.params.get("resource", None)
+        body = module.params.get("body", None)
         state = module.params["state"]
 
         # Validate the id
@@ -138,30 +141,30 @@ def main():
         # Make the requested changes
         if state == "present":
             if resource_id is None:
-                if resource is None:
+                if body is None:
                     raise ValueError(
                         f"Must specify 'resource' to create a {singular_leaf_resource_type}"
                     )
                 # Create the resource
                 created_resource = client_factory.resources_op(
-                    resource_type, "create", id, resource
+                    resource_type, "create", id, body
                 )
                 resource_id = created_resource["id"]
                 id[singular_leaf_resource_type] = resource_id
                 result["id"] = id
                 result["changed"] = True
-                result["resource"] = created_resource
+                result["response"] = created_resource
                 result["msg"] = f"{singular_leaf_resource_type} created successfully"
             else:
                 # Update the resource
                 current_resource = client_factory.resources_op(resource_type, "get", id)
                 changes = {}
-                if compare_and_update(current_resource, resource, changes):
+                if compare_and_update(current_resource, body, changes):
                     updated_resource = client_factory.resources_op(
                         resource_type, "patch", id, changes
                     )
                     result["changed"] = True
-                    result["resource"] = updated_resource
+                    result["response"] = updated_resource
                     result["msg"] = (
                         f"{singular_leaf_resource_type} updated successfully"
                     )

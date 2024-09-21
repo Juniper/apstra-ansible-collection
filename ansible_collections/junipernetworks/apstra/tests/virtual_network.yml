@@ -11,7 +11,7 @@
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
-        resource:
+        body:
           label: "test_blueprint"
           design: "two_stage_l3clos"
         lock_state: "locked"
@@ -25,7 +25,7 @@
     - name: Create virtual_network
       junipernetworks.apstra.virtual_network:
         id: "{{ bp.id }}"
-        resource:
+        body:
           label: "test_virtual_network"
           description: "test VN description"
           ipv4_enabled: true
@@ -42,7 +42,7 @@
     - name: Modify virtual_network
       junipernetworks.apstra.virtual_network:
         id: "{{ vn.id }}"
-        resource:
+        body:
           description: "test VN description edwin wuz here"
         auth_token: "{{ auth.token }}"
 

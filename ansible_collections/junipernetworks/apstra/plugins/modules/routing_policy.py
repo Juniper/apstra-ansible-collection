@@ -34,7 +34,7 @@ options:
       - Dictionary containing the blueprint and routing policy IDs.
     required: true
     type: dict
-  resource:
+  body:
     description:
       - Dictionary containing the routing policy resource details.
     required: false
@@ -57,7 +57,7 @@ EXAMPLES = r"""
   junipernetworks.apstra.routing_policy:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-    resource:
+    body:
       description: "Example routing policy"
       expect_default_ipv4_route: true
       expect_default_ipv6_route: true
@@ -77,7 +77,7 @@ EXAMPLES = r"""
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
       security_zone: "AjAuUuVLylXCUgAqaQ"
-    resource:
+    body:
       description: "example routing zone UPDATE"
       import_policy: "extra_only"
     state: present
@@ -95,7 +95,7 @@ changed:
   description: Indicates whether the module has made any changes.
   type: bool
   returned: always
-resource:
+response:
   description: The routing policy resource details.
   type: dict
   returned: when state is present and changes are made
@@ -117,7 +117,7 @@ msg:
 def main():
     resource_module_args = dict(
         id=dict(type="dict", required=True),
-        resource=dict(type="dict", required=False),
+        body=dict(type="dict", required=False),
         state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
         ),
@@ -139,7 +139,7 @@ def main():
 
         # Validate params
         id = module.params["id"]
-        resource = module.params.get("resource", None)
+        body = module.params.get("body", None)
         state = module.params["state"]
 
         # Validate the id
@@ -155,30 +155,30 @@ def main():
         # Make the requested changes
         if state == "present":
             if resource_id is None:
-                if resource is None:
+                if body is None:
                     raise ValueError(
                         f"Must specify 'resource' to create a {leaf_resource_type}"
                     )
                 # Create the resource
                 created_resource = client_factory.resources_op(
-                    resource_type, "create", id, resource
+                    resource_type, "create", id, body
                 )
                 resource_id = created_resource["id"]
                 id[leaf_resource_type] = resource_id
                 result["id"] = id
                 result["changed"] = True
-                result["resource"] = created_resource
+                result["response"] = created_resource
                 result["msg"] = f"{leaf_resource_type} created successfully"
             else:
                 # Update the resource
                 current_resource = client_factory.resources_op(resource_type, "get", id)
                 changes = {}
-                if compare_and_update(current_resource, resource, changes):
+                if compare_and_update(current_resource, body, changes):
                     updated_resource = client_factory.resources_op(
                         resource_type, "patch", id, changes
                     )
                     result["changed"] = True
-                    result["resource"] = updated_resource
+                    result["response"] = updated_resource
                     result["msg"] = (
                         f"{leaf_resource_type} updated successfully"
                     )

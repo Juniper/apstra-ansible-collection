@@ -59,7 +59,7 @@ install: build
 	test-routing_policy \
 	test-security_zone
 
-ANSIBLE_FLAGS ?= -v
+ANSIBLE_FLAGS ?= -i localhost -v
 
 test-apstra_facts: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml

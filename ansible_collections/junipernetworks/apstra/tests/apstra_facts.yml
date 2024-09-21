@@ -12,8 +12,8 @@
     - name: Run apstra_facts module
       junipernetworks.apstra.apstra_facts:
         auth_token: "{{ auth.token }}"
-        gather_network_resources: 'all'
-        available_network_resources: true
+        gather_network_facts: 'all'
+        available_network_facts: true
       register: apstra_facts
 
     - name: Display gathered facts

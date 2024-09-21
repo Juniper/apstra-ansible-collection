@@ -11,7 +11,7 @@
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
-        resource:
+        body:
           label: "test_blueprint"
           design: "two_stage_l3clos"
         lock_state: "locked"

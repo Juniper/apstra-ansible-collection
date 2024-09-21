@@ -9,7 +9,7 @@ description:
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
-  gather_network_resources:
+  gather_network_facts:
     description:
       - List of network resources to gather facts about.
       - Use 'all' to gather facts about all supported network resources.
@@ -21,7 +21,7 @@ options:
       - Dictionary containing identifiers to focus us.
     required: false
     type: dict
-  available_network_resources:
+  available_network_facts:
     description:
       - If set to true, the module will return a list of available network resources.
     type: bool
@@ -35,13 +35,13 @@ EXAMPLES = """
 # Gather facts about all network resources
 - name: Gather all Apstra facts
   apstra_facts:
-    gather_network_resources:
+    gather_network_facts:
       - all
 
 # Gather facts about specific network resources for a blueprint
 - name: Gather specific Apstra facts
   apstra_facts:
-    gather_network_resources:
+    gather_network_facts:
       - virtual_networks
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -49,15 +49,15 @@ EXAMPLES = """
 # Get the list of available network resources
 - name: List available Apstra network resources
   apstra_facts:
-    gather_network_resources:
+    gather_network_facts:
       - all
-    available_network_resources: true
+    available_network_facts: true
 """
 
 RETURN = """
-available_network_resources:
+available_network_facts:
   description: List of available network resources that can be gathered.
-  returned: when available_network_resources is true
+  returned: when available_network_facts is true
   type: list
   sample: ['blueprint.virtual_networks', 'blueprint.security_zones', 'blueprint.endpoint_policies', 'blueprint.endpoint_policies.application_points']
 facts:
@@ -85,8 +85,8 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
 def main():
     facts_module_args = dict(
         id=dict(type="dict", required=False, default={}),
-        available_network_resources=dict(type="bool", required=False, default=False),
-        gather_network_resources=dict(
+        available_network_facts=dict(type="bool", required=False, default=False),
+        gather_network_facts=dict(
             type="list", elements="str", required=False, default=["blueprints"]
         ),
     )
@@ -103,8 +103,8 @@ def main():
         base_client = client_factory.get_base_client()
 
         # If requested, add the available network resources to the result
-        if module.params["available_network_resources"]:
-            result["available_network_resources"] = client_factory.network_resources
+        if module.params["available_network_facts"]:
+            result["available_network_facts"] = client_factory.network_resources
 
         # Gather facts using the persistent connection
 
@@ -117,7 +117,7 @@ def main():
 
         # Process the list of requested network resources
         requested_network_resources = []
-        for resource_type in module.params["gather_network_resources"]:
+        for resource_type in module.params["gather_network_facts"]:
             if resource_type == "all":
                 requested_network_resources = client_factory.network_resources
                 break

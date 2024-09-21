@@ -11,7 +11,7 @@
 
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
-        resource:
+        body:
           label: "test_blueprint"
           design: "two_stage_l3clos"
         lock_state: "locked"
@@ -25,7 +25,7 @@
     - name: Create routing_policy
       junipernetworks.apstra.routing_policy:
         id: "{{ bp.id }}"
-        resource:
+        body:
           description: "Example routing policy"
           expect_default_ipv4_route: true
           expect_default_ipv6_route: true
@@ -48,7 +48,7 @@
     - name: Modify routing_policy
       junipernetworks.apstra.routing_policy:
         id: "{{ rp.id }}"
-        resource:
+        body:
           description: "Example routing policy edwin wuz here"
         auth_token: "{{ auth.token }}"
       register: rp_modify

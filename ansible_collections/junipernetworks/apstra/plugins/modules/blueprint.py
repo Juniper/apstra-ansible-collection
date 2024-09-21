@@ -27,7 +27,7 @@ options:
             - The ID of the blueprint.
         required: false
         type: dict
-    resource:
+    body:
         description:
             - A dictionary representing the blueprint to create.
         required: false
@@ -66,7 +66,7 @@ EXAMPLES = '''
 # Create a new blueprint
 - name: Create blueprint
   blueprint:
-    resource:
+    response:
       name: example_blueprint
       design: two_stage_l3clos
     state: present
@@ -95,25 +95,11 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-resource:
-    description: The blueprint object.
-    returned: on create
-    type: dict
-    sample: {
-        "id": "blueprint-123",
-        "name": "example_blueprint",
-        "design": "two_stage_l3clos"
-    }
 changed:
     description: Whether the blueprint was changed.
     returned: always
     type: bool
     sample: true
-lock_state:
-    description: State of the blueprint lock.
-    returned: always
-    type: str
-    sample: "locked"
 id:
     description: The ID of the created blueprint.
     returned: on create
@@ -126,12 +112,24 @@ msg:
     returned: always
     type: str
     sample: "blueprint created successfully"
+lock_state:
+    description: State of the blueprint lock.
+    returned: always
+    type: str
+    sample: "locked"
+response:
+    description: The response from the Apstra API.
+    returned: on create
+    type: dict
+    sample: {
+        "id": "blueprint-123",
+    }
 '''
 
 def main():
     blueprint_module_args = dict(
         id=dict(type="dict", required=False),
-        resource=dict(type="dict", required=False),
+        body=dict(type="dict", required=False),
         lock_state=dict(type="str", required=False, choices=["locked", "unlocked", "ignore"], default="locked"),
         lock_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_LOCK_TIMEOUT),
         commit_timeout=dict(type="int", required=False, default=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT),
@@ -153,7 +151,7 @@ def main():
         # Get the id if specified
         id = module.params.get("id", None)
         blueprint_id = id.get("blueprint", None) if id is not None else None
-        resource = module.params.get("resource", None)
+        body = module.params.get("body", None)
         state = module.params["state"]
         lock_state = module.params["lock_state"]
         lock_timeout = module.params["lock_timeout"]
@@ -162,15 +160,15 @@ def main():
         # Make the requested changes
         if state != "absent":
             if id is None:
-                if resource is None:
+                if body is None:
                     raise ValueError("Must specify 'resource' to create a blueprint")
                 # Create the resource
-                created_blueprint = client_factory.resources_op("blueprints", "create", {}, resource)
+                created_blueprint = client_factory.resources_op("blueprints", "create", {}, body)
                 blueprint_id = created_blueprint["id"]
                 id = {"blueprint": blueprint_id}
                 result["id"] = id
                 result["changed"] = True
-                result["resource"] = created_blueprint
+                result["response"] = created_blueprint
                 result["msg"] = "blueprint created successfully"
 
         # If we still don't have an id, there's a problem
