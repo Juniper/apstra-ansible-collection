@@ -8,9 +8,9 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
     apstra_client_module_args,
     ApstraClientFactory,
-    singular_leaf_resource_type
+    singular_leaf_object_type
 )
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.resource import (
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
     compare_and_update,
 )
 
@@ -36,7 +36,7 @@ options:
     type: dict
   body:
     description:
-      - Dictionary containing the security zone resource details.
+      - Dictionary containing the security zone object details.
     required: false
     type: dict
   state:
@@ -96,7 +96,7 @@ changed:
   type: bool
   returned: always
 response:
-  description: The security zone resource details.
+  description: The security zone object details.
   type: dict
   returned: when state is present and changes are made
 id:
@@ -115,7 +115,7 @@ msg:
 
 
 def main():
-    resource_module_args = dict(
+    object_module_args = dict(
         id=dict(type="dict", required=True),
         body=dict(type="dict", required=False),
         state=dict(
@@ -123,7 +123,7 @@ def main():
         ),
     )
     client_module_args = apstra_client_module_args()
-    module_args = client_module_args | resource_module_args
+    module_args = client_module_args | object_module_args
 
     # values expected to get set: changed, blueprint, msg
     result = dict(changed=False)
@@ -134,9 +134,9 @@ def main():
         # Instantiate the client factory
         client_factory = ApstraClientFactory.from_params(module.params)
 
-        resource_type = "blueprints.security_zones"
-        leaf_resource_type = singular_leaf_resource_type(
-            resource_type
+        object_type = "blueprints.security_zones"
+        leaf_object_type = singular_leaf_object_type(
+            object_type
         )
 
         # Validate params
@@ -145,57 +145,57 @@ def main():
         state = module.params["state"]
 
         # Validate the id
-        missing_id = client_factory.validate_id(resource_type, id)
+        missing_id = client_factory.validate_id(object_type, id)
         if len(missing_id) > 1 or (
             len(missing_id) == 1
             and state == "absent"
-            and missing_id[0] != leaf_resource_type
+            and missing_id[0] != leaf_object_type
         ):
             raise ValueError(f"Invalid id: {id} for desired state of {state}.")
-        resource_id = id.get(leaf_resource_type, None)
+        object_id = id.get(leaf_object_type, None)
 
         # Make the requested changes
         if state == "present":
-            if resource_id is None:
+            if object_id is None:
                 if body is None:
                     raise ValueError(
-                        f"Must specify 'resource' to create a {leaf_resource_type}"
+                        f"Must specify 'body' to create a {leaf_object_type}"
                     )
-                # Create the resource
-                created_resource = client_factory.resources_op(
-                    resource_type, "create", id, body
+                # Create the object
+                created_object = client_factory.object_request(
+                    object_type, "create", id, body
                 )
-                resource_id = created_resource["id"]
-                id[leaf_resource_type] = resource_id
+                object_id = created_object["id"]
+                id[leaf_object_type] = object_id
                 result["id"] = id
                 result["changed"] = True
-                result["response"] = created_resource
-                result["msg"] = f"{leaf_resource_type} created successfully"
+                result["response"] = created_object
+                result["msg"] = f"{leaf_object_type} created successfully"
             else:
-                # Update the resource
-                current_resource = client_factory.resources_op(resource_type, "get", id)
+                # Update the object
+                current_object = client_factory.object_request(object_type, "get", id)
                 changes = {}
-                if compare_and_update(current_resource, body, changes):
-                    updated_resource = client_factory.resources_op(
-                        resource_type, "patch", id, changes
+                if compare_and_update(current_object, body, changes):
+                    updated_object = client_factory.object_request(
+                        object_type, "patch", id, changes
                     )
                     result["changed"] = True
-                    result["response"] = updated_resource
+                    result["response"] = updated_object
                     result["msg"] = (
-                        f"{leaf_resource_type} updated successfully"
+                        f"{leaf_object_type} updated successfully"
                     )
 
         # If we still don't have an id, there's a problem
         if id is None:
             raise ValueError(
-                f"Cannot manage a {leaf_resource_type} without a resource id"
+                f"Cannot manage a {leaf_object_type} without a object id"
             )
 
         if state == "absent":
             # Delete the blueprint
-            client_factory.resources_op(resource_type, "delete", id)
+            client_factory.object_request(object_type, "delete", id)
             result["changed"] = True
-            result["msg"] = f"{leaf_resource_type} deleted successfully"
+            result["msg"] = f"{leaf_object_type} deleted successfully"
 
     except Exception as e:
         module.fail_json(msg=str(e), **result)

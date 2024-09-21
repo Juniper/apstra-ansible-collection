@@ -11,7 +11,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
     DEFAULT_BLUEPRINT_COMMIT_TIMEOUT
 )
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.resource import compare_and_update
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import compare_and_update
 
 DOCUMENTATION = '''
 ---
@@ -161,9 +161,9 @@ def main():
         if state != "absent":
             if id is None:
                 if body is None:
-                    raise ValueError("Must specify 'resource' to create a blueprint")
-                # Create the resource
-                created_blueprint = client_factory.resources_op("blueprints", "create", {}, body)
+                    raise ValueError("Must specify 'body' to create a blueprint")
+                # Create the object
+                created_blueprint = client_factory.object_request("blueprints", "create", {}, body)
                 blueprint_id = created_blueprint["id"]
                 id = {"blueprint": blueprint_id}
                 result["id"] = id
@@ -173,18 +173,18 @@ def main():
 
         # If we still don't have an id, there's a problem
         if id is None:
-            raise ValueError("Cannot manage a blueprint without a resource id")
+            raise ValueError("Cannot manage a blueprint without a object id")
             
-        # Lock the resource if requested
+        # Lock the object if requested
         if lock_state == "locked" and state != "absent":
             module.log("Locking blueprint")
             client_factory.lock_blueprint(id=blueprint_id, timeout=lock_timeout)
             
         if state == "absent":
             if id is None:
-                raise ValueError("Cannot delete a blueprint without a resource id")
+                raise ValueError("Cannot delete a blueprint without a object id")
             # Delete the blueprint
-            client_factory.resources_op("blueprints", "delete", id)
+            client_factory.object_request("blueprints", "delete", id)
             result["changed"] = True
             result["msg"] = "blueprint deleted successfully"
         

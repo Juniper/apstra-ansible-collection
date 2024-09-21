@@ -51,48 +51,48 @@ def apstra_client_module_args():
     )
 
 
-def _add_resources_to_db(resources_db, full_resource_type, resources):
+def _add_objects_to_db(objects_db, full_object_type, objects):
     """
-    Helper method to add resources to the resource_db.
+    Helper method to add objects to the object_db.
 
     Args:
-        resource_db (dict): The database to store resources.
-        full_resource_type (str): The type of the resource.
-        resources (dict or list): The resources to add.
+        object_db (dict): The database to store objects.
+        full_object_type (str): The type of the object.
+        objects (dict or list): The objects to add.
     """
-    if full_resource_type not in resources_db:
-        resources_db[full_resource_type] = {}
-    if isinstance(resources, Graph):
-        resources_db[full_resource_type][resources.id] = resources.compact_json()
-    elif isinstance(resources, dict):
-        if resources.get("id") is not None:
-            # Individual resource
-            resources_db[full_resource_type][resources["id"]] = resources
-        elif resources.get("items", None) is not None:
-            # Dictionary of list of resources
-            for resource in resources["items"]:
-                resource_id = resource.get("id")
-                if resource_id is not None:
-                    resources_db[full_resource_type][resource_id] = resource
+    if full_object_type not in objects_db:
+        objects_db[full_object_type] = {}
+    if isinstance(objects, Graph):
+        objects_db[full_object_type][objects.id] = objects.compact_json()
+    elif isinstance(objects, dict):
+        if objects.get("id") is not None:
+            # Individual object
+            objects_db[full_object_type][objects["id"]] = objects
+        elif objects.get("items", None) is not None:
+            # Dictionary of list of objects
+            for object in objects["items"]:
+                object_id = object.get("id")
+                if object_id is not None:
+                    objects_db[full_object_type][object_id] = object
         else:
-            for resource in resources.values():
-                if isinstance(resource, dict):
-                    resource_id = resource.get("id")
-                    if resource.get("id") is not None:
+            for object in objects.values():
+                if isinstance(object, dict):
+                    object_id = object.get("id")
+                    if object.get("id") is not None:
                         # Dictionary indexed by id
-                        resources_db[full_resource_type][resource_id] = resources
+                        objects_db[full_object_type][object_id] = objects
                     else:
-                        # Some leaf resources don't have an id, no need to add to db
+                        # Some leaf objects don't have an id, no need to add to db
                         break
     else:
-        iterable = resources if isinstance(resources, list) else [resources]
-        for resource in iterable:
-            if resource.get("id") is not None:
-                resources_db[full_resource_type][resource["id"]] = resource
+        iterable = objects if isinstance(objects, list) else [objects]
+        for object in iterable:
+            if object.get("id") is not None:
+                objects_db[full_object_type][object["id"]] = object
             
 def _add_parents_to_db(parents_db, parent, children):
     """
-    Helper method to add resources to the resource_db.
+    Helper method to add objects to the object_db.
 
     Args:
         parents_db (dict): The database of parents.
@@ -112,7 +112,7 @@ def _add_parents_to_db(parents_db, parent, children):
                 iterable = items
             else:
                 # Something weird.
-                # Likely a leaf resource
+                # Likely a leaf object
                 return
     elif isinstance(children, list):
         iterable = children
@@ -122,7 +122,7 @@ def _add_parents_to_db(parents_db, parent, children):
     for child in iterable:
         child_id = child.get("id", None)
         if child_id is None:
-            # some leaf resources don't have an id
+            # some leaf objects don't have an id
             break
         
         parent_val = parents_db.get(child_id)
@@ -131,20 +131,20 @@ def _add_parents_to_db(parents_db, parent, children):
         else:
             raise Exception(f"Parent {parent_val['id']} already set for child {child['id']}")
 
-# Gets the parent ids from parent_db for a resource
+# Gets the parent ids from parent_db for a object
 # identified by (plural) type and id. Ids of all parents
 # are returned in the id dictionary.
 # parents_db is a dictionary of child_id to parent_id
-# resource_attrs is a list of resource types, from the 
+# object_attrs is a list of object types, from the 
 # root type to the last type in the id.
-def _get_parent_id(parents_db, resource_attrs, id):
-    # Walk backwards through the resource types
-    for i in range (len(resource_attrs) - 1, -1, -1):
-        parent_attr = resource_attrs[i]
+def _get_parent_id(parents_db, object_attrs, id):
+    # Walk backwards through the object types
+    for i in range (len(object_attrs) - 1, -1, -1):
+        parent_attr = object_attrs[i]
         if parent_attr in id:
             # Already have the parent id
             continue
-        child_attr = resource_attrs[i + 1]
+        child_attr = object_attrs[i + 1]
         child_id = id[child_attr]
         parent = parents_db.get(child_id)
         if parent is None:
@@ -154,51 +154,51 @@ def _get_parent_id(parents_db, resource_attrs, id):
             raise Exception(f"Parent {parent} has no id")
         id[parent_attr] = parent_id
 
-# Map from plural to singular resource types
+# Map from plural to singular object types
 _plural_to_singular = [("ies","y"), ("s","")]
 
-def singular_leaf_resource_type(resource_type):
-    # Get the singular form of the leaf resource type
-    # This is used for the id in the resource
-    attrs = resource_type.split(".")
-    return singular_resource_type(attrs[-1])
+def singular_leaf_object_type(object_type):
+    # Get the singular form of the leaf object type
+    # This is used for the id in the object
+    attrs = object_type.split(".")
+    return singular_object_type(attrs[-1])
 
 def singular_to_plural_id(id):
     # Get the plural form of the id
-    # This is used for the id in the resource
+    # This is used for the id in the object
     new_id = {}
     for key, value in id.items():
-        new_id[plural_resource_type(key)] = value
+        new_id[plural_object_type(key)] = value
     return new_id
 
 def plural_to_singular_id(id):
     # Get the singular form of the id
-    # This is used for the id in the resource
+    # This is used for the id in the object
     new_id = {}
     for key, value in id.items():
-        new_id[singular_resource_type(key)] = value
+        new_id[singular_object_type(key)] = value
     return new_id
 
-def singular_resource_type(resource_type):
-    # Get the singular form of the resource type
-    # This is used for the id in the resource
+def singular_object_type(object_type):
+    # Get the singular form of the object type
+    # This is used for the id in the object
     for plural, singular in _plural_to_singular:
-        if resource_type.endswith(plural):
-            plural_type = resource_type[: -len(plural)] + singular
+        if object_type.endswith(plural):
+            plural_type = object_type[: -len(plural)] + singular
             return plural_type
-    return resource_type
+    return object_type
 
-def plural_resource_type(resource_type):
-    # Get the plural form of the resource type
-    # This is used for the id in the resource
+def plural_object_type(object_type):
+    # Get the plural form of the object type
+    # This is used for the id in the object
     for plural, singular in _plural_to_singular:
-        if singular == "" and resource_type:
-            singular_type = resource_type + plural
+        if singular == "" and object_type:
+            singular_type = object_type + plural
             return singular_type
-        if resource_type.endswith(singular):
-            singular_type = resource_type[: -len(singular)] + plural
+        if object_type.endswith(singular):
+            singular_type = object_type[: -len(singular)] + plural
             return singular_type
-    return resource_type
+    return object_type
 
 # Get blueprint lock tag name
 def _blueprint_lock_tag_name(blueprint_id):
@@ -247,13 +247,13 @@ class ApstraClientFactory:
         }
 
         # Populate the list (and set) of supported objects
-        self.network_resources = []
-        self.network_resources_set = {}
-        for resource_client, resource_types in self._client_to_types.items():
-            for resource_type in resource_types:
-                self.network_resources.append(resource_type)
-                # Map the resource type to the client
-                self.network_resources_set[resource_type] = resource_client
+        self.network_objects = []
+        self.network_objects_set = {}
+        for object_client, object_types in self._client_to_types.items():
+            for object_type in object_types:
+                self.network_objects.append(object_type)
+                # Map the object type to the client
+                self.network_objects_set[object_type] = object_client
 
     @classmethod
     def from_params(cls, params):
@@ -293,10 +293,10 @@ class ApstraClientFactory:
         self._login(client_instance)
         return client_instance
 
-    def get_client(self, resource_type):
-        client_attr = self.network_resources_set.get(resource_type)
+    def get_client(self, object_type):
+        client_attr = self.network_objects_set.get(object_type)
         if client_attr is None:
-            raise Exception("Unsupported resource type: {}".format(resource_type))
+            raise Exception("Unsupported object type: {}".format(object_type))
         client_type = self._client_types.get(client_attr)
         if client_type is None:
             raise Exception("Unsupported client type: {}".format(client_attr))
@@ -317,36 +317,36 @@ class ApstraClientFactory:
     def get_tags_client(self):
         return self._get_client("tags_client", tagsClient)
 
-    def validate_id(self, resource_type, id):
-        # Traverse nested resource_type
-        attrs = resource_type.split(".")
+    def validate_id(self, object_type, id):
+        # Traverse nested object_type
+        attrs = object_type.split(".")
         missing = []
         for attr in attrs:
-            singular_attr = singular_resource_type(attr)
+            singular_attr = singular_object_type(attr)
             if singular_attr not in id:
                 missing.append(singular_attr)
         return missing
 
-    # Call resource op. If op is 'get', will get one resource, or all resources of that type.
-    # The id is a dictionary including any required keys for the resource type.
+    # Call object op. If op is 'get', will get one object, or all objects of that type.
+    # The id is a dictionary including any required keys for the object type.
     # For example, for blueprints.virtual_networks, the id would be {'blueprint': 'my_blueprint', 'virtual_network': 'my_vn'}
-    # If the leaf resource (e.g.- virtual_network) is not specified, all resources are returned (e.g. -- all virtual networks for a blueprint)
-    def resources_op(self, resource_type, op="get", id={}, data=None):
+    # If the leaf object (e.g.- virtual_network) is not specified, all objects are returned (e.g. -- all virtual networks for a blueprint)
+    def object_request(self, object_type, op="get", id={}, data=None):
         plural_id = singular_to_plural_id(id)
-        return self._resources_op(resource_type, op, plural_id, data)
+        return self._object_request(object_type, op, plural_id, data)
 
     # Internal method uses the plural types to simplify logic
-    def _resources_op(self, resource_type, op="get", id={}, data=None):
-        client = self.get_client(resource_type)
+    def _object_request(self, object_type, op="get", id={}, data=None):
+        client = self.get_client(object_type)
 
-        # Traverse nested resource_type, using attrs to walk to object hierarchy
-        attrs = resource_type.split(".")
+        # Traverse nested object_type, using attrs to walk to object hierarchy
+        attrs = object_type.split(".")
         obj = client
         for index, attr in enumerate(attrs):
-            resource = getattr(obj, attr, None)
-            if resource is None:
+            object = getattr(obj, attr, None)
+            if object is None:
                 raise Exception(
-                    f"Resource type '{resource_type}' not defined for client {type(client).__name__}"
+                    f"Object type '{object_type}' not defined for client {type(client).__name__}"
                 )
 
             # Check if this is the leaf type
@@ -358,13 +358,13 @@ class ApstraClientFactory:
                 # Get the id value
                 id_value = id[attr]
                 # Get the object
-                obj = resource[id_value]
+                obj = object[id_value]
             elif leaf_type:
-                obj = resource
+                obj = object
             else:
-                singular_attr = singular_resource_type(attr)
+                singular_attr = singular_object_type(attr)
                 raise Exception(
-                    f"Missing required id attribute '{singular_attr}' for resource type '{resource_type}'"
+                    f"Missing required id attribute '{singular_attr}' for object type '{object_type}'"
                 )
 
             # Nothing else to do if this is not the leaf type
@@ -381,7 +381,7 @@ class ApstraClientFactory:
                         op_attr = getattr(obj, "get")
                     except AttributeError:
                         raise Exception(
-                            f"Operation 'list' and 'get' not defined for resource type '{resource_type}'"
+                            f"Operation 'list' and 'get' not defined for object type '{object_type}'"
                         )
             else:
                 try:
@@ -389,7 +389,7 @@ class ApstraClientFactory:
                     op_attr = getattr(obj, op)
                 except AttributeError:
                     raise Exception(
-                        f"Invalid operation '{op}' for resource type '{resource_type}', id '{id}'"
+                        f"Invalid operation '{op}' for object type '{object_type}', id '{id}'"
                     )
 
             # Call the op on the object
@@ -403,102 +403,102 @@ class ApstraClientFactory:
                 if te.args[0] == "'NoneType' object is not subscriptable":
                     return None
 
-    # List all resources in the set of types and return them as a dictionary
-    # Method used by Ansible module uses singular resource types, internally we use plural.
-    def list_all_resources(self, resource_types, resource_id={}):
-        plural_resource_id = singular_to_plural_id(resource_id)
-        return self._list_all_resources(resource_types, plural_resource_id)
+    # List all objects in the set of types and return them as a dictionary
+    # Method used by Ansible module uses singular object types, internally we use plural.
+    def list_all_objects(self, object_types, object_id={}):
+        plural_object_id = singular_to_plural_id(object_id)
+        return self._list_all_objects(object_types, plural_object_id)
 
-    # List all resources in the set of types and return them as a dictionary
-    # resource_id types should be plural.
-    def _list_all_resources(self, resource_types, resource_id={}):
-        # sort the resource types in alphabetical order (also topological order)
-        resource_types.sort()
+    # List all objects in the set of types and return them as a dictionary
+    # object_id types should be plural.
+    def _list_all_objects(self, object_types, object_id={}):
+        # sort the object types in alphabetical order (also topological order)
+        object_types.sort()
 
-        # Maintain a database of (root) resources. resource_db[root_type][id] can retrieve 
-        # any root resource by ID. This is used to traverse the resource hierarchy.
-        resources_db = {}
+        # Maintain a database of (root) objects. object_db[root_type][id] can retrieve 
+        # any root object by ID. This is used to traverse the object hierarchy.
+        objects_db = {}
 
-        # Maintain a dictionary of GUIDs to parent resource objects.
-        # parents_db[child_id] can access the parent resource of any child_id.
+        # Maintain a dictionary of GUIDs to parent object objects.
+        # parents_db[child_id] can access the parent object of any child_id.
         parents_db = {}
 
-        # Map of all the root resources that are encountered.
+        # Map of all the root objects that are encountered.
         root_types = {}
 
-        # For each resource_type, get all the resources.
-        # Use the id like a "cursor" to get the resources.
+        # For each object_type, get all the objects.
+        # Use the id like a "cursor" to get the objects.
 
-        for resource_type in resource_types:
-            resource_attrs = resource_type.split(".")
+        for object_type in object_types:
+            object_attrs = object_type.split(".")
 
-            # Get the objects from the resource_db for this type
-            root_type = resource_attrs[0]
+            # Get the objects from the object_db for this type
+            root_type = object_attrs[0]
             root_types[root_type] = {}
-            r_map = resources_db.get(root_type, {})
+            r_map = objects_db.get(root_type, {})
             if not r_map:
-                resources_db[root_type] = r_map
-                root_resources = self._resources_op(
+                objects_db[root_type] = r_map
+                root_objects = self._object_request(
                     root_type, "list", {}
                 )
-                # Only add the resource we care about
+                # Only add the object we care about
                 # If we get by ID, we'll get a graph object.
                 # Not what we want.
-                if root_type in resource_id:
-                    for root_resource in root_resources:
-                        if root_resource["id"] == resource_id[root_type]:
-                            _add_resources_to_db(
-                                resources_db, root_type, root_resource
+                if root_type in object_id:
+                    for root_object in root_objects:
+                        if root_object["id"] == object_id[root_type]:
+                            _add_objects_to_db(
+                                objects_db, root_type, root_object
                             )
                             break
                 else:
-                    _add_resources_to_db(
-                        resources_db, root_type, root_resources
+                    _add_objects_to_db(
+                        objects_db, root_type, root_objects
                     )
 
-            # Iterate through parent resources to get these resource
-            for i in range(0, len(resource_attrs) - 1):
-                parent_attr = resource_attrs[i]
-                child_attr = resource_attrs[i + 1]
+            # Iterate through parent objects to get these object
+            for i in range(0, len(object_attrs) - 1):
+                parent_attr = object_attrs[i]
+                child_attr = object_attrs[i + 1]
 
-                # See if we have limited the id to a specific parent resource
-                parent_full_resource_type = ".".join(resource_attrs[: i + 1])
-                child_full_resource_type = ".".join(resource_attrs[: i + 2])
+                # See if we have limited the id to a specific parent object
+                parent_full_object_type = ".".join(object_attrs[: i + 1])
+                child_full_object_type = ".".join(object_attrs[: i + 2])
 
-                # accumalate id's for the resource we're getting
-                id = resource_id.copy() if resource_id else {}
+                # accumalate id's for the object we're getting
+                id = object_id.copy() if object_id else {}
                 
-                parent_db = resources_db.get(parent_full_resource_type, {})
+                parent_db = objects_db.get(parent_full_object_type, {})
                 if not parent_db:
-                    resources_db[parent_full_resource_type] = parent_db
-                    parent_resources = self._resources_op(
-                        parent_full_resource_type, "list", id
+                    objects_db[parent_full_object_type] = parent_db
+                    parent_objects = self._object_request(
+                        parent_full_object_type, "list", id
                     )
-                    _add_resources_to_db(
-                        resources_db, parent_full_resource_type, parent_resources
+                    _add_objects_to_db(
+                        objects_db, parent_full_object_type, parent_objects
                     )
-                    parent_db = resources_db[parent_full_resource_type]
+                    parent_db = objects_db[parent_full_object_type]
 
-                # Iterate through the ids of the parent resource to make sure we got it.
+                # Iterate through the ids of the parent object to make sure we got it.
                 for key in parent_db.keys():
                     id[parent_attr] = key
-                    _get_parent_id(parents_db, resource_attrs[:i+1], id)
-                    parent_value = resources_db[parent_full_resource_type][key]
+                    _get_parent_id(parents_db, object_attrs[:i+1], id)
+                    parent_value = objects_db[parent_full_object_type][key]
                     if parent_value.get(child_attr) is None:
-                        children = self._resources_op(
-                            child_full_resource_type, "list", id
+                        children = self._object_request(
+                            child_full_object_type, "list", id
                         )
                         parent_value[child_attr] = children
-                        _add_resources_to_db(
-                            resources_db,
-                            child_full_resource_type,
+                        _add_objects_to_db(
+                            objects_db,
+                            child_full_object_type,
                             parent_value[child_attr],
                         )
                         _add_parents_to_db(parents_db, parent_value, children)
 
-        # Return all the resources by starting at the root type
+        # Return all the objects by starting at the root type
         for root_type in root_types.keys():
-            root_types[root_type] = resources_db.get(root_type, {})
+            root_types[root_type] = objects_db.get(root_type, {})
         return root_types
 
     def lock_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT):

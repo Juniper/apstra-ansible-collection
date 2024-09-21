@@ -1,5 +1,4 @@
 # Ansible configuration
-ansible.cfg
 inventory.yml
 junipernetworks-apstra-*.gz
 

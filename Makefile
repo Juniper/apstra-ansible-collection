@@ -17,7 +17,7 @@ OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
 PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
 else
-# Latest 
+# Unix 
 export LDFLAGS := -Wl,-rpath,$(shell brew --prefix openssl)/lib
 export CPPFLAGS := -I$(shell brew --prefix openssl)/include
 export CONFIGURE_OPTS := --with-openssl=$(shell brew --prefix openssl)
@@ -59,7 +59,11 @@ install: build
 	test-routing_policy \
 	test-security_zone
 
-ANSIBLE_FLAGS ?= -i localhost -v
+# Ignore warnings about localhost from ansible-playbook
+export ANSIBLE_LOCALHOST_WARNING=False
+export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
+
+ANSIBLE_FLAGS ?= -v
 
 test-apstra_facts: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml

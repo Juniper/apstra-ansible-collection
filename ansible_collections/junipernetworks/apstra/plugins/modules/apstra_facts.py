@@ -11,8 +11,8 @@ author: "Edwin Jacques (@edwinpjacques)"
 options:
   gather_network_facts:
     description:
-      - List of network resources to gather facts about.
-      - Use 'all' to gather facts about all supported network resources.
+      - List of network objects to gather facts about.
+      - Use 'all' to gather facts about all supported network objects.
     type: list
     elements: str
     required: true
@@ -23,7 +23,7 @@ options:
     type: dict
   available_network_facts:
     description:
-      - If set to true, the module will return a list of available network resources.
+      - If set to true, the module will return a list of available network objects.
     type: bool
     default: false
 requirements:
@@ -32,13 +32,13 @@ requirements:
 """
 
 EXAMPLES = """
-# Gather facts about all network resources
+# Gather facts about all network objects
 - name: Gather all Apstra facts
   apstra_facts:
     gather_network_facts:
       - all
 
-# Gather facts about specific network resources for a blueprint
+# Gather facts about specific network objects for a blueprint
 - name: Gather specific Apstra facts
   apstra_facts:
     gather_network_facts:
@@ -46,8 +46,8 @@ EXAMPLES = """
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
 
-# Get the list of available network resources
-- name: List available Apstra network resources
+# Get the list of available network objects
+- name: List available Apstra network objects
   apstra_facts:
     gather_network_facts:
       - all
@@ -56,7 +56,7 @@ EXAMPLES = """
 
 RETURN = """
 available_network_facts:
-  description: List of available network resources that can be gathered.
+  description: List of available network objects that can be gathered.
   returned: when available_network_facts is true
   type: list
   sample: ['blueprint.virtual_networks', 'blueprint.security_zones', 'blueprint.endpoint_policies', 'blueprint.endpoint_policies.application_points']
@@ -102,38 +102,38 @@ def main():
         client_factory = ApstraClientFactory.from_params(module.params)
         base_client = client_factory.get_base_client()
 
-        # If requested, add the available network resources to the result
+        # If requested, add the available network objects to the result
         if module.params["available_network_facts"]:
-            result["available_network_facts"] = client_factory.network_resources
+            result["available_network_facts"] = client_factory.network_objects
 
         # Gather facts using the persistent connection
 
         # Get /api/version
         version = base_client.version.get()
 
-        # client_factory.network_resources is a list of supported network resources
-        # The resources are nested, like 'blueprints', 'blueprints.config_templates', etc.
+        # client_factory.network_objects is a list of supported network objects
+        # The objects are nested, like 'blueprints', 'blueprints.config_templates', etc.
         # Need to get the list in topological sort order.
 
-        # Process the list of requested network resources
-        requested_network_resources = []
-        for resource_type in module.params["gather_network_facts"]:
-            if resource_type == "all":
-                requested_network_resources = client_factory.network_resources
+        # Process the list of requested network objects
+        requested_network_objects = []
+        for object_type in module.params["gather_network_facts"]:
+            if object_type == "all":
+                requested_network_objects = client_factory.network_objects
                 break
-            elif resource_type in client_factory.network_resources_set:
-                # Add resource type to set
-                requested_network_resources.append(resource_type)
+            elif object_type in client_factory.network_objects_set:
+                # Add object type to set
+                requested_network_objects.append(object_type)
             else:
-                module.fail_json(msg=f"Unsupported network resource '{resource_type}'")
+                module.fail_json(msg=f"Unsupported network object '{object_type}'")
 
-        # Iterate through the list of requested network resources and get everything.
-        resource_map = client_factory.list_all_resources(requested_network_resources, module.params.get("id", {}))
+        # Iterate through the list of requested network objects and get everything.
+        object_map = client_factory.list_all_objects(requested_network_objects, module.params.get("id", {}))
 
         # Structure used for gathered facts
         facts = {
             "version": version,
-            "resources": resource_map,
+            "objects": object_map,
         }
 
         # Set the gathered facts in the result
