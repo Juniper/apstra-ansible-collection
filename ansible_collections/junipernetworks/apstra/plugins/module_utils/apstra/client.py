@@ -423,6 +423,9 @@ class ApstraClientFactory:
         # parents_db[child_id] can access the parent resource of any child_id.
         parents_db = {}
 
+        # Map of all the root resources that are encountered.
+        root_types = {}
+
         # For each resource_type, get all the resources.
         # Use the id like a "cursor" to get the resources.
 
@@ -431,6 +434,7 @@ class ApstraClientFactory:
 
             # Get the objects from the resource_db for this type
             root_type = resource_attrs[0]
+            root_types[root_type] = {}
             r_map = resources_db.get(root_type, {})
             if not r_map:
                 resources_db[root_type] = r_map
@@ -492,7 +496,10 @@ class ApstraClientFactory:
                         )
                         _add_parents_to_db(parents_db, parent_value, children)
 
-        return resources_db.get("blueprints", {})
+        # Return all the resources by starting at the root type
+        for root_type in root_types.keys():
+            root_types[root_type] = resources_db.get(root_type, {})
+        return root_types
 
     def lock_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
         tags_client = self.get_tags_client()
