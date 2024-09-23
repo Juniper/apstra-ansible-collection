@@ -28,11 +28,35 @@ description:
   - This module allows you to update the endpoint policy application points in Apstra.
 
 options:
-  id:
+  api_url:
     description:
-      - Dictionary containing the blueprint and endpoint policy IDs.
-    required: true
-    type: dict
+      - The url used to access the Apstra api.
+    type: str
+    required: false
+    default: APSTRA_API_URL environment variable
+  username:
+    description:
+      - The username for authentication.
+    type: str
+    required: false
+    default: APSTRA_USERNAME environment variable
+  password:
+    description:
+      - The password for authentication.
+    type: str
+    required: false
+    default: APSTRA_PASSWORD environment variable
+  auth_token:
+    description:
+      - The authentication token to use if already authenticated.
+    type: str
+    required: false
+    default: APSTRA_AUTH_TOKEN environment variable
+  logout:
+    description:
+      - If set to true, the module will log out the current session.
+    type: bool
+    default: false
   body:
     description:
       - Dictionary containing the endpoint policy application point object details.

@@ -1,70 +1,65 @@
 DOCUMENTATION = '''
 ---
 module: apstra_authenticate
-short_description: Authenticate with Apstra AOS and retrieve an auth token
+short_description: Authenticate with Apstra and retrieve an auth token
 description:
-  - This module authenticates with Apstra AOS and retrieves an authentication token.
+  - This module authenticates with Apstra and retrieves an authentication token.
   - It can also handle logout operations.
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
-  aos_ip:
+  api_url:
     description:
-      - The IP address of the Apstra AOS server.
+      - The url used to access the Apstra api.
     type: str
-    required: true
-  aos_port:
-    description:
-      - The port number of the Apstra AOS server.
-    type: int
-    required: true
+    required: false
+    default: APSTRA_API_URL environment variable
   username:
     description:
       - The username for authentication.
     type: str
-    required: true
+    required: false
+    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
-    required: true
+    required: false
+    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
+    default: APSTRA_AUTH_TOKEN environment variable
   logout:
     description:
       - If set to true, the module will log out the current session.
     type: bool
     default: false
-requirements:
-  - "python >= 3.10"
-  - "apstra-client >= 1.0.0"
 '''
 
 EXAMPLES = '''
-# Authenticate with Apstra AOS and retrieve an auth token
+# Authenticate with Apstra AOS and retrieve an auth token.
+# Token can be read via {{ auth.token }}.
 - name: Authenticate with Apstra AOS
   apstra_authenticate:
-    aos_ip: "192.168.1.1"
-    aos_port: 443
+    api_url: "https://10.87.2.40/api"
     username: "admin"
     password: "password"
+  register: auth
 
 # Use an existing auth token
 - name: Use existing auth token
   apstra_authenticate:
-    aos_ip: "192.168.1.1"
-    aos_port: 443
-    auth_token: "existing_token"
+    api_url: "https://10.87.2.40/api"
+    auth_token: "{{ auth.token }}"
 
 # Log out from Apstra AOS
 - name: Log out from Apstra AOS
   apstra_authenticate:
-    aos_ip: "192.168.1.1"
-    aos_port: 443
-    auth_token: "existing_token"
+    api_url: "https://10.87.2.40/api"
+    auth_token: "{{ auth.token }}"
     logout: true
 '''
 

@@ -9,6 +9,30 @@ description:
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
+  api_url:
+    description:
+      - The url used to access the Apstra api.
+    type: str
+    required: false
+    default: APSTRA_API_URL environment variable
+  username:
+    description:
+      - The username for authentication.
+    type: str
+    required: false
+    default: APSTRA_USERNAME environment variable
+  password:
+    description:
+      - The password for authentication.
+    type: str
+    required: false
+    default: APSTRA_PASSWORD environment variable
+  auth_token:
+    description:
+      - The authentication token to use if already authenticated.
+    type: str
+    required: false
+    default: APSTRA_AUTH_TOKEN environment variable
   gather_network_facts:
     description:
       - List of network objects to gather facts about.

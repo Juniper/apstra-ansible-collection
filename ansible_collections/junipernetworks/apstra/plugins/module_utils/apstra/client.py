@@ -47,7 +47,7 @@ def apstra_client_module_args():
             no_log=True,
             default=os.getenv("APSTRA_PASSWORD"),
         ),
-        logout=dict(type="bool", required=False),
+        logout=dict(type="bool", required=False, default=False),
     )
 
 

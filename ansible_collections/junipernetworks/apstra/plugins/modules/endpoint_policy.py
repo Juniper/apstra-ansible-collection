@@ -29,6 +29,30 @@ description:
   - This module allows you to create, update, and delete endpoint policies in Apstra.
 
 options:
+  api_url:
+    description:
+      - The url used to access the Apstra api.
+    type: str
+    required: false
+    default: APSTRA_API_URL environment variable
+  username:
+    description:
+      - The username for authentication.
+    type: str
+    required: false
+    default: APSTRA_USERNAME environment variable
+  password:
+    description:
+      - The password for authentication.
+    type: str
+    required: false
+    default: APSTRA_PASSWORD environment variable
+  auth_token:
+    description:
+      - The authentication token to use if already authenticated.
+    type: str
+    required: false
+    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - Dictionary containing the blueprint and endpoint policy IDs.

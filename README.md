@@ -5,15 +5,14 @@
 This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra AOS platform.
 
 - [Juniper Apstra Ansible Collection](#juniper-apstra-ansible-collection)
-  - [Installation](#installation)
-  - [Usage](#usage)
+  - [Installation and Usage](#installation-and-usage)
   - [Contributing](#contributing)
   - [Development Environment](#development-environment)
     - [Setup](#setup)
       - [Mac OS X](#mac-os-x)
       - [Linux-based Systems](#linux-based-systems)
       - [All Systems](#all-systems)
-    - [Usage](#usage-1)
+    - [Usage](#usage)
     - [Test Configuration](#test-configuration)
     - [Building/Testing](#buildingtesting)
     - [Debugging](#debugging)
@@ -21,49 +20,9 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
     - [Locking the Blueprint](#locking-the-blueprint)
   - [License](#license)
 
-## Installation
+## Installation and Usage
 
-To install the Juniper Apstra Ansible Collection, you can use the following command:
-
-```shell
-ansible-galaxy collection install junipernetworks.apstra
-```
-
-## Usage
-
-Once the collection is installed, you can start using the provided modules and roles in your Ansible playbooks. Here's an example of how to use the `apstra_facts` module to get network configuration state information from Apstra:
-
-```yaml
----
-- name: Gather Apstra facts
-  hosts: all
-  gather_facts: no
-  tasks:
-    - name: Run apstra_facts module
-      junipernetworks.apstra.apstra_facts:
-      register: apstra_facts_result
-
-    - name: Display gathered facts
-      debug:
-        var: apstra_facts_result.ansible_facts
-```
-
-Here's an example of how you specify the Apstra inventory:
-```yaml
-all:
-  hosts:
-    cloudlabs-apstra:
-      ansible_connection: junipernetworks.apstra.apstra_connection
-```
-
-You need to specify environment variables to connect to Apstra. For example:
-```bash
-APSTRA_API_URL="https://apstra-34d9c451-d688-408b-826d-581b963c086e.aws.apstra.com/api"
-APSTRA_USERNAME="admin"
-APSTRA_PASSWORD="TenaciousFlyingfish1#"
-```
-
-For more information on the available modules and their usage, please refer to the [documentation](https://docs.juniper.net/apstra/ansible-collection).
+See [README](ansible_collections/junipernetworks/apstra/README.md).
 
 ## Contributing
 
