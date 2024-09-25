@@ -3,17 +3,22 @@
   hosts: localhost
   gather_facts: false
   connection: local
-  vars_files:
-    - variables.yml
   tasks:
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
         logout: false
       register: auth
 
+    - name: Get blueprint
+      junipernetworks.apstra.blueprint:
+        body:
+          label: "eda-bp"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
     - name: Create security_zone
       junipernetworks.apstra.security_zone:
-        id: "{{ blueprint_id }}"
+        id: "{{ bp.id }}"
         body:
           vrf_name: "eda-demo-sample"
           vni_id: 10000
@@ -25,7 +30,7 @@
 
     - name: Create virtual_network
       junipernetworks.apstra.virtual_network:
-        id: "{{ blueprint_id }}"
+        id: "{{ bp.id }}"
         body:
           label: "eda-demo-sample"
           description: "Create EDA VN sample"
@@ -36,7 +41,7 @@
 
     - name: Commit the blueprint
       junipernetworks.apstra.blueprint:
-        id: "{{ blueprint_id }}"
+        id: "{{ bp.id }}"
         lock_state: "ignore"
         state: committed
         auth_token: "{{ auth.token }}"
