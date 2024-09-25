@@ -12,7 +12,7 @@ This collection has been validated on Juniper Astra version 5.0.
 
 As a Red Hat Ansible [Certified Content](https://catalog.redhat.com/software/search?target_platforms=Red%20Hat%20Ansible%20Automation%20Platform), this collection is entitled to [support](https://access.redhat.com/support/) through [Ansible Automation Platform](https://www.redhat.com/en/technologies/management/ansible) (AAP).
 
-If a support case cannot be opened with Red Hat and the collection has been obtained either from [Galaxy](https://galaxy.ansible.com/ui/) or [GitHub](https://github.com/ansible-collections/junipernetworks.junos), there is community support available at no charge.
+If a support case cannot be opened with Red Hat and the collection has been obtained either from [Galaxy](https://galaxy.ansible.com/ui/) or [GitHub](https://github.com/Juniper/apstra-ansible-collection/issues), there is community support available at no charge.
 
 You can join us on [#network:ansible.com](https://matrix.to/#/#network:ansible.com) room or the [Ansible Forum Network Working Group](https://forum.ansible.com/g/network-wg).
 
@@ -40,20 +40,26 @@ This collection has been tested against following Ansible versions: **>=2.15**.
 ### Modules
 Name | Description
 --- | ---
-[junipernetworks.apstra.authenticate](docs/unipernetworks.apstra.authenticate.rst) | Authenticate to Apstra API
-[junipernetworks.apstra.apstra_facts](docs/unipernetworks.apstra.apstra_facts.rst) | Collect network facts from Apstra
-[junipernetworks.apstra.blueprint](docs/unipernetworks.apstra.blueprint.rst) | Manage blueprints
-[junipernetworks.apstra.endpoint_policy](docs/unipernetworks.apstra.endpoint_policy.rst) | Manage endpoint policies
-[junipernetworks.apstra.endpoint_policy_application_point](docs/unipernetworks.apstra.endpoint_policy_application_point.rst) | Manage endpoint policy application points
-[junipernetworks.apstra.routing_policy](docs/unipernetworks.apstra.routing_policy.rst) | Manage routing policies
-[junipernetworks.apstra.security_zone](docs/unipernetworks.apstra.security_zone.rst) | Manage security zones
-[junipernetworks.apstra.virtual_network](docs/unipernetworks.apstra.virtual_network.rst) | Manage virtual networks
+[junipernetworks.apstra.authenticate](docs/junipernetworks.apstra.authenticate.rst) | Authenticate to Apstra API
+[junipernetworks.apstra.apstra_facts](docs/junipernetworks.apstra.apstra_facts.rst) | Collect network facts from Apstra
+[junipernetworks.apstra.blueprint](docs/junipernetworks.apstra.blueprint.rst) | Manage blueprints
+[junipernetworks.apstra.endpoint_policy](docs/junipernetworks.apstra.endpoint_policy.rst) | Manage endpoint policies
+[junipernetworks.apstra.endpoint_policy_application_point](docs/junipernetworks.apstra.endpoint_policy_application_point.rst) | Manage endpoint policy application points
+[junipernetworks.apstra.routing_policy](docs/junipernetworks.apstra.routing_policy.rst) | Manage routing policies
+[junipernetworks.apstra.security_zone](docs/junipernetworks.apstra.security_zone.rst) | Manage security zones
+[junipernetworks.apstra.virtual_network](docs/junipernetworks.apstra.virtual_network.rst) | Manage virtual networks
 
 Click the `Content` button to see the list of content included in this collection.
 
 ## Installation
 
-You can install the Juniper Networks Junos collection with the Ansible Galaxy CLI:
+You can ensure that the [required packages](requirements.txt) are installed via pip:
+
+```shell
+pip install --requirement requirements.txt
+```
+
+You can install the Juniper Networks Apstr collection with the Ansible Galaxy CLI:
 
 ```shell
 ansible-galaxy collection install junipernetworks.apstra
@@ -72,7 +78,8 @@ collections:
 You can call modules by their Fully Qualified Collection Namespace (FQCN), such as `junipernetworks.apstra.authenticate`.
 The following example plays show how to log in to Apstra, create a blueprint and gather facts.
 
-The collection is simply an Ansible interface to specific Apstra API
+The collection is simply an Ansible interface to specific Apstra API. This is why 
+
 ### Login
 
 ```yaml
@@ -83,19 +90,6 @@ The collection is simply an Ansible interface to specific Apstra API
     password: "password"
     logout: false
   register: auth
-```
-
-### Create blueprint
-
-```yaml
-- name: Create blueprint
-  junipernetworks.apstra.blueprint:
-    body:
-      label: "test_blueprint"
-      design: "two_stage_l3clos"
-    lock_state: "locked"
-    auth_token: "{{ auth.token }}"
-  register: bp
 ```
 
 ### Gather facts
@@ -109,9 +103,23 @@ The collection is simply an Ansible interface to specific Apstra API
   register: apstra_facts
 ```
 
+### Create blueprint
+
+```yaml
+- name: Create/get blueprint
+  junipernetworks.apstra.blueprint:
+    body:
+      label: "test_blueprint"
+      design: "two_stage_l3clos"
+    lock_state: "locked"
+    auth_token: "{{ auth.token }}"
+  register: bp
+```
+
+
 ## Contributing to this collection
 
-We welcome community contributions to this collection. If you find problems, please open an issue or create a PR against the [Juniper Networks Junos collection repository](https://github.com/ansible-collections/junipernetworks.junos). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html#contributing-maintained-collections) for complete details.
+We welcome community contributions to this collection. If you find problems, please open an issue or create a PR against the [Juniper Networks Apstr collection repository](https://github.com/Juniper/apstra-ansible-collection). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html#contributing-maintained-collections) for complete details.
 
 You can also join us on:
 

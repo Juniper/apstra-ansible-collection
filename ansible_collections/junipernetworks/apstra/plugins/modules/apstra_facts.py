@@ -15,6 +15,12 @@ options:
     type: str
     required: false
     default: APSTRA_API_URL environment variable
+  verify_certificates:
+    description:
+      - If set to false, SSL certificates will not be verified.
+    type: bool
+    required: false
+    default: True
   username:
     description:
       - The username for authentication.

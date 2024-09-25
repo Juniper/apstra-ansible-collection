@@ -140,7 +140,7 @@ The following `make` targets are supported to build, install and test an ansible
 |install|Install package `junipernetworks-apstra-$(VERSION).tar.gz.`|
 |test|Test the collection.|
 |clean|Clean up created files.|
-|force-rebuild|Force rebuilding the collection.|
+|release-build|Force rebuilding the collection for release.|
 |pipenv|Setup the pipenv used for developement and execution.|
 |clean-pipenv|Clean the pipenv used for development and execution.|
 

@@ -9,7 +9,7 @@ PY_VERSION := $(shell cat .python-version)
 
 APSTRA_COLLECTION = junipernetworks-apstra-$(VERSION).tar.gz
 
-.PHONY: setup build force-rebuild install clean clean-pipenv pipenv
+.PHONY: setup build release-build install clean clean-pipenv pipenv
 
 # OS-specific settings
 OS := $(shell uname -s)
@@ -22,6 +22,9 @@ export CPPFLAGS := -I$(shell brew --prefix openssl)/include
 export CONFIGURE_OPTS := --with-openssl=$(shell brew --prefix openssl)
 endif
 
+# By default use .venv in the current directory
+export PIPENV_VENV_IN_PROJECT=1
+
 setup: clean-pipenv
 	pyenv uninstall --force $(PY_VERSION)
 	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
@@ -30,10 +33,12 @@ setup: clean-pipenv
 	$(MAKE) pipenv
 
 pipenv:
+	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
 
-force-rebuild:
+release-build:
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
+	make build
 
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
