@@ -1,5 +1,4 @@
-TOP := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
-APSTRA_COLLECTION_ROOT := $(TOP)/ansible_collections/junipernetworks/apstra
+APSTRA_COLLECTION_ROOT := ansible_collections/junipernetworks/apstra
 
 # Get all .py files in the APSTRA_COLLECTION_ROOT directory
 PY_FILES := $(shell find $(APSTRA_COLLECTION_ROOT) -name *.py)
@@ -8,7 +7,7 @@ VERSION := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION
 
 PY_VERSION := $(shell cat .python-version)
 
-APSTRA_COLLECTION = $(TOP)/junipernetworks-apstra-$(VERSION).tar.gz
+APSTRA_COLLECTION = junipernetworks-apstra-$(VERSION).tar.gz
 
 .PHONY: setup build force-rebuild install clean clean-pipenv pipenv
 
@@ -39,14 +38,16 @@ force-rebuild:
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
 $(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
-	rm -f $(TOP)/junipernetworks-apstra-*.tar.gz
+	rm -f junipernetworks-apstra-*.tar.gz
 	pipenv run ansible-galaxy collection build $(APSTRA_COLLECTION_ROOT)
-	touch $@
+	touch "$@"
 
-$(APSTRA_COLLECTION_ROOT)/requirements.txt: $(TOP)/Pipfile
+$(APSTRA_COLLECTION_ROOT)/requirements.txt: Pipfile Makefile
 	pipenv --rm &>/dev/null || true
 	pipenv install
-	pipenv run pip freeze > $@
+	pipenv run pip freeze > "$@.tmp"
+	sed -e 's/==/~=/' "$@.tmp" > "$@"
+	rm "$@.tmp"
 	pipenv install --dev
 	
 install: build
@@ -91,7 +92,7 @@ clean-pipenv:
 	rm -rf .venv
 
 clean: clean-pipenv
-	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt $(TOP)/junipernetworks-apstra-*.tar.gz
+	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt junipernetworks-apstra-*.tar.gz
 
 demo: install
-	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(TOP)/demo/security_zone.yml
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) demo/security_zone.yml
