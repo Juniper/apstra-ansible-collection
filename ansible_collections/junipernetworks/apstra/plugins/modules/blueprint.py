@@ -234,7 +234,7 @@ def main():
         # Lock the object if requested
         if lock_state == "locked" and state != "absent":
             module.log("Locking blueprint")
-            client_factory.lock_blueprint(id=blueprint_id, timeout=lock_timeout)
+            client_factory.lock_blueprint(blueprint_id, lock_timeout)
 
         if state == "absent":
             if id is None:
@@ -246,8 +246,8 @@ def main():
 
         if state == "committed":
             # Commit the blueprint
-            client_factory.commit_blueprint(id=blueprint_id, timeout=commit_timeout)
-            result["changed"] = True
+            committed = client_factory.commit_blueprint(blueprint_id, commit_timeout)
+            result["changed"] = committed
             result["msg"] = "blueprint committed successfully"
 
         # Unlock the blueprint if requested
@@ -255,7 +255,7 @@ def main():
             # If the blueprint is deleted, it will be unlocked (tag deleted)
             lock_state = "unlocked"
         elif lock_state == "unlocked":
-            client_factory.unlock_blueprint(id=blueprint_id)
+            client_factory.unlock_blueprint(blueprint_id)
 
         # Always report the lock state
         result["lock_state"] = lock_state

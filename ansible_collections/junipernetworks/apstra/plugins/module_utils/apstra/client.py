@@ -574,8 +574,8 @@ class ApstraClientFactory:
                 tags_client.blueprints[id].tags[tag["id"]].delete()
                 return
 
-        # Tag was not locked. This is exceptional.
-        raise Exception(f"Blueprint {id} is not locked")
+        # Tag was not locked.
+        return
 
     # Ensure that the blueprint is locked
     def check_blueprint_locked(self, id):
@@ -585,6 +585,7 @@ class ApstraClientFactory:
         return tag is not None
 
     # Commit the blueprint
+    # Return true if the blueprint was committed, false if already committed.
     def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
         blueprint_client = self.get_client("blueprints")
         start_time = time.time()
@@ -597,4 +598,8 @@ class ApstraClientFactory:
                     f"Failed to commit blueprint {id} within {timeout} seconds"
                 )
             time.sleep(interval)
-        return blueprint.commit()
+
+        is_committed = blueprint.is_committed()
+        if not is_committed:
+            blueprint.commit()
+        return not is_committed
