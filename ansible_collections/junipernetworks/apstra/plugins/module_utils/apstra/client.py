@@ -572,10 +572,10 @@ class ApstraClientFactory:
         for tag in tags:
             if tag["label"] == tag_name:
                 tags_client.blueprints[id].tags[tag["id"]].delete()
-                return
+                return True
 
         # Tag was not locked.
-        return
+        return False
 
     # Ensure that the blueprint is locked
     def check_blueprint_locked(self, id):

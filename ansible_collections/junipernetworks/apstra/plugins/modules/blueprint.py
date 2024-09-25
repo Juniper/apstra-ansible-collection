@@ -235,6 +235,7 @@ def main():
         if lock_state == "locked" and state != "absent":
             module.log("Locking blueprint")
             client_factory.lock_blueprint(blueprint_id, lock_timeout)
+            result["changed"] = True
 
         if state == "absent":
             if id is None:
@@ -255,7 +256,8 @@ def main():
             # If the blueprint is deleted, it will be unlocked (tag deleted)
             lock_state = "unlocked"
         elif lock_state == "unlocked":
-            client_factory.unlock_blueprint(blueprint_id)
+            unlocked = client_factory.unlock_blueprint(blueprint_id)
+            result["changed"] = unlocked
 
         # Always report the lock state
         result["lock_state"] = lock_state
