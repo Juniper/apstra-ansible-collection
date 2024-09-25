@@ -57,7 +57,6 @@
           vni_id: 16777214
           vrf_description: "my test VRF"
           sz_type: "evpn"
-          route_target: "7000:1"
           label: "test-vrf-label"
           vlan_id: 2048
         auth_token: "{{ auth.token }}"
@@ -66,6 +65,21 @@
     - name: Show created security_zone
       ansible.builtin.debug:
         var: sz
+
+    - name: Create security_zone (no change)
+      junipernetworks.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          routing_policy_id: "{{ rp.id.routing_policy }}"
+          junos_evpn_irb_mode: "asymmetric"
+          l3_mtu: 9170
+          vrf_name: "test_vrf"
+          vni_id: 16777214
+          vrf_description: "my test VRF"
+          sz_type: "evpn"
+          label: "test-vrf-label"
+          vlan_id: 2048
+        auth_token: "{{ auth.token }}"
 
     - name: Modify security_zone
       junipernetworks.apstra.security_zone:

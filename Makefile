@@ -38,7 +38,7 @@ force-rebuild:
 
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
-$(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(PY_FILES)
+$(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
 	rm -f $(TOP)/junipernetworks-apstra-*.tar.gz
 	pipenv run ansible-galaxy collection build $(APSTRA_COLLECTION_ROOT)
 	touch $@
@@ -92,3 +92,6 @@ clean-pipenv:
 
 clean: clean-pipenv
 	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt $(TOP)/junipernetworks-apstra-*.tar.gz
+
+demo: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(TOP)/demo/security_zone.yml

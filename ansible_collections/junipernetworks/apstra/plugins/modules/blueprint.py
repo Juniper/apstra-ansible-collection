@@ -93,7 +93,7 @@ extends_documentation_fragment:
 
 EXAMPLES = """
 # Create a new blueprint
-- name: Create blueprint
+- name: Create blueprint (or get update it if the label exists)
   blueprint:
     response:
       name: example_blueprint
@@ -206,15 +206,25 @@ def main():
             if id is None:
                 if body is None:
                     raise ValueError("Must specify 'body' to create a blueprint")
-                # Create the object
-                created_blueprint = client_factory.object_request(
-                    "blueprints", "create", {}, body
-                )
-                blueprint_id = created_blueprint["id"]
+
+                # See if the object label exists
+                blueprint = client_factory.object_request("blueprints", "get", {}, body) if "label" in body else None
+                if blueprint:
+                    result["changed"] = False
+                    # Blueprint does not support updates, make sure there's no changes
+                    changes = {}
+                    if compare_and_update(blueprint, body, changes):
+                        raise ValueError("Blueprint already exists and cannot be updated: {}".format(changes))
+                else:
+                    # Create the object
+                    blueprint = client_factory.object_request(
+                        "blueprints", "create", {}, body
+                    )
+                    result["changed"] = True
+                blueprint_id = blueprint["id"]
                 id = {"blueprint": blueprint_id}
                 result["id"] = id
-                result["changed"] = True
-                result["response"] = created_blueprint
+                result["response"] = blueprint
                 result["msg"] = "blueprint created successfully"
 
         # If we still don't have an id, there's a problem

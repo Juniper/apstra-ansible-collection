@@ -96,7 +96,7 @@ EXAMPLES = r"""
       policy_type: "user_defined"
     state: present
 
-- name: Update a security zone
+- name: Update a security zone (or update it if the label exists)
   junipernetworks.apstra.security_zone:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -119,13 +119,17 @@ changed:
   description: Indicates whether the module has made any changes.
   type: bool
   returned: always
+changes:
+  description: Dictionary of updates that were applied.
+  type: dict
+  returned: on update
 response:
   description: The security zone object details.
   type: dict
   returned: when state is present and changes are made
 id:
   description: The ID of the created security zone.
-  returned: on create
+  returned: on create, or when object identified by label
   type: dict
   sample: {
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
@@ -180,22 +184,38 @@ def main():
 
         # Make the requested changes
         if state == "present":
+            current_object = None
             if object_id is None:
                 if body is None:
                     raise ValueError(
                         f"Must specify 'body' to create a {leaf_object_type}"
                     )
-                # Create the object
-                created_object = client_factory.object_request(
-                    object_type, "create", id, body
+              
+                # See if the object label exists
+                current_object = (
+                  client_factory.object_request(
+                    object_type, "get", id, body
+                  )
+                  if "label" in body else None
                 )
-                object_id = created_object["id"]
-                id[leaf_object_type] = object_id
-                result["id"] = id
-                result["changed"] = True
-                result["response"] = created_object
-                result["msg"] = f"{leaf_object_type} created successfully"
+                if current_object:
+                  id[leaf_object_type] = current_object["id"]
+                  result["id"] = id
+                else:
+                  # Create the object
+                  object = client_factory.object_request(
+                      object_type, "create", id, body
+                  )
+                  object_id = object["id"]
+                  id[leaf_object_type] = object_id
+                  result["id"] = id
+                  result["changed"] = True
+                  result["response"] = object
+                  result["msg"] = f"{leaf_object_type} created successfully"
             else:
+                current_object = client_factory.object_request(object_type, "get", id)
+            
+            if current_object:
                 # Update the object
                 current_object = client_factory.object_request(object_type, "get", id)
                 changes = {}
@@ -204,7 +224,9 @@ def main():
                         object_type, "patch", id, changes
                     )
                     result["changed"] = True
-                    result["response"] = updated_object
+                    if updated_object:
+                      result["response"] = updated_object
+                    result["changes"] = changes
                     result["msg"] = (
                         f"{leaf_object_type} updated successfully"
                     )

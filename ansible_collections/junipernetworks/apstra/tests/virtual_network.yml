@@ -39,6 +39,18 @@
       ansible.builtin.debug:
         var: vn
 
+    - name: Create virtual_network (no change)
+      junipernetworks.apstra.virtual_network:
+        id: "{{ bp.id }}"
+        body:
+          label: "test_virtual_network"
+          description: "test VN description"
+          ipv4_enabled: true
+          virtual_gateway_ipv4_enabled: true
+          vn_id: "16777214"
+          vn_type: "vxlan"
+        auth_token: "{{ auth.token }}"
+
     - name: Modify virtual_network
       junipernetworks.apstra.virtual_network:
         id: "{{ vn.id }}"

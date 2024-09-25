@@ -1,0 +1,48 @@
+---
+- name: Test create/update/delete security_zone
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars_files:
+    - variables.yml
+  tasks:
+    - name: Connect to Apstra
+      junipernetworks.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create security_zone
+      junipernetworks.apstra.security_zone:
+        id: "{{ blueprint_id }}"
+        body:
+          vrf_name: "eda-demo-sample"
+          vni_id: 10000
+          vrf_description: "Create VRF demo"
+          sz_type: "evpn"
+          label: "eda-demo-sample"
+        auth_token: "{{ auth.token }}"
+      register: sz
+
+    - name: Create virtual_network
+      junipernetworks.apstra.virtual_network:
+        id: "{{ blueprint_id }}"
+        body:
+          label: "eda-demo-sample"
+          description: "Create EDA VN sample"
+          vn_type: "vxlan"
+          security_zone_id: "{{ sz.id.security_zone }}"
+        auth_token: "{{ auth.token }}"
+      register: vn
+
+    - name: Commit the blueprint
+      junipernetworks.apstra.blueprint:
+        id: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+        auth_token: "{{ auth.token }}"
+      register: blueprint_commit
+
+    - name: Logout of Apstra
+      junipernetworks.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"

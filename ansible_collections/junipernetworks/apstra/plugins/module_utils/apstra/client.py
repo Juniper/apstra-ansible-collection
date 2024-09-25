@@ -328,6 +328,9 @@ class ApstraClientFactory:
         return missing
 
     # Call object op. If op is 'get', will get one object, or all objects of that type.
+    # If data is supplied, it will be passed into the operation on create or update.
+    # For "get" or "list" operations, the result can be filtered by label if the
+    # label key is found in the data dictionary.
     # The id is a dictionary including any required keys for the object type.
     # For example, for blueprints.virtual_networks, the id would be {'blueprint': 'my_blueprint', 'virtual_network': 'my_vn'}
     # If the leaf object (e.g.- virtual_network) is not specified, all objects are returned (e.g. -- all virtual networks for a blueprint)
@@ -342,6 +345,7 @@ class ApstraClientFactory:
         # Traverse nested object_type, using attrs to walk to object hierarchy
         attrs = object_type.split(".")
         obj = client
+        label = None 
         for index, attr in enumerate(attrs):
             object = getattr(obj, attr, None)
             if object is None:
@@ -361,6 +365,7 @@ class ApstraClientFactory:
                 obj = object[id_value]
             elif leaf_type:
                 obj = object
+                label = data.get("label") if isinstance(data,dict) else None
             else:
                 singular_attr = singular_object_type(attr)
                 raise Exception(
@@ -372,8 +377,10 @@ class ApstraClientFactory:
                 continue
 
             op_attr = None
+            read_only = op in ["list", "get"]
+            no_arg = True if op in ["delete"] else read_only
             # Try list then get if id is not specified
-            if op in ["list", "get"]:
+            if read_only:
                 try:
                     op_attr = getattr(obj, "list")
                 except AttributeError:
@@ -394,8 +401,26 @@ class ApstraClientFactory:
 
             # Call the op on the object
             try:
-                if data is None:
-                    return op_attr()
+                if no_arg:
+                    ret = op_attr()
+                    if read_only and label:
+                        iterable = None
+                        if isinstance(ret, list):
+                            iterable = ret
+                        elif isinstance(ret, dict):
+                            if "id" in ret:
+                                iterable = [ret]
+                            elif "items" in ret:
+                                iterable = ret["items"]
+                            else:
+                                iterable = ret.values()
+                        # Filter the result by label
+                        for object in iterable:
+                            if object.get("label") == label:
+                                return object
+                        return None
+                    else:
+                        return ret
                 else:
                     return op_attr(data)
             except TypeError as te:

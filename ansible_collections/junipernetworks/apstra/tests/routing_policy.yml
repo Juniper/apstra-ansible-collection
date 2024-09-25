@@ -45,6 +45,24 @@
       ansible.builtin.debug:
         var: rp
 
+    - name: Create routing_policy (no change)
+      junipernetworks.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        body:
+          description: "Example routing policy"
+          expect_default_ipv4_route: true
+          expect_default_ipv6_route: true
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          import_policy: "all"
+          label: "example_policy"
+          policy_type: "user_defined"
+        auth_token: "{{ auth.token }}"
+
     - name: Modify routing_policy
       junipernetworks.apstra.routing_policy:
         id: "{{ rp.id }}"

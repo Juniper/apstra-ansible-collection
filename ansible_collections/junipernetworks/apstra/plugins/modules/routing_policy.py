@@ -8,7 +8,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
     apstra_client_module_args,
     ApstraClientFactory,
-    singular_leaf_object_type
+    singular_leaf_object_type,
 )
 from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
     compare_and_update,
@@ -77,7 +77,7 @@ extends_documentation_fragment:
 """
 
 EXAMPLES = r"""
-- name: Create a routing policy
+- name: Create a routing policy (or update it if the label exists)
   junipernetworks.apstra.routing_policy:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -119,13 +119,17 @@ changed:
   description: Indicates whether the module has made any changes.
   type: bool
   returned: always
+changes:
+  description: Dictionary of updates that were applied.
+  type: dict
+  returned: on update
 response:
   description: The routing policy object details.
   type: dict
   returned: when state is present and changes are made
 id:
   description: The ID of the created routing policy.
-  returned: on create
+  returned: on create, or when object identified by label
   type: dict
   sample: {
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
@@ -178,40 +182,52 @@ def main():
 
         # Make the requested changes
         if state == "present":
+            current_object = None
             if object_id is None:
                 if body is None:
                     raise ValueError(
                         f"Must specify 'body' to create a {leaf_object_type}"
                     )
-                # Create the object
-                created_object = client_factory.object_request(
-                    object_type, "create", id, body
+
+                # See if the object label exists
+                current_object = (
+                    client_factory.object_request(object_type, "get", id, body)
+                    if "label" in body
+                    else None
                 )
-                object_id = created_object["id"]
-                id[leaf_object_type] = object_id
-                result["id"] = id
-                result["changed"] = True
-                result["response"] = created_object
-                result["msg"] = f"{leaf_object_type} created successfully"
+                if current_object:
+                    id[leaf_object_type] = current_object["id"]
+                    result["id"] = id
+                else:
+                    # Create the object
+                    object = client_factory.object_request(
+                        object_type, "create", id, body
+                    )
+                    object_id = object["id"]
+                    id[leaf_object_type] = object_id
+                    result["id"] = id
+                    result["changed"] = True
+                    result["response"] = object
+                    result["msg"] = f"{leaf_object_type} created successfully"
             else:
-                # Update the object
                 current_object = client_factory.object_request(object_type, "get", id)
+
+            if current_object:
+                # Update the object
                 changes = {}
                 if compare_and_update(current_object, body, changes):
                     updated_object = client_factory.object_request(
                         object_type, "patch", id, changes
                     )
                     result["changed"] = True
-                    result["response"] = updated_object
-                    result["msg"] = (
-                        f"{leaf_object_type} updated successfully"
-                    )
+                    if updated_object:
+                        result["response"] = updated_object
+                    result["changes"] = changes
+                    result["msg"] = f"{leaf_object_type} updated successfully"
 
         # If we still don't have an id, there's a problem
         if id is None:
-            raise ValueError(
-                f"Cannot manage a {leaf_object_type} without a object id"
-            )
+            raise ValueError(f"Cannot manage a {leaf_object_type} without a object id")
 
         if state == "absent":
             # Delete the blueprint
