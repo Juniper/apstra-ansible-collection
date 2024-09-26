@@ -4,30 +4,15 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-    singular_leaf_object_type,
-)
-
-DOCUMENTATION = r"""
+DOCUMENTATION = """
 ---
 module: endpoint_policy
-
 short_description: Manage endpoint policies in Apstra
-
 version_added: "0.1.0"
-
 author:
   - "Edwin Jacques (@edwinpjacques)"
-
 description:
   - This module allows you to create, update, and delete endpoint policies in Apstra.
-
 options:
   api_url:
     description:
@@ -76,13 +61,9 @@ options:
     type: str
     choices: ["present", "absent"]
     default: "present"
-
-extends_documentation_fragment:
-  - junipernetworks.apstra.apstra_client_module_args
-
 """
 
-EXAMPLES = r"""
+EXAMPLES = """
 - name: Create a endpoint policy (or update it if the label exists)
   junipernetworks.apstra.endpoint_policy:
     id:
@@ -120,7 +101,7 @@ EXAMPLES = r"""
     state: absent
 """
 
-RETURN = r"""
+RETURN = """
 changed:
   description: Indicates whether the module has made any changes.
   type: bool
@@ -146,6 +127,17 @@ msg:
   type: str
   returned: always
 """
+
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
+    compare_and_update,
+    singular_leaf_object_type,
+)
 
 
 def main():

@@ -40,24 +40,18 @@ This collection has been tested against following Ansible versions: **>=2.15**.
 ### Modules
 Name | Description
 --- | ---
-[junipernetworks.apstra.authenticate](docs/junipernetworks.apstra.authenticate.rst) | Authenticate to Apstra API
-[junipernetworks.apstra.apstra_facts](docs/junipernetworks.apstra.apstra_facts.rst) | Collect network facts from Apstra
-[junipernetworks.apstra.blueprint](docs/junipernetworks.apstra.blueprint.rst) | Manage blueprints
-[junipernetworks.apstra.endpoint_policy](docs/junipernetworks.apstra.endpoint_policy.rst) | Manage endpoint policies
-[junipernetworks.apstra.endpoint_policy_application_point](docs/junipernetworks.apstra.endpoint_policy_application_point.rst) | Manage endpoint policy application points
-[junipernetworks.apstra.routing_policy](docs/junipernetworks.apstra.routing_policy.rst) | Manage routing policies
-[junipernetworks.apstra.security_zone](docs/junipernetworks.apstra.security_zone.rst) | Manage security zones
-[junipernetworks.apstra.virtual_network](docs/junipernetworks.apstra.virtual_network.rst) | Manage virtual networks
+[junipernetworks.apstra.apstra_facts](docs/apstra_facts_module.rst) | Collect network facts from Apstra
+[junipernetworks.apstra.authenticate](docs/authenticate_module.rst) | Authenticate to Apstra API
+[junipernetworks.apstra.blueprint](docs/blueprint_module.rst) | Manage blueprints
+[junipernetworks.apstra.endpoint_policy](docs/endpoint_policy_module.rst) | Manage endpoint policies
+[junipernetworks.apstra.endpoint_policy_application_point](docs/endpoint_policy_application_point_module.rst) | Manage endpoint policy application points
+[junipernetworks.apstra.routing_policy](docs/routing_policy_module.rst) | Manage routing policies
+[junipernetworks.apstra.security_zone](docs/security_zone_module.rst) | Manage security zones
+[junipernetworks.apstra.virtual_network](docs/virtual_network_module.rst) | Manage virtual networks
 
 Click the `Content` button to see the list of content included in this collection.
 
 ## Installation
-
-You can ensure that the [required packages](requirements.txt) are installed via pip:
-
-```shell
-pip install --requirement requirements.txt
-```
 
 You can install the Juniper Networks Apstr collection with the Ansible Galaxy CLI:
 
@@ -71,6 +65,12 @@ You can also include it in a `requirements.yml` file and install it with `ansibl
 ---
 collections:
   - name: junipernetworks.apstra
+```
+
+You can ensure that the [required packages](docs/requirements.txt) are installed via pip. For example, if your collection is installed in the default location:
+
+```shell
+pip install -r ~/junipernetworks/apstra/docs/requirements.txt
 ```
 
 ## Usage

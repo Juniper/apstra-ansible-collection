@@ -4,30 +4,15 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type,
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
-
-DOCUMENTATION = r"""
+DOCUMENTATION = """
 ---
 module: routing_policy
-
 short_description: Manage routing policies in Apstra
-
 version_added: "0.1.0"
-
 author:
   - "Edwin Jacques (@edwinpjacques)"
-
 description:
   - This module allows you to create, update, and delete routing policies in Apstra.
-
 options:
   api_url:
     description:
@@ -76,13 +61,9 @@ options:
     type: str
     choices: ["present", "absent"]
     default: "present"
-
-extends_documentation_fragment:
-  - junipernetworks.apstra.apstra_client_module_args
-
 """
 
-EXAMPLES = r"""
+EXAMPLES = """
 - name: Create a routing policy (or update it if the label exists)
   junipernetworks.apstra.routing_policy:
     id:
@@ -120,7 +101,7 @@ EXAMPLES = r"""
     state: absent
 """
 
-RETURN = r"""
+RETURN = """
 changed:
   description: Indicates whether the module has made any changes.
   type: bool
@@ -146,6 +127,17 @@ msg:
   type: str
   returned: always
 """
+
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
+    compare_and_update,
+)
 
 
 def main():

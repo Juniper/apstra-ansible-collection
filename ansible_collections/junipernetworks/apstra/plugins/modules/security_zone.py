@@ -4,17 +4,7 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
-
-DOCUMENTATION = r"""
+DOCUMENTATION = """
 ---
 module: security_zone
 
@@ -76,13 +66,9 @@ options:
     type: str
     choices: ["present", "absent"]
     default: "present"
-
-extends_documentation_fragment:
-  - junipernetworks.apstra.apstra_client_module_args
-
 """
 
-EXAMPLES = r"""
+EXAMPLES = """
 - name: Create a security zone
   junipernetworks.apstra.security_zone:
     id:
@@ -120,7 +106,7 @@ EXAMPLES = r"""
     state: absent
 """
 
-RETURN = r"""
+RETURN = """
 changed:
   description: Indicates whether the module has made any changes.
   type: bool
@@ -148,6 +134,17 @@ msg:
 """
 
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
+    compare_and_update,
+)
+
+
 def main():
     object_module_args = dict(
         id=dict(type="dict", required=True),
@@ -169,9 +166,7 @@ def main():
         client_factory = ApstraClientFactory.from_params(module.params)
 
         object_type = "blueprints.security_zones"
-        leaf_object_type = singular_leaf_object_type(
-            object_type
-        )
+        leaf_object_type = singular_leaf_object_type(object_type)
 
         # Validate params
         id = module.params["id"]
@@ -196,31 +191,30 @@ def main():
                     raise ValueError(
                         f"Must specify 'body' to create a {leaf_object_type}"
                     )
-              
+
                 # See if the object label exists
                 current_object = (
-                  client_factory.object_request(
-                    object_type, "get", id, body
-                  )
-                  if "label" in body else None
+                    client_factory.object_request(object_type, "get", id, body)
+                    if "label" in body
+                    else None
                 )
                 if current_object:
-                  id[leaf_object_type] = current_object["id"]
-                  result["id"] = id
+                    id[leaf_object_type] = current_object["id"]
+                    result["id"] = id
                 else:
-                  # Create the object
-                  object = client_factory.object_request(
-                      object_type, "create", id, body
-                  )
-                  object_id = object["id"]
-                  id[leaf_object_type] = object_id
-                  result["id"] = id
-                  result["changed"] = True
-                  result["response"] = object
-                  result["msg"] = f"{leaf_object_type} created successfully"
+                    # Create the object
+                    object = client_factory.object_request(
+                        object_type, "create", id, body
+                    )
+                    object_id = object["id"]
+                    id[leaf_object_type] = object_id
+                    result["id"] = id
+                    result["changed"] = True
+                    result["response"] = object
+                    result["msg"] = f"{leaf_object_type} created successfully"
             else:
                 current_object = client_factory.object_request(object_type, "get", id)
-            
+
             if current_object:
                 # Update the object
                 current_object = client_factory.object_request(object_type, "get", id)
@@ -231,17 +225,13 @@ def main():
                     )
                     result["changed"] = True
                     if updated_object:
-                      result["response"] = updated_object
+                        result["response"] = updated_object
                     result["changes"] = changes
-                    result["msg"] = (
-                        f"{leaf_object_type} updated successfully"
-                    )
+                    result["msg"] = f"{leaf_object_type} updated successfully"
 
         # If we still don't have an id, there's a problem
         if id is None:
-            raise ValueError(
-                f"Cannot manage a {leaf_object_type} without a object id"
-            )
+            raise ValueError(f"Cannot manage a {leaf_object_type} without a object id")
 
         if state == "absent":
             # Delete the blueprint

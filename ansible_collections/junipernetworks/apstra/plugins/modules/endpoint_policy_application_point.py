@@ -4,29 +4,15 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
-
-DOCUMENTATION = r"""
+DOCUMENTATION = """
 ---
 module: endpoint_policy_application_point
-
-short_description: Manage endpoint policy application points in Apstra
-
+short_description: Manage endpoint policy application points
 version_added: "0.1.0"
-
 author:
   - "Edwin Jacques (@edwinpjacques)"
-
 description:
   - This module allows you to update the endpoint policy application points in Apstra.
-
 options:
   api_url:
     description:
@@ -68,13 +54,9 @@ options:
       - Dictionary containing the endpoint policy application point object details.
     required: false
     type: dict
-
-extends_documentation_fragment:
-  - junipernetworks.apstra.apstra_client_module_args
-
 """
 
-EXAMPLES = r"""
+EXAMPLES = """
 - name: Update a endpoint policy application point
   junipernetworks.apstra.endpoint_policy_application_point:
     id:
@@ -90,7 +72,7 @@ EXAMPLES = r"""
 
 """
 
-RETURN = r"""
+RETURN = """
 changed:
   description: Indicates whether the module has made any changes. True if successful.
   type: bool
@@ -104,6 +86,16 @@ response:
     returned: on update
     type: dict
 """
+
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
+    compare_and_update,
+)
 
 
 def main():
@@ -124,9 +116,7 @@ def main():
         client_factory = ApstraClientFactory.from_params(module.params)
 
         object_type = "blueprints.endpoint_policies.application_points"
-        singular_leaf_object_type = singular_leaf_object_type(
-            object_type
-        )
+        singular_leaf_object_type = singular_leaf_object_type(object_type)
 
         # Validate params
         id = module.params["id"]
@@ -136,9 +126,11 @@ def main():
         missing_id = client_factory.validate_id(object_type, id)
         if len(missing_id) > 1:
             raise ValueError(f"Invalid id: {id}.")
-        object_id = id.get('endpoint_policy')
+        object_id = id.get("endpoint_policy")
         if object_id is None:
-            raise ValueError(f"Cannot manage a {singular_leaf_object_type} without an endpoint policy id")
+            raise ValueError(
+                f"Cannot manage a {singular_leaf_object_type} without an endpoint policy id"
+            )
 
         # Make the requested changes
 

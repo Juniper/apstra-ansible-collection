@@ -2,25 +2,14 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
-    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
+# MIT License
 
 DOCUMENTATION = """
 ---
 module: blueprint
 short_description: Manage Apstra blueprints
 description:
-    - This module allows you to create, lock, unlock, and delete Apstra blueprints.
+  - This module allows you to create, lock, unlock, and delete Apstra blueprints.
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
@@ -76,13 +65,13 @@ options:
       - The timeout in seconds for locking the blueprint.
     required: false
     type: int
-    default: {lock_timeout}
+    default: 60
   commit_timeout:
     description:
       - The timeout in seconds for committing the blueprint.
     required: false
     type: int
-    default: {commit_timeout}
+    default: 120
   state:
     description:
       - The desired state of the blueprint.
@@ -90,12 +79,7 @@ options:
     type: str
     choices: ["present", "committed", "absent"]
     default: "present"
-extends_documentation_fragment:
-    - junipernetworks.apstra.apstra_client
-""".format(
-    lock_timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
-    commit_timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
-)
+"""
 
 EXAMPLES = """
 # Create a new blueprint
@@ -162,6 +146,18 @@ response:
 """
 
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
+    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
+    compare_and_update,
+)
+
+
 def main():
     blueprint_module_args = dict(
         id=dict(type="dict", required=False),
@@ -214,13 +210,21 @@ def main():
                     raise ValueError("Must specify 'body' to create a blueprint")
 
                 # See if the object label exists
-                blueprint = client_factory.object_request("blueprints", "get", {}, body) if "label" in body else None
+                blueprint = (
+                    client_factory.object_request("blueprints", "get", {}, body)
+                    if "label" in body
+                    else None
+                )
                 if blueprint:
                     result["changed"] = False
                     # Blueprint does not support updates, make sure there's no changes
                     changes = {}
                     if compare_and_update(blueprint, body, changes):
-                        raise ValueError("Blueprint already exists and cannot be updated: {}".format(changes))
+                        raise ValueError(
+                            "Blueprint already exists and cannot be updated: {}".format(
+                                changes
+                            )
+                        )
                 else:
                     # Create the object
                     blueprint = client_factory.object_request(

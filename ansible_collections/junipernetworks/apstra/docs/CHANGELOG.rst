@@ -4,7 +4,7 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
-v0.1.4
+v0.1.5
 ======
 
 Release Summary
@@ -24,3 +24,4 @@ Major Changes
     - endpoint_policies
     - endpoint_policies_application_points
 - Locking blueprints by convention via well-known tag.
+- Publish generated documentation.

@@ -1,3 +1,9 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# Copyright (c) 2024, Juniper Networks
+# MIT License
+
 DOCUMENTATION = """
 ---
 module: apstra_facts
@@ -158,7 +164,9 @@ def main():
                 module.fail_json(msg=f"Unsupported network object '{object_type}'")
 
         # Iterate through the list of requested network objects and get everything.
-        object_map = client_factory.list_all_objects(requested_network_objects, module.params.get("id", {}))
+        object_map = client_factory.list_all_objects(
+            requested_network_objects, module.params.get("id", {})
+        )
 
         # Structure used for gathered facts
         facts = {

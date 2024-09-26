@@ -9,6 +9,10 @@ aos-sdk = {file = "https://s-artifactory.juniper.net:443/artifactory/atom-generi
 
 [dev-packages]
 ansible-lint = "*"
+antsibull-docs = "<3.0.0,>=2.0.0"
+sphinx-ansible-theme = ">=0.9.0"
+ansible-pygments = "*"
+sphinx = "*"
 
 [requires]
 python_version = "3.11"

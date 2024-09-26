@@ -9,7 +9,7 @@ PY_VERSION := $(shell cat .python-version)
 
 APSTRA_COLLECTION = junipernetworks-apstra-$(VERSION).tar.gz
 
-.PHONY: setup build release-build install clean clean-pipenv pipenv
+.PHONY: setup build release-build install clean clean-pipenv pipenv docs
 
 # OS-specific settings
 OS := $(shell uname -s)
@@ -25,6 +25,11 @@ endif
 # By default use .venv in the current directory
 export PIPENV_VENV_IN_PROJECT=1
 
+# Needed for antsi-build doc build
+CERT_PATH := $(shell python -m certifi)
+export SSL_CERT_FILE=$(CERT_PATH)
+export REQUESTS_CA_BUNDLE=$(CERT_PATH)
+
 setup: clean-pipenv
 	pyenv uninstall --force $(PY_VERSION)
 	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
@@ -36,18 +41,41 @@ pipenv:
 	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
 
-release-build:
+release-build: docs
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
+	make clean-pipenv
+	pipenv install
 	make build
 
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
-$(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
+APSTRA_COLLECTION_DOCS_BUILD := ansible_collections/junipernetworks/apstra/_build
+
+docs: pipenv install
+	rm -rf "$(APSTRA_COLLECTION_DOCS_BUILD)"
+	mkdir -p $(APSTRA_COLLECTION_ROOT)/_build
+	pipenv run antsibull-docs sphinx-init \
+		--dest-dir $(APSTRA_COLLECTION_DOCS_BUILD) \
+		--no-indexes \
+		--no-add-antsibull-docs-version \
+		--output-format simplified-rst \
+		--use-current \
+		--squash-hierarchy \
+		--lenient \
+		--project "Juniper Network Apstra Ansible Collection" \
+		--copyright "Juniper Networks, Inc." \
+		--title "Apstra Ansible Collection" \
+		--title "Apstra Ansible Collection" \
+		junipernetworks.apstra
+	pipenv run $(APSTRA_COLLECTION_DOCS_BUILD)/build.sh
+	cp $(APSTRA_COLLECTION_DOCS_BUILD)/rst/*.rst $(APSTRA_COLLECTION_ROOT)/docs/
+
+$(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/docs/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
 	rm -f junipernetworks-apstra-*.tar.gz
 	pipenv run ansible-galaxy collection build $(APSTRA_COLLECTION_ROOT)
 	touch "$@"
 
-$(APSTRA_COLLECTION_ROOT)/requirements.txt: Pipfile Makefile
+$(APSTRA_COLLECTION_ROOT)/docs/requirements.txt: Pipfile Makefile
 	pipenv --rm &>/dev/null || true
 	pipenv install
 	pipenv run pip freeze > "$@.tmp"
@@ -97,7 +125,7 @@ clean-pipenv:
 	rm -rf .venv
 
 clean: clean-pipenv
-	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt junipernetworks-apstra-*.tar.gz
+	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/docs/requirements.txt junipernetworks-apstra-*.tar.gz
 
 demo: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) demo/security_zone.yml

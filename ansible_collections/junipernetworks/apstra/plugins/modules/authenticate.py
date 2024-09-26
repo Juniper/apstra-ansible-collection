@@ -1,10 +1,15 @@
-DOCUMENTATION = '''
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# Copyright (c) 2024, Juniper Networks
+# MIT License
+
+DOCUMENTATION = """
 ---
 module: apstra_authenticate
-short_description: Authenticate with Apstra and retrieve an auth token
+short_description: Apstra authentication
 description:
-  - This module authenticates with Apstra and retrieves an authentication token.
-  - It can also handle logout operations.
+  - This module authenticates with Apstra and retrieves an authentication token.  It can also handle logout operations.
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
@@ -43,9 +48,9 @@ options:
       - If set to true, the module will log out the current session.
     type: bool
     default: false
-'''
+"""
 
-EXAMPLES = '''
+EXAMPLES = """
 # Authenticate with Apstra AOS and retrieve an auth token.
 # Token can be read via {{ auth.token }}.
 - name: Authenticate with Apstra AOS
@@ -67,31 +72,29 @@ EXAMPLES = '''
     api_url: "https://10.87.2.40/api"
     auth_token: "{{ auth.token }}"
     logout: true
-'''
+"""
 
-RETURN = '''
+RETURN = """
 token:
   description: The authentication token retrieved from Apstra AOS.
   returned: when not logging out
   type: str
   sample: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-'''
+"""
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import apstra_client_module_args, ApstraClientFactory
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+
 
 def main():
     module_args = apstra_client_module_args()
 
-    result = dict(
-        changed=False,
-        response=''
-    )
+    result = dict(changed=False, response="")
 
-    module = AnsibleModule(
-        argument_spec=module_args,
-        supports_check_mode=True
-    )
+    module = AnsibleModule(argument_spec=module_args, supports_check_mode=True)
 
     try:
         client_factory = ApstraClientFactory.from_params(module.params)
@@ -99,7 +102,7 @@ def main():
         # If auth_token is already set, and we're not logging out, return the auth_token.
         if bool(client_factory.auth_token) and not client_factory.logout:
             module.exit_json(changed=False, token=module.auth_token)
-        
+
         client_factory.get_base_client()
 
         if client_factory.logout:
@@ -112,5 +115,6 @@ def main():
 
     module.exit_json(**result)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -4,17 +4,7 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type,
-)
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
-
-DOCUMENTATION = r"""
+DOCUMENTATION = """
 ---
 module: virtual_network
 
@@ -76,13 +66,9 @@ options:
     type: str
     choices: ["present", "absent"]
     default: "present"
-
-extends_documentation_fragment:
-  - junipernetworks.apstra.apstra_client_module_args
-
 """
 
-EXAMPLES = r"""
+EXAMPLES = """
 - name: Create a virtual network (or update it if the label exists)
   junipernetworks.apstra.virtual_network:
     id:
@@ -114,7 +100,7 @@ EXAMPLES = r"""
     state: absent
 """
 
-RETURN = r"""
+RETURN = """
 changed:
   description: Indicates whether the module has made any changes.
   type: bool
@@ -140,6 +126,17 @@ msg:
   type: str
   returned: always
 """
+
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
+    compare_and_update,
+)
 
 
 def main():
@@ -191,15 +188,13 @@ def main():
 
                 # See if the object label exists
                 current_object = (
-                    client_factory.object_request(
-                        object_type, "get", id, body
-                    )
+                    client_factory.object_request(object_type, "get", id, body)
                     if "label" in body
                     else None
                 )
                 if current_object:
-                  id[leaf_object_type] = current_object["id"]
-                  result["id"] = id
+                    id[leaf_object_type] = current_object["id"]
+                    result["id"] = id
                 else:
                     # Create the object
                     object = client_factory.object_request(
@@ -223,7 +218,7 @@ def main():
                     )
                     result["changed"] = True
                     if updated_object:
-                      result["response"] = updated_object
+                        result["response"] = updated_object
                     result["changes"] = changes
                     result["msg"] = f"{leaf_object_type} updated successfully"
 
