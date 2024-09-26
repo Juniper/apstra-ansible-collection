@@ -259,6 +259,7 @@ class ApstraClientFactory:
                 "blueprints.virtual_networks",
                 "blueprints.security_zones",
                 "blueprints.routing_policies",
+                "blueprints.tags",
             ],
             "endpointpolicy_client": [
                 "blueprints.endpoint_policies",
@@ -664,3 +665,30 @@ class ApstraClientFactory:
                 changed = True
         
         return changed
+
+    def update_tags(self, id, leaf_type, tags):
+        # Get the blueprint id from the id dict
+        blueprint_id = id.get("blueprint")
+        if blueprint_id is None:
+            self.module.fail_json(msg="Missing 'blueprint' in id")
+
+        # Get the set of tags for the blueprint
+        tags_client = self.get_tags_client()
+        all_tags = tags_client.blueprints[blueprint_id].tags.list()
+        all_tags_set = {tag['label'] for tag in all_tags if 'label' in tag}
+        
+        # Create a set of requested tags for quick lookup
+        tags_set = set(tags)
+
+        # Make sure all requested tags are present
+        if not all_tags_set.issuperset(tags_set):
+            missing_tags = tags_set.difference(all_tags_set)
+            self.module.fail_json(msg=f"update_tags failed: missing tags: {missing_tags}")
+
+        # Find out what tags are not set
+        missing_tags = all_tags_set.difference(tags_set)
+
+        # Update the tags
+        tags_client.blueprints[blueprint_id].tagging([id[leaf_type]], tags, list(missing_tags))
+        self.module.debug(f"Tags updated for {leaf_type} {id}, ADDED: {tags}, REMOVED: {missing_tags}")
+        return tags

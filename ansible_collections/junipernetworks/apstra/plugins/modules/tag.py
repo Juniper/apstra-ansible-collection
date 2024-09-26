@@ -6,13 +6,13 @@
 
 DOCUMENTATION = """
 ---
-module: endpoint_policy
-short_description: Manage endpoint policies in Apstra
-version_added: "0.1.0"
+module: tag
+short_description: Manage tags in Apstra
+version_added: "0.1.6"
 author:
   - "Edwin Jacques (@edwinpjacques)"
 description:
-  - This module allows you to create, update, and delete endpoint policies in Apstra.
+  - This module allows you to create, update, and delete tags in Apstra.
 options:
   api_url:
     description:
@@ -46,20 +46,17 @@ options:
     default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
-      - Dictionary containing the blueprint and endpoint policy IDs.
+      - Dictionary containing the blueprint and tag IDs.
     required: true
     type: dict
   body:
     description:
-      - Dictionary containing the endpoint policy object details.
+      - Dictionary containing the tag object details.
     required: false
     type: dict
-  tags:
-    description:
-      - List of tags to apply to the endpoint policy.
   state:
     description:
-      - Desired state of the endpoint policy.
+      - Desired state of the tag.
     required: false
     type: str
     choices: ["present", "absent"]
@@ -67,40 +64,30 @@ options:
 """
 
 EXAMPLES = """
-- name: Create a endpoint policy (or update it if the label exists)
-  junipernetworks.apstra.endpoint_policy:
+- name: Create a tag (or update it if the label exists)
+  junipernetworks.apstra.tag:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
     body:
-      description: "Example routing policy"
-      expect_default_ipv4_route: true
-      expect_default_ipv6_route: true
-      export_policy:
-        l2edge_subnets: true
-        loopbacks: true
-        spine_leaf_links: false
-        spine_superspine_links: false
-        static_routes: false
-      import_policy: "all"
-      label: "example_policy"
-      policy_type: "user_defined"
+      label: "example_tag"
+      description: "Example tag"
     state: present
 
-- name: Update a endpoint policy
-  junipernetworks.apstra.endpoint_policy:
+- name: Update a tag
+  junipernetworks.apstra.tag:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      endpoint_policy: "AjAuUuVLylXCUgAqaQ"
+      tag: ""Ho9QACZ2tHyxsoWcBA""
     body:
-      description: "test VN description UPDATE"
-      import_policy: "extra_only"
+      label: "example_tag_changed"
+      description: "Example tag UPDATE"
     state: present
 
-- name: Delete a endpoint policy
-  junipernetworks.apstra.endpoint_policy:
+- name: Delete a tag
+  junipernetworks.apstra.tag:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      endpoint_policy: "AjAuUuVLylXCUgAqaQ"
+      tag: ""Ho9QACZ2tHyxsoWcBA""
     state: absent
 """
 
@@ -114,22 +101,17 @@ changes:
   type: dict
   returned: on update
 response:
-  description: The endpoint policy object details.
+  description: The tag object details.
   type: dict
   returned: when state is present and changes are made
 id:
-  description: The ID of the created endpoint policy.
+  description: The ID of the created tag.
   returned: on create, or when object identified by label
   type: dict
   sample: {
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
-      "endpoint_policy": "AjAuUuVLylXCUgAqaQ"
+      "tag": ""Ho9QACZ2tHyxsoWcBA""
   }
-tag_response:
-  description: The response from applying tags to the endpoint policy.
-  type: list
-  returned: when tags are applied
-  sample: ["red", "blue"]
 msg:
   description: The output message that the module generates.
   type: str
@@ -152,7 +134,6 @@ def main():
         state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
         ),
-        tags=dict(type="list", required=False),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | object_module_args
@@ -166,14 +147,13 @@ def main():
         # Instantiate the client factory
         client_factory = ApstraClientFactory.from_params(module)
 
-        object_type = "blueprints.endpoint_policies"
+        object_type = "blueprints.tags"
         leaf_object_type = singular_leaf_object_type(object_type)
 
         # Validate params
         id = module.params["id"]
         body = module.params.get("body", None)
         state = module.params["state"]
-        tags = module.params.get("tags", None)
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -218,24 +198,17 @@ def main():
                 current_object = client_factory.object_request(object_type, "get", id)
 
             if current_object:
-                if body:
-                    # Update the object
-                    changes = {}
-                    if client_factory.compare_and_update(current_object, body, changes):
-                        updated_object = client_factory.object_request(
-                            object_type, "patch", id, changes
-                        )
-                        result["changed"] = True
-                        if updated_object:
-                            result["response"] = updated_object
-                        result["changes"] = changes
-                        result["msg"] = f"{leaf_object_type} updated successfully"
-
-            # Apply tags if specified
-            if tags:
-                result["tag_response"] = client_factory.update_tags(
-                    id, leaf_object_type, tags
-                )
+                # Update the object
+                changes = {}
+                if client_factory.compare_and_update(current_object, body, changes):
+                    updated_object = client_factory.object_request(
+                        object_type, "patch", id, changes
+                    )
+                    result["changed"] = True
+                    if updated_object:
+                        result["response"] = updated_object
+                    result["changes"] = changes
+                    result["msg"] = f"{leaf_object_type} updated successfully"
 
         # If we still don't have an id, there's a problem
         if id is None:

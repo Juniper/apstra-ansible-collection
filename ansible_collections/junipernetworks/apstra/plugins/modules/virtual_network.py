@@ -59,6 +59,9 @@ options:
       - Dictionary containing the virtual network object details.
     required: false
     type: dict
+  tags:
+    description:
+      - List of tags to apply to the virtual network.
   state:
     description:
       - Desired state of the virtual network.
@@ -121,6 +124,11 @@ id:
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
       "virtual_network": "AjAuUuVLylXCUgAqaQ"
   }
+tag_response:
+  description: The response from applying tags to the virtual network.
+  type: list
+  returned: when tags are applied
+  sample: ["red", "blue"]
 msg:
   description: The output message that the module generates.
   type: str
@@ -143,6 +151,7 @@ def main():
         state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
         ),
+        tags=dict(type="list", required=False),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | object_module_args
@@ -163,6 +172,7 @@ def main():
         id = module.params["id"]
         body = module.params.get("body", None)
         state = module.params["state"]
+        tags = module.params.get("tags", None)
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -208,16 +218,23 @@ def main():
 
             if current_object:
                 # Update the object
-                changes = {}
-                if client_factory.compare_and_update(current_object, body, changes):
-                    updated_object = client_factory.object_request(
-                        object_type, "patch", id, changes
-                    )
-                    result["changed"] = True
-                    if updated_object:
-                        result["response"] = updated_object
-                    result["changes"] = changes
-                    result["msg"] = f"{leaf_object_type} updated successfully"
+                if body:
+                    changes = {}
+                    if client_factory.compare_and_update(current_object, body, changes):
+                        updated_object = client_factory.object_request(
+                            object_type, "patch", id, changes
+                        )
+                        result["changed"] = True
+                        if updated_object:
+                            result["response"] = updated_object
+                        result["changes"] = changes
+                        result["msg"] = f"{leaf_object_type} updated successfully"
+
+            # Apply tags if specified
+            if tags:
+                result["tag_response"] = client_factory.update_tags(
+                    id, leaf_object_type, tags
+                )
 
         # If we still don't have an id, there's a problem
         if id is None:

@@ -91,7 +91,9 @@ install: build
 	test-blueprint \
 	test-virtual_network \
 	test-routing_policy \
-	test-security_zone
+	test-security_zone \
+	test-endpoint_policy \
+	test-tag
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -117,7 +119,10 @@ test-security_zone: install
 test-endpoint_policy: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/endpoint_policy.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy
+test-tag: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tag.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag
 
 clean-pipenv:
 	pipenv --rm || true
