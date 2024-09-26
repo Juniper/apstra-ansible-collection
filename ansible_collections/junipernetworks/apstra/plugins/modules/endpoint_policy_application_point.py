@@ -93,9 +93,6 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     apstra_client_module_args,
     ApstraClientFactory,
 )
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
 
 
 def main():
@@ -113,7 +110,7 @@ def main():
 
     try:
         # Instantiate the client factory
-        client_factory = ApstraClientFactory.from_params(module.params)
+        client_factory = ApstraClientFactory.from_params(module)
 
         object_type = "blueprints.endpoint_policies.application_points"
         singular_leaf_object_type = singular_leaf_object_type(object_type)

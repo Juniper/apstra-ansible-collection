@@ -135,9 +135,6 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     ApstraClientFactory,
     singular_leaf_object_type,
 )
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
 
 
 def main():
@@ -158,7 +155,7 @@ def main():
 
     try:
         # Instantiate the client factory
-        client_factory = ApstraClientFactory.from_params(module.params)
+        client_factory = ApstraClientFactory.from_params(module)
 
         object_type = "blueprints.routing_policies"
         leaf_object_type = singular_leaf_object_type(object_type)
@@ -213,7 +210,7 @@ def main():
             if current_object:
                 # Update the object
                 changes = {}
-                if compare_and_update(current_object, body, changes):
+                if client_factory.compare_and_update(current_object, body, changes):
                     updated_object = client_factory.object_request(
                         object_type, "patch", id, changes
                     )

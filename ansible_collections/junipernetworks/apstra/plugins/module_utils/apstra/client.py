@@ -13,6 +13,7 @@ import os
 import re
 import time
 from datetime import datetime
+from ansible.module_utils.basic import AnsibleModule
 
 import urllib3
 
@@ -89,7 +90,8 @@ def _add_objects_to_db(objects_db, full_object_type, objects):
         for object in iterable:
             if object.get("id") is not None:
                 objects_db[full_object_type][object["id"]] = object
-            
+
+
 def _add_parents_to_db(parents_db, parent, children):
     """
     Helper method to add objects to the object_db.
@@ -97,7 +99,7 @@ def _add_parents_to_db(parents_db, parent, children):
     Args:
         parents_db (dict): The database of parents.
         parent (dict): The parent object of the children.
-        children (iterable): List of children to add 
+        children (iterable): List of children to add
         parents for.
     """
     iterable = []
@@ -118,28 +120,31 @@ def _add_parents_to_db(parents_db, parent, children):
         iterable = children
     else:
         raise Exception(f"Invalid children type {children}")
-    
+
     for child in iterable:
         child_id = child.get("id", None)
         if child_id is None:
             # some leaf objects don't have an id
             break
-        
+
         parent_val = parents_db.get(child_id)
         if parent_val is None:
             parents_db[child_id] = parent
         else:
-            raise Exception(f"Parent {parent_val['id']} already set for child {child['id']}")
+            raise Exception(
+                f"Parent {parent_val['id']} already set for child {child['id']}"
+            )
+
 
 # Gets the parent ids from parent_db for a object
 # identified by (plural) type and id. Ids of all parents
 # are returned in the id dictionary.
 # parents_db is a dictionary of child_id to parent_id
-# object_attrs is a list of object types, from the 
+# object_attrs is a list of object types, from the
 # root type to the last type in the id.
 def _get_parent_id(parents_db, object_attrs, id):
     # Walk backwards through the object types
-    for i in range (len(object_attrs) - 1, -1, -1):
+    for i in range(len(object_attrs) - 1, -1, -1):
         parent_attr = object_attrs[i]
         if parent_attr in id:
             # Already have the parent id
@@ -154,14 +159,17 @@ def _get_parent_id(parents_db, object_attrs, id):
             raise Exception(f"Parent {parent} has no id")
         id[parent_attr] = parent_id
 
+
 # Map from plural to singular object types
-_plural_to_singular = [("ies","y"), ("s","")]
+_plural_to_singular = [("ies", "y"), ("s", "")]
+
 
 def singular_leaf_object_type(object_type):
     # Get the singular form of the leaf object type
     # This is used for the id in the object
     attrs = object_type.split(".")
     return singular_object_type(attrs[-1])
+
 
 def singular_to_plural_id(id):
     # Get the plural form of the id
@@ -171,6 +179,7 @@ def singular_to_plural_id(id):
         new_id[plural_object_type(key)] = value
     return new_id
 
+
 def plural_to_singular_id(id):
     # Get the singular form of the id
     # This is used for the id in the object
@@ -178,6 +187,7 @@ def plural_to_singular_id(id):
     for key, value in id.items():
         new_id[singular_object_type(key)] = value
     return new_id
+
 
 def singular_object_type(object_type):
     # Get the singular form of the object type
@@ -187,6 +197,7 @@ def singular_object_type(object_type):
             plural_type = object_type[: -len(plural)] + singular
             return plural_type
     return object_type
+
 
 def plural_object_type(object_type):
     # Get the plural form of the object type
@@ -200,14 +211,24 @@ def plural_object_type(object_type):
             return singular_type
     return object_type
 
+
 # Get blueprint lock tag name
 def _blueprint_lock_tag_name(blueprint_id):
     return "blueprint {} locked".format(blueprint_id)
 
+
 class ApstraClientFactory:
     def __init__(
-        self, api_url, verify_certificates, auth_token, username, password, logout
+        self,
+        module,
+        api_url,
+        verify_certificates,
+        auth_token,
+        username,
+        password,
+        logout,
     ):
+        self.module = module
         self.api_url = api_url
         self.verify_certificates = verify_certificates
         self.auth_token = auth_token
@@ -256,19 +277,27 @@ class ApstraClientFactory:
                 self.network_objects_set[object_type] = object_client
 
     @classmethod
-    def from_params(cls, params):
-        api_url = params.get("api_url")
-        verify_certificates = params.get("verify_certificates")
-        auth_token = params.get("auth_token")
-        username = params.get("username")
-        password = params.get("password")
+    def from_params(cls, module):
+        api_url = module.params.get("api_url")
+        verify_certificates = module.params.get("verify_certificates")
+        auth_token = module.params.get("auth_token")
+        username = module.params.get("username")
+        password = module.params.get("password")
 
         # Do not log out if auth_token is already set
-        logout = params.get("logout")
+        logout = module.params.get("logout")
         if logout is None:
             logout = not bool(auth_token)
 
-        return cls(api_url, verify_certificates, auth_token, username, password, logout)
+        return cls(
+            module=module,
+            api_url=api_url,
+            verify_certificates=verify_certificates,
+            auth_token=auth_token,
+            username=username,
+            password=password,
+            logout=logout,
+        )
 
     def __del__(self):
         if self.logout:
@@ -345,7 +374,7 @@ class ApstraClientFactory:
         # Traverse nested object_type, using attrs to walk to object hierarchy
         attrs = object_type.split(".")
         obj = client
-        label = None 
+        label = None
         for index, attr in enumerate(attrs):
             object = getattr(obj, attr, None)
             if object is None:
@@ -365,7 +394,7 @@ class ApstraClientFactory:
                 obj = object[id_value]
             elif leaf_type:
                 obj = object
-                label = data.get("label") if isinstance(data,dict) else None
+                label = data.get("label") if isinstance(data, dict) else None
             else:
                 singular_attr = singular_object_type(attr)
                 raise Exception(
@@ -440,7 +469,7 @@ class ApstraClientFactory:
         # sort the object types in alphabetical order (also topological order)
         object_types.sort()
 
-        # Maintain a database of (root) objects. object_db[root_type][id] can retrieve 
+        # Maintain a database of (root) objects. object_db[root_type][id] can retrieve
         # any root object by ID. This is used to traverse the object hierarchy.
         objects_db = {}
 
@@ -463,23 +492,17 @@ class ApstraClientFactory:
             r_map = objects_db.get(root_type, {})
             if not r_map:
                 objects_db[root_type] = r_map
-                root_objects = self._object_request(
-                    root_type, "list", {}
-                )
+                root_objects = self._object_request(root_type, "list", {})
                 # Only add the object we care about
                 # If we get by ID, we'll get a graph object.
                 # Not what we want.
                 if root_type in object_id:
                     for root_object in root_objects:
                         if root_object["id"] == object_id[root_type]:
-                            _add_objects_to_db(
-                                objects_db, root_type, root_object
-                            )
+                            _add_objects_to_db(objects_db, root_type, root_object)
                             break
                 else:
-                    _add_objects_to_db(
-                        objects_db, root_type, root_objects
-                    )
+                    _add_objects_to_db(objects_db, root_type, root_objects)
 
             # Iterate through parent objects to get these object
             for i in range(0, len(object_attrs) - 1):
@@ -492,7 +515,7 @@ class ApstraClientFactory:
 
                 # accumalate id's for the object we're getting
                 id = object_id.copy() if object_id else {}
-                
+
                 parent_db = objects_db.get(parent_full_object_type, {})
                 if not parent_db:
                     objects_db[parent_full_object_type] = parent_db
@@ -507,7 +530,7 @@ class ApstraClientFactory:
                 # Iterate through the ids of the parent object to make sure we got it.
                 for key in parent_db.keys():
                     id[parent_attr] = key
-                    _get_parent_id(parents_db, object_attrs[:i+1], id)
+                    _get_parent_id(parents_db, object_attrs[: i + 1], id)
                     parent_value = objects_db[parent_full_object_type][key]
                     if parent_value.get(child_attr) is None:
                         children = self._object_request(
@@ -526,6 +549,10 @@ class ApstraClientFactory:
             root_types[root_type] = objects_db.get(root_type, {})
         return root_types
 
+    # Lock the blueprint with a well-known tag.
+    # This is a "gentlemen's agreement" lock, not a true lock.
+    # A tag is used for locking.
+    # Returns True if locking succeeded, and raises an exception if there is an error.
     def lock_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
         tags_client = self.get_tags_client()
         start_time = time.time()
@@ -544,23 +571,20 @@ class ApstraClientFactory:
                         ),
                     }
                 )
-                break  # Exit the loop if the lock is successful
+                # Successfully locked
+                return True
             except ClientError as ce:
                 error_message = str(ce)
                 if re.search(locked_pattern, error_message):
-                    if time.time() - start_time > timeout:
-                        raise Exception(
-                            f"Failed to lock blueprint {id} within {timeout} seconds"
-                        )
+                    time_left = timeout - (time.time() - start_time)
+                    if time_left <= 0:
+                        self.module.fail_json(msg=f"Failed to lock blueprint {id} within {timeout} seconds")
+                    self.module.debug(f"Blueprint {id} is locked, waiting up to {time_left} seconds for unlock...")
                     time.sleep(interval)
                 else:
-                    raise Exception(
-                        f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {ce}"
-                    )
+                    self.module.fail_json(msg=f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {e}")
             except Exception as e:
-                raise Exception(
-                    f"Unexpected Exception trying to lock blueprint {id} within {timeout} seconds: {e}"
-                )
+                self.module.fail_json(msg=f"Unexpected Exception trying to lock blueprint {id} within {timeout} seconds: {e}")
 
     # Unlock the blueprint
     def unlock_blueprint(self, id):
@@ -585,7 +609,7 @@ class ApstraClientFactory:
         return tag is not None
 
     # Commit the blueprint
-    # Return true if the blueprint was committed, false if already committed.
+    # Return true if the blueprint was committed, false if not.
     def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
         blueprint_client = self.get_client("blueprints")
         start_time = time.time()
@@ -593,13 +617,50 @@ class ApstraClientFactory:
         blueprint = None
         while blueprint == None:
             blueprint = blueprint_client.blueprints[id].get()
-            if time.time() - start_time > timeout:
-                raise Exception(
-                    f"Failed to commit blueprint {id} within {timeout} seconds"
-                )
+            time_left = timeout - (time.time() - start_time)
+            if time_left <= 0:
+                self.module.fail_json(msg=f"Failed to commit blueprint {id} within {timeout} seconds")
+            self.module.debug(f"Waiting {time_left} seconds for blueprint to be committed...")
             time.sleep(interval)
 
         is_committed = blueprint.is_committed()
         if not is_committed:
             blueprint.commit()
         return not is_committed
+
+    def compare_and_update(self, current, desired, changes):
+        """
+        Recursively compare and update the current state to match the desired state.
+        
+        :param current: The current state dictionary.
+        :param desired: The desired state dictionary.
+        :param changes: A dictionary to track changes.
+        :return: True if any changes were made, False otherwise.
+        """
+        changed = False
+        for key, desired_value in desired.items():
+            if key not in current:
+                self.module.fail_json(msg=f"Field '{key}' is missing in the current state.")
+            
+            current_value = current[key]
+            
+            if isinstance(desired_value, dict) and isinstance(current_value, dict):
+                # Recursively compare nested dictionaries
+                nested_changes = {}
+                nested_changed = self.compare_and_update(current_value, desired_value, nested_changes)
+                if nested_changed:
+                    changes[key] = nested_changes
+                    changed = True
+            elif isinstance(desired_value, list) and isinstance(current_value, list):
+                # Compare lists
+                if current_value != desired_value:
+                    current[key] = desired_value
+                    changes[key] = desired_value
+                    changed = True
+            elif current_value != desired_value:
+                # Update the current state and track the change
+                current[key] = desired_value
+                changes[key] = desired_value
+                changed = True
+        
+        return changed

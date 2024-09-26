@@ -135,7 +135,7 @@ def main():
 
     try:
         # Instantiate the client factory
-        client_factory = ApstraClientFactory.from_params(module.params)
+        client_factory = ApstraClientFactory.from_params(module)
         base_client = client_factory.get_base_client()
 
         # If requested, add the available network objects to the result

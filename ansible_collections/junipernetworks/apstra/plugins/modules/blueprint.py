@@ -153,9 +153,6 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
     DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
 )
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.object import (
-    compare_and_update,
-)
 
 
 def main():
@@ -192,7 +189,7 @@ def main():
 
     try:
         # Instantiate the client factory
-        client_factory = ApstraClientFactory.from_params(module.params)
+        client_factory = ApstraClientFactory.from_params(module)
 
         # Get the id if specified
         id = module.params.get("id", None)
@@ -219,7 +216,7 @@ def main():
                     result["changed"] = False
                     # Blueprint does not support updates, make sure there's no changes
                     changes = {}
-                    if compare_and_update(blueprint, body, changes):
+                    if client_factory.compare_and_update(blueprint, body, changes):
                         raise ValueError(
                             "Blueprint already exists and cannot be updated: {}".format(
                                 changes
@@ -244,8 +241,8 @@ def main():
         # Lock the object if requested
         if lock_state == "locked" and state != "absent":
             module.log("Locking blueprint")
-            client_factory.lock_blueprint(blueprint_id, lock_timeout)
-            result["changed"] = True
+            if client_factory.lock_blueprint(blueprint_id, lock_timeout):
+                result["changed"] = True
 
         if state == "absent":
             if id is None:

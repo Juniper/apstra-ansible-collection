@@ -42,7 +42,7 @@
     - name: Commit the blueprint
       junipernetworks.apstra.blueprint:
         id: "{{ bp.id }}"
-        lock_state: "ignore"
+        lock_state: "unlocked"
         state: committed
         auth_token: "{{ auth.token }}"
       register: blueprint_commit

@@ -97,7 +97,7 @@ def main():
     module = AnsibleModule(argument_spec=module_args, supports_check_mode=True)
 
     try:
-        client_factory = ApstraClientFactory.from_params(module.params)
+        client_factory = ApstraClientFactory.from_params(module)
 
         # If auth_token is already set, and we're not logging out, return the auth_token.
         if bool(client_factory.auth_token) and not client_factory.logout:
