@@ -550,7 +550,7 @@ class ApstraClientFactory:
                 if re.search(locked_pattern, error_message):
                     if time.time() - start_time > timeout:
                         raise Exception(
-                            f"Failed to lock blueprint {id} within {timeout} seconds: {ce}"
+                            f"Failed to lock blueprint {id} within {timeout} seconds"
                         )
                     time.sleep(interval)
                 else:
