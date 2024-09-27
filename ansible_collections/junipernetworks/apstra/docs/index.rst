@@ -57,7 +57,7 @@ Modules
 * :ansplugin:`endpoint_policy_application_point module <junipernetworks.apstra.endpoint_policy_application_point#module>` -- Manage endpoint policy application points
 * :ansplugin:`routing_policy module <junipernetworks.apstra.routing_policy#module>` -- Manage routing policies in Apstra
 * :ansplugin:`security_zone module <junipernetworks.apstra.security_zone#module>` -- Manage security zones in Apstra
-* :ansplugin:`tag module <junipernetworks.apstra.tag#module>` --
+* :ansplugin:`tag module <junipernetworks.apstra.tag#module>` -- Manage tags in Apstra
 * :ansplugin:`virtual_network module <junipernetworks.apstra.virtual_network#module>` -- Manage virtual networks in Apstra
 
 .. toctree::

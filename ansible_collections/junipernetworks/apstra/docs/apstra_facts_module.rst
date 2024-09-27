@@ -113,7 +113,7 @@ Parameters
 
         <div class="ansible-option-cell">
 
-      The url used to access the Apstra api.
+      The URL used to access the Apstra api.
 
 
       .. rst-class:: ansible-option-line

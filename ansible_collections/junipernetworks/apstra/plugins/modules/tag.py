@@ -16,7 +16,7 @@ description:
 options:
   api_url:
     description:
-      - The url used to access the Apstra api.
+      - The URL used to access the Apstra api.
     type: str
     required: false
     default: APSTRA_API_URL environment variable
@@ -110,7 +110,7 @@ id:
   type: dict
   sample: {
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
-      "tag": ""Ho9QACZ2tHyxsoWcBA""
+      "tag": "Ho9QACZ2tHyxsoWcBA"
   }
 msg:
   description: The output message that the module generates.

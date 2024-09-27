@@ -17,7 +17,7 @@ author: "Edwin Jacques (@edwinpjacques)"
 options:
   api_url:
     description:
-      - The url used to access the Apstra api.
+      - The URL used to access the Apstra api.
     type: str
     required: false
     default: APSTRA_API_URL environment variable
