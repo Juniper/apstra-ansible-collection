@@ -96,16 +96,19 @@ available_network_facts:
   returned: when available_network_facts is true
   type: list
   sample: ['blueprint.virtual_networks', 'blueprint.security_zones', 'blueprint.endpoint_policies', 'blueprint.endpoint_policies.application_points']
-facts:
+ansible_facts:
   description: Dictionary containing the gathered facts.
   returned: always
   type: dict
   sample: {
-    "blueprints": {
-      "virtual_networks": {...},
-      "routing_zone_constraints": {...},
-      "endpoint_policies": {
-        "application_points": {...}
+    "apstra_version": "5.0.0",
+    "apstra_facts": {
+      "blueprints": {
+        "virtual_networks": {...},
+        "routing_zone_constraints": {...},
+        "endpoint_policies": {
+          "application_points": {...}
+        }
       }
     }
   }
@@ -170,8 +173,8 @@ def main():
 
         # Structure used for gathered facts
         facts = {
-            "version": version,
-            "objects": object_map,
+            "apstra_version": version,
+            "apstra_facts": object_map,
         }
 
         # Set the gathered facts in the result

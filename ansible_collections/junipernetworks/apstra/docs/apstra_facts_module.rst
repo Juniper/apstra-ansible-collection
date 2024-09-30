@@ -19,7 +19,7 @@ junipernetworks.apstra.apstra_facts module -- Gather facts from Apstra AOS
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.6).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.8).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -490,51 +490,6 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
       .. rst-class:: ansible-option-sample
 
       :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`["blueprint.virtual\_networks", "blueprint.security\_zones", "blueprint.endpoint\_policies", "blueprint.endpoint\_policies.application\_points"]`
-
-
-      .. raw:: html
-
-        </div>
-
-
-  * - .. raw:: html
-
-        <div class="ansible-option-cell">
-        <div class="ansibleOptionAnchor" id="return-facts"></div>
-
-      .. _ansible_collections.junipernetworks.apstra.apstra_facts_module__return-facts:
-
-      .. rst-class:: ansible-option-title
-
-      **facts**
-
-      .. raw:: html
-
-        <a class="ansibleOptionLink" href="#return-facts" title="Permalink to this return value"></a>
-
-      .. ansible-option-type-line::
-
-        :ansible-option-type:`dictionary`
-
-      .. raw:: html
-
-        </div>
-
-    - .. raw:: html
-
-        <div class="ansible-option-cell">
-
-      Dictionary containing the gathered facts.
-
-
-      .. rst-class:: ansible-option-line
-
-      :ansible-option-returned-bold:`Returned:` always
-
-      .. rst-class:: ansible-option-line
-      .. rst-class:: ansible-option-sample
-
-      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`{"blueprints": {"endpoint\_policies": {"application\_points": {"...": null}}, "routing\_zone\_constraints": {"...": null}, "virtual\_networks": {"...": null}}}`
 
 
       .. raw:: html

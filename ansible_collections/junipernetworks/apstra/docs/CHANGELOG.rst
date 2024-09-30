@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.8
+======
+
+Minor Changes
+-------------
+
+- Changed apstra_facts to return the apstra_facts object under the ansible_facts object. Also, rename version to apstra_version.
+
 v0.1.7
 ======
 
