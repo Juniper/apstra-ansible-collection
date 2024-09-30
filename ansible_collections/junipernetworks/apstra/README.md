@@ -40,14 +40,14 @@ This collection has been tested against following Ansible versions: **>=2.15**.
 ### Modules
 Name | Description
 --- | ---
-[junipernetworks.apstra.apstra_facts](docs/apstra_facts_module.rst) | Collect network facts from Apstra
-[junipernetworks.apstra.authenticate](docs/authenticate_module.rst) | Authenticate to Apstra API
-[junipernetworks.apstra.blueprint](docs/blueprint_module.rst) | Manage blueprints
-[junipernetworks.apstra.endpoint_policy](docs/endpoint_policy_module.rst) | Manage endpoint policies
-[junipernetworks.apstra.endpoint_policy_application_point](docs/endpoint_policy_application_point_module.rst) | Manage endpoint policy application points
-[junipernetworks.apstra.routing_policy](docs/routing_policy_module.rst) | Manage routing policies
-[junipernetworks.apstra.security_zone](docs/security_zone_module.rst) | Manage security zones
-[junipernetworks.apstra.virtual_network](docs/virtual_network_module.rst) | Manage virtual networks
+[junipernetworks.apstra.apstra_facts](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/apstra_facts_module.rst) | Collect network facts from Apstra
+[junipernetworks.apstra.authenticate](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/authenticate_module.rst) | Authenticate to Apstra API
+[junipernetworks.apstra.blueprint](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/blueprint_module.rst) | Manage blueprints
+[junipernetworks.apstra.endpoint_policy](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/endpoint_policy_module.rst) | Manage endpoint policies
+[junipernetworks.apstra.endpoint_policy_application_point](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/endpoint_policy_application_point_module.rst) | Manage endpoint policy application points
+[junipernetworks.apstra.routing_policy](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/routing_policy_module.rst) | Manage routing policies
+[junipernetworks.apstra.security_zone](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/security_zone_module.rst) | Manage security zones
+[junipernetworks.apstra.virtual_network](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/virtual_network_module.rst) | Manage virtual networks
 
 Click the `Content` button to see the list of content included in this collection.
 
@@ -67,7 +67,7 @@ collections:
   - name: junipernetworks.apstra
 ```
 
-You can ensure that the [required packages](docs/requirements.txt) are installed via pip. For example, if your collection is installed in the default location:
+You can ensure that the [required packages](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/requirements.txt) are installed via pip. For example, if your collection is installed in the default location:
 
 ```shell
 pip install -r ~/junipernetworks/apstra/docs/requirements.txt
@@ -136,7 +136,7 @@ Please read and familiarize yourself with this document.
 
 ## Release Notes
 
-Release notes are available [here](docs/CHANGELOG.rst).
+Release notes are available [here](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/CHANGELOG.rst).
 
 ## Roadmap
 

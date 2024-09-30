@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.9
+======
+
+Minor Changes
+-------------
+
+- Change paths for the doc links to point to internal site.
+
 v0.1.8
 ======
 
