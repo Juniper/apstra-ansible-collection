@@ -125,6 +125,26 @@ id:
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
       "routing_policy": "AjAuUuVLylXCUgAqaQ"
   }
+routing_policy:
+  description: The routing policy object details.
+  returned: on create or update
+  type: dict
+  sample: {
+      "id": "AjAuUuVLylXCUgAqaQ",
+      "label": "example_policy",
+      "description": "example routing policy",
+      "expect_default_ipv4_route": true,
+      "expect_default_ipv6_route": true,
+      "export_policy": {
+          "l2edge_subnets": true,
+          "loopbacks": true,
+          "spine_leaf_links": false,
+          "spine_superspine_links": false,
+          "static_routes": false
+      },
+      "import_policy": "all",
+      "policy_type": "user_defined"
+  }
 tag_response:
   description: The response from applying tags to the routing policy.
   type: list
@@ -236,6 +256,9 @@ def main():
                 result["tag_response"] = client_factory.update_tags(
                     id, leaf_object_type, tags
                 )
+
+            # Return the final object state
+            result[leaf_object_type] = client_factory.object_request(object_type, "get", id)
 
         # If we still don't have an id, there's a problem
         if id is None:

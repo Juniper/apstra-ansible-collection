@@ -4,6 +4,22 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.10
+=======
+
+Major Changes
+-------------
+
+- Moved the endpoint_policies_application_points module into the endpoint_policies module.
+- Added the resource_groups module to support update and delete operations on resource groups.
+
+Minor Changes
+-------------
+
+- Add support for blueprint.policy_types to apstra_facts.
+- Add support for blueprint.resource_groups to apstra_facts.
+- Return the object state on create or update for virtual_networks, security_zones, routing_policies, endpoint_policies and tags.
+
 v0.1.9
 ======
 

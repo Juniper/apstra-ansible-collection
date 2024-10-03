@@ -19,7 +19,7 @@ junipernetworks.apstra.routing_policy module -- Manage routing policies in Apstr
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.9).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.10).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -686,6 +686,51 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
       .. rst-class:: ansible-option-line
 
       :ansible-option-returned-bold:`Returned:` when state is present and changes are made
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-routing_policy"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.routing_policy_module__return-routing_policy:
+
+      .. rst-class:: ansible-option-title
+
+      **routing_policy**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-routing_policy" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      The routing policy object details.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` on create or update
+
+      .. rst-class:: ansible-option-line
+      .. rst-class:: ansible-option-sample
+
+      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`{"description": "example routing policy", "expect\_default\_ipv4\_route": true, "expect\_default\_ipv6\_route": true, "export\_policy": {"l2edge\_subnets": true, "loopbacks": true, "spine\_leaf\_links": false, "spine\_superspine\_links": false, "static\_routes": false}, "id": "AjAuUuVLylXCUgAqaQ", "import\_policy": "all", "label": "example\_policy", "policy\_type": "user\_defined"}`
 
 
       .. raw:: html

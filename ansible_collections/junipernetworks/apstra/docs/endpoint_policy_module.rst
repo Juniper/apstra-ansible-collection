@@ -19,7 +19,7 @@ junipernetworks.apstra.endpoint_policy module -- Manage endpoint policies in Aps
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.9).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.10).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -46,7 +46,7 @@ Synopsis
 
 .. Description
 
-- This module allows you to create, update, and delete endpoint policies in Apstra.
+- This module allows you to create, update, and delete endpoint policies and application points in Apstra.
 
 
 .. Aliases
@@ -561,6 +561,51 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
       .. rst-class:: ansible-option-line
 
       :ansible-option-returned-bold:`Returned:` on update
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-endpoint_policy"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_module__return-endpoint_policy:
+
+      .. rst-class:: ansible-option-title
+
+      **endpoint_policy**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-endpoint_policy" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      The endpoint policy object details.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` on create or update
+
+      .. rst-class:: ansible-option-line
+      .. rst-class:: ansible-option-sample
+
+      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`{"description": "Example routing policy", "expect\_default\_ipv4\_route": true, "expect\_default\_ipv6\_route": true, "export\_policy": {"l2edge\_subnets": true, "loopbacks": true, "spine\_leaf\_links": false, "spine\_superspine\_links": false, "static\_routes": false}, "id": "AjAuUuVLylXCUgAqaQ", "import\_policy": "all", "label": "example\_policy", "policy\_type": "user\_defined"}`
 
 
       .. raw:: html

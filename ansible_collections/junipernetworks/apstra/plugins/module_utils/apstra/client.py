@@ -7,6 +7,9 @@ from aos.sdk.reference_design.freeform.client import Client as freeformClient
 from aos.sdk.reference_design.extension.endpoint_policy import (
     Client as endpointPolicyClient,
 )
+from aos.sdk.reference_design.extension.resource_allocation import (
+    Client as resourceAllocationClient,
+)
 from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
 from aos.sdk.graph import Graph
 import os
@@ -25,6 +28,11 @@ DEFAULT_BLUEPRINT_COMMIT_TIMEOUT = 120
 
 
 def apstra_client_module_args():
+    """
+    Return the module arguments for an Apstra module.
+
+    :return: The module arguments.
+    """
     return dict(
         api_url=dict(type="str", required=False, default=os.getenv("APSTRA_API_URL")),
         verify_certificates=dict(
@@ -131,18 +139,21 @@ def _add_parents_to_db(parents_db, parent, children):
         if parent_val is None:
             parents_db[child_id] = parent
         else:
-            raise Exception(
-                f"Parent {parent_val['id']} already set for child {child['id']}"
-            )
+            # Nothing to do if the parent is already set
+            return
 
 
-# Gets the parent ids from parent_db for a object
-# identified by (plural) type and id. Ids of all parents
-# are returned in the id dictionary.
-# parents_db is a dictionary of child_id to parent_id
-# object_attrs is a list of object types, from the
-# root type to the last type in the id.
 def _get_parent_id(parents_db, object_attrs, id):
+    """
+    Get the parent ids from the parent_db for an object identified by (plural) type and id.
+    Ids of all parents are returned in the id dictionary.
+    
+    :param parents_db: A dictionary of child_id to parent_id.
+    :param object_attrs: A list of object types, from the root type to the last type in the id.
+    :param id: The dictionary of ids.
+    
+    :raises Exception: If the parent is not found or has no id.
+    """
     # Walk backwards through the object types
     for i in range(len(object_attrs) - 1, -1, -1):
         parent_attr = object_attrs[i]
@@ -165,15 +176,22 @@ _plural_to_singular = [("ies", "y"), ("s", "")]
 
 
 def singular_leaf_object_type(object_type):
-    # Get the singular form of the leaf object type
-    # This is used for the id in the object
+    """
+    Get the singular form of the leaf object type.
+    
+    :param object_type: The object type.
+    """
     attrs = object_type.split(".")
     return singular_object_type(attrs[-1])
 
 
 def singular_to_plural_id(id):
-    # Get the plural form of the id
-    # This is used for the id in the object
+    """
+    Get the plural form of the id.
+    
+    :param id: The id dictionary.
+    :return: The id dictionary with plural object types.
+    """
     new_id = {}
     for key, value in id.items():
         new_id[plural_object_type(key)] = value
@@ -181,8 +199,12 @@ def singular_to_plural_id(id):
 
 
 def plural_to_singular_id(id):
-    # Get the singular form of the id
-    # This is used for the id in the object
+    """
+    Get the singular form of the id.
+    
+    :param id: The id dictionary.
+    :return: The id dictionary with singular object types.
+    """
     new_id = {}
     for key, value in id.items():
         new_id[singular_object_type(key)] = value
@@ -190,8 +212,12 @@ def plural_to_singular_id(id):
 
 
 def singular_object_type(object_type):
-    # Get the singular form of the object type
-    # This is used for the id in the object
+    """
+    Get the singular form of the object type.
+    
+    :param object_type: The object type.
+    :return: The singular form of the object type.
+    """
     for plural, singular in _plural_to_singular:
         if object_type.endswith(plural):
             plural_type = object_type[: -len(plural)] + singular
@@ -200,8 +226,12 @@ def singular_object_type(object_type):
 
 
 def plural_object_type(object_type):
-    # Get the plural form of the object type
-    # This is used for the id in the object
+    """
+    Get the plural form of the object type.
+    
+    :param object_type: The object type.
+    :return: The plural form of the object type.
+    """
     for plural, singular in _plural_to_singular:
         if singular == "" and object_type:
             singular_type = object_type + plural
@@ -212,12 +242,28 @@ def plural_object_type(object_type):
     return object_type
 
 
-# Get blueprint lock tag name
 def _blueprint_lock_tag_name(blueprint_id):
+    """
+    Get the tag name for locking a blueprint.
+    
+    :param blueprint_id: The ID of the blueprint.
+    :return: The tag name.
+    """
     return "blueprint {} locked".format(blueprint_id)
 
 
 class ApstraClientFactory:
+    """
+    Factory class to create and manage Apstra clients.
+    
+    :param module: The Ansible module.
+    :param api_url: The URL of the AOS API.
+    :param verify_certificates: Whether to verify SSL certificates.
+    :param auth_token: The authentication token.
+    :param username: The username for authentication.
+    :param password: The password for authentication.
+    :param logout: Whether to log out after the operation.
+    """
     def __init__(
         self,
         module,
@@ -241,6 +287,7 @@ class ApstraClientFactory:
         self.freeform_client = None
         self.endpointpolicy_client = None
         self.tags_client = None
+        self.resource_allocation_client = None
 
         # Map client members to client types
         self._client_types = {
@@ -249,6 +296,7 @@ class ApstraClientFactory:
             "freeform_client": freeformClient,
             "endpointpolicy_client": endpointPolicyClient,
             "tags_client": tagsClient,
+            "resource_allocation_client": resourceAllocationClient,
         }
 
         # Map client to types. Dotted types are traversed.
@@ -258,14 +306,17 @@ class ApstraClientFactory:
                 "blueprints",
                 "blueprints.virtual_networks",
                 "blueprints.security_zones",
+                "blueprints.resource_groups",
                 "blueprints.routing_policies",
                 "blueprints.tags",
             ],
             "endpointpolicy_client": [
+                "blueprints.policy_types",
                 "blueprints.endpoint_policies",
                 "blueprints.endpoint_policies.application_points",
             ],
             "tags_client": ["blueprints.tags"],
+            "resource_allocation_client": ["blueprints.resource_groups"],
         }
 
         # Populate the list (and set) of supported objects
@@ -279,6 +330,11 @@ class ApstraClientFactory:
 
     @classmethod
     def from_params(cls, module):
+        """
+        Create an ApstraClientFactory from the module parameters.
+        
+        :param module: The Ansible module.
+        """
         api_url = module.params.get("api_url")
         verify_certificates = module.params.get("verify_certificates")
         auth_token = module.params.get("auth_token")
@@ -301,11 +357,18 @@ class ApstraClientFactory:
         )
 
     def __del__(self):
+        """
+        Log out when the object is deleted.
+        """
         if self.logout:
             base_client = self.get_base_client()
             base_client.logout()
 
     def _login(self, client):
+        """
+        Log in to the client.
+        :param client: The client to log in to.
+        """
         if bool(self.auth_token):
             client.set_auth_token(self.auth_token)
         elif self.username and self.password:
@@ -316,6 +379,12 @@ class ApstraClientFactory:
             )
 
     def _get_client(self, client_attr, client_class):
+        """
+        Get the client instance for the given attribute.
+        :param client_attr: The attribute name of the client.
+        :param client_class: The class of the client.
+        :return: The client instance.
+        """
         client_instance = getattr(self, client_attr)
         if client_instance is None:
             client_instance = client_class(self.api_url, self.verify_certificates)
@@ -324,6 +393,11 @@ class ApstraClientFactory:
         return client_instance
 
     def get_client(self, object_type):
+        """
+        Get the client for the given object type.
+        :param object_type: The object type.
+        :return: The client instance.
+        """
         client_attr = self.network_objects_set.get(object_type)
         if client_attr is None:
             raise Exception("Unsupported object type: {}".format(object_type))
@@ -333,21 +407,53 @@ class ApstraClientFactory:
         return self._get_client(client_attr, client_type)
 
     def get_base_client(self):
+        """
+        Get the base client.
+        :return: The base client instance.
+        """
         return self._get_client("base_client", Client)
 
     def get_l3clos_client(self):
+        """
+        Get the L3 CLOS client.
+        :return: The L3 CLOS client instance.
+        """
         return self._get_client("l3clos_client", l3closClient)
 
     def get_freeform_client(self):
+        """
+        Get the freeform client.
+        :return: The freeform client instance."""
         return self._get_client("freeform_client", freeformClient)
 
     def get_endpointpolicy_client(self):
+        """
+        Get the endpoint policy client.
+        :return: The endpoint policy client instance.
+        """
         return self._get_client("endpointpolicy_client", endpointPolicyClient)
 
     def get_tags_client(self):
+        """
+        Get the tags client.
+        :return: The tags client instance.
+        """
         return self._get_client("tags_client", tagsClient)
 
+    def get_resource_allocation_client(self):
+        """
+        Get the resource allocation client.
+        :return: The resource allocation client instance.
+        """
+        return self._get_client("resource_allocation_client", resourceAllocationClient)
+
     def validate_id(self, object_type, id):
+        """
+        Validate the id for the object type.
+        :param object_type: The object type.
+        :param id: The id dictionary.
+        :return: A list of missing required attributes.
+        """
         # Traverse nested object_type
         attrs = object_type.split(".")
         missing = []
@@ -357,19 +463,36 @@ class ApstraClientFactory:
                 missing.append(singular_attr)
         return missing
 
-    # Call object op. If op is 'get', will get one object, or all objects of that type.
-    # If data is supplied, it will be passed into the operation on create or update.
-    # For "get" or "list" operations, the result can be filtered by label if the
-    # label key is found in the data dictionary.
-    # The id is a dictionary including any required keys for the object type.
-    # For example, for blueprints.virtual_networks, the id would be {'blueprint': 'my_blueprint', 'virtual_network': 'my_vn'}
-    # If the leaf object (e.g.- virtual_network) is not specified, all objects are returned (e.g. -- all virtual networks for a blueprint)
     def object_request(self, object_type, op="get", id={}, data=None):
+        """
+        Call object op. If op is 'get', will get one object, or all objects of that type.
+        If data is supplied, it will be passed into the operation on create or update.
+        For "get" or "list" operations, the result can be filtered by label if the
+        label key is found in the data dictionary.
+        The id is a dictionary including any required keys for the object type.
+        For example, for blueprints.virtual_networks, the id would be {'blueprint': 'my_blueprint', 'virtual_network': 'my_vn'}
+        If the leaf object (e.g.- virtual_network) is not specified, all objects are returned (e.g. -- all virtual networks for a blueprint)
+
+        :param object_type: The object type.
+        :param op: The operation to perform.
+        :param id: The id dictionary.
+        :param data: The data to pass to the operation.
+        :return: The result of the operation.
+        """
         plural_id = singular_to_plural_id(id)
         return self._object_request(object_type, op, plural_id, data)
 
-    # Internal method uses the plural types to simplify logic
     def _object_request(self, object_type, op="get", id={}, data=None):
+        """
+        Call object op. If op is 'get', will get one object, or all objects of that type.
+        Internal method uses the plural types to simplify logic
+        
+        :param object_type: The object type.
+        :param op: The operation to perform.
+        :param id: The id dictionary.
+        :param data: The data to pass to the operation.
+        :return: The result of the operation.
+        """
         client = self.get_client(object_type)
 
         # Traverse nested object_type, using attrs to walk to object hierarchy
@@ -550,11 +673,16 @@ class ApstraClientFactory:
             root_types[root_type] = objects_db.get(root_type, {})
         return root_types
 
-    # Lock the blueprint with a well-known tag.
-    # This is a "gentlemen's agreement" lock, not a true lock.
-    # A tag is used for locking.
-    # Returns True if locking succeeded, and raises an exception if there is an error.
     def lock_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_LOCK_TIMEOUT):
+        """
+        Lock the blueprint with the given ID.
+        This is a "gentlemen's agreement" lock, not a true lock.
+        A tag is used for locking.
+        
+        :param id: The ID of the blueprint to lock.
+        :param timeout: The maximum time to wait for the blueprint to be locked.
+        :return: True if the blueprint was locked, False if not.
+        """
         tags_client = self.get_tags_client()
         start_time = time.time()
         interval = 5
@@ -587,8 +715,12 @@ class ApstraClientFactory:
             except Exception as e:
                 self.module.fail_json(msg=f"Unexpected Exception trying to lock blueprint {id} within {timeout} seconds: {e}")
 
-    # Unlock the blueprint
     def unlock_blueprint(self, id):
+        """
+        Unlock the blueprint with the given ID.
+        :param id: The ID of the blueprint to unlock.
+        :return: True if the blueprint was unlocked, False if not.
+        """
         tags_client = self.get_tags_client()
         tag_name = _blueprint_lock_tag_name(id)
 
@@ -602,16 +734,25 @@ class ApstraClientFactory:
         # Tag was not locked.
         return False
 
-    # Ensure that the blueprint is locked
     def check_blueprint_locked(self, id):
+        """
+        Check if the blueprint with the given ID is locked.
+        :param id: The ID of the blueprint to check.
+        :return: True if the blueprint is locked, False if not.
+        """
         # Try to get the tag on the given blueprint
         tags_client = self.get_tags_client()
         tag = tags_client.blueprints[id].tags.get(label=_blueprint_lock_tag_name(id))
         return tag is not None
 
-    # Commit the blueprint
-    # Return true if the blueprint was committed, false if not.
     def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
+        """
+        Commit the blueprint with the given ID.
+        
+        :param id: The ID of the blueprint to commit.
+        :param timeout: The maximum time to wait for the blueprint to be committed.
+        :return: True if the blueprint was committed, False if not.
+        """
         blueprint_client = self.get_client("blueprints")
         start_time = time.time()
         interval = 5
@@ -666,7 +807,33 @@ class ApstraClientFactory:
         
         return changed
 
+    def extract_field(self, data, field_name):
+        """
+        Extract a top-level field from a dictionary, remove it from the original dictionary,
+        and return it in a new dictionary.
+
+        :param data: The original dictionary.
+        :param field_name: The field to extract.
+        :return: A new dictionary containing the extracted field, or None.
+        """
+        if field_name not in data:
+            # Nothing to do
+            return None
+        
+        # Extract the field
+        field_value = data.pop(field_name)
+        
+        # Return the field in a new dictionary
+        return {field_name: field_value}
+
     def update_tags(self, id, leaf_type, tags):
+        """
+        Update the tags for a leaf object.
+
+        :param id: The ID of the leaf object.
+        :param leaf_type: The type of the leaf object.
+        :param tags: The tags to set.
+        """
         # Get the blueprint id from the id dict
         blueprint_id = id.get("blueprint")
         if blueprint_id is None:

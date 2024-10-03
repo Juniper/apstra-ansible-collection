@@ -66,6 +66,18 @@
       ansible.builtin.debug:
         var: sz
 
+    - name: Get security_zone by label
+      junipernetworks.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "test-vrf-label"
+        auth_token: "{{ auth.token }}"
+      register: sz_by_label
+
+    - name: Show retrieved security_zone
+      ansible.builtin.debug:
+        var: sz_by_label
+
     - name: Create security_zone (no change)
       junipernetworks.apstra.security_zone:
         id: "{{ bp.id }}"

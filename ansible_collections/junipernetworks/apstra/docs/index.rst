@@ -3,7 +3,7 @@
 Junipernetworks.Apstra
 ======================
 
-Collection version 0.1.9
+Collection version 0.1.10
 
 .. contents::
    :local:
@@ -54,7 +54,7 @@ Modules
 * :ansplugin:`authenticate module <junipernetworks.apstra.authenticate#module>` -- Apstra authentication
 * :ansplugin:`blueprint module <junipernetworks.apstra.blueprint#module>` -- Manage Apstra blueprints
 * :ansplugin:`endpoint_policy module <junipernetworks.apstra.endpoint_policy#module>` -- Manage endpoint policies in Apstra
-* :ansplugin:`endpoint_policy_application_point module <junipernetworks.apstra.endpoint_policy_application_point#module>` -- Manage endpoint policy application points
+* :ansplugin:`resource_group module <junipernetworks.apstra.resource_group#module>` -- Manage resource groups in Apstra
 * :ansplugin:`routing_policy module <junipernetworks.apstra.routing_policy#module>` -- Manage routing policies in Apstra
 * :ansplugin:`security_zone module <junipernetworks.apstra.security_zone#module>` -- Manage security zones in Apstra
 * :ansplugin:`tag module <junipernetworks.apstra.tag#module>` -- Manage tags in Apstra
@@ -68,7 +68,7 @@ Modules
     authenticate_module
     blueprint_module
     endpoint_policy_module
-    endpoint_policy_application_point_module
+    resource_group_module
     routing_policy_module
     security_zone_module
     tag_module

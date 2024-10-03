@@ -19,7 +19,7 @@ junipernetworks.apstra.virtual_network module -- Manage virtual networks in Apst
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.9).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.10).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -725,6 +725,51 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
       .. rst-class:: ansible-option-sample
 
       :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`["red", "blue"]`
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-virtual_network"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.virtual_network_module__return-virtual_network:
+
+      .. rst-class:: ansible-option-title
+
+      **virtual_network**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-virtual_network" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      The virtual network object details.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` on create or update
+
+      .. rst-class:: ansible-option-line
+      .. rst-class:: ansible-option-sample
+
+      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`{"description": "test VN description", "id": "AjAuUuVLylXCUgAqaQ", "ipv4\_enabled": true, "label": "Test-VN-label", "virtual\_gateway\_ipv4\_enabled": true, "vn\_id": "16777214", "vn\_type": "vxlan"}`
 
 
       .. raw:: html

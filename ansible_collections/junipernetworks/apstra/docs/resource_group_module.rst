@@ -7,26 +7,26 @@
 
 .. Anchors
 
-.. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module:
+.. _ansible_collections.junipernetworks.apstra.resource_group_module:
 
 .. Anchors: short name for ansible.builtin
 
 .. Title
 
-junipernetworks.apstra.endpoint_policy_application_point module -- Manage endpoint policy application points
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+junipernetworks.apstra.resource_group module -- Manage resource groups in Apstra
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.9).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.10).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
 
     To install it, use: :code:`ansible-galaxy collection install junipernetworks.apstra`.
 
-    To use it in a playbook, specify: :code:`junipernetworks.apstra.endpoint_policy_application_point`.
+    To use it in a playbook, specify: :code:`junipernetworks.apstra.resource_group`.
 
 .. version_added
 
@@ -46,7 +46,7 @@ Synopsis
 
 .. Description
 
-- This module allows you to update the endpoint policy application points in Apstra.
+- This module allows you to update, and delete resource groups in Apstra.
 
 
 .. Aliases
@@ -80,7 +80,7 @@ Parameters
         <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-api_url"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-api_url:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-api_url:
 
       .. rst-class:: ansible-option-title
 
@@ -118,7 +118,7 @@ Parameters
         <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-auth_token"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-auth_token:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-auth_token:
 
       .. rst-class:: ansible-option-title
 
@@ -156,7 +156,7 @@ Parameters
         <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-body"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-body:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-body:
 
       .. rst-class:: ansible-option-title
 
@@ -178,7 +178,7 @@ Parameters
 
         <div class="ansible-option-cell">
 
-      Dictionary containing the endpoint policy application point object details.
+      Dictionary containing the resource group object details.
 
 
       .. raw:: html
@@ -188,21 +188,21 @@ Parameters
   * - .. raw:: html
 
         <div class="ansible-option-cell">
-        <div class="ansibleOptionAnchor" id="parameter-logout"></div>
+        <div class="ansibleOptionAnchor" id="parameter-id"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-logout:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-id:
 
       .. rst-class:: ansible-option-title
 
-      **logout**
+      **id**
 
       .. raw:: html
 
-        <a class="ansibleOptionLink" href="#parameter-logout" title="Permalink to this option"></a>
+        <a class="ansibleOptionLink" href="#parameter-id" title="Permalink to this option"></a>
 
       .. ansible-option-type-line::
 
-        :ansible-option-type:`boolean`
+        :ansible-option-type:`dictionary` / :ansible-option-required:`required`
 
       .. raw:: html
 
@@ -212,15 +212,13 @@ Parameters
 
         <div class="ansible-option-cell">
 
-      If set to true, the module will log out the current session.
+      Dictionary containing the blueprint and resource group IDs.
 
+      To identify the resource group, the resource\_type and group\_name fields are required.
 
-      .. rst-class:: ansible-option-line
+      When creating a resource group, only the blueprint field is required, other fields
 
-      :ansible-option-choices:`Choices:`
-
-      - :ansible-option-choices-entry-default:`false` :ansible-option-choices-default-mark:`← (default)`
-      - :ansible-option-choices-entry:`true`
+      are specified in the body.
 
 
       .. raw:: html
@@ -232,7 +230,7 @@ Parameters
         <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-password"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-password:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-password:
 
       .. rst-class:: ansible-option-title
 
@@ -268,9 +266,51 @@ Parameters
   * - .. raw:: html
 
         <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-state"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-state:
+
+      .. rst-class:: ansible-option-title
+
+      **state**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-state" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`string`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Desired state of the resource group.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-choices:`Choices:`
+
+      - :ansible-option-choices-entry-default:`"present"` :ansible-option-choices-default-mark:`← (default)`
+      - :ansible-option-choices-entry:`"absent"`
+
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-username"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-username:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-username:
 
       .. rst-class:: ansible-option-title
 
@@ -308,7 +348,7 @@ Parameters
         <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-verify_certificates"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__parameter-verify_certificates:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__parameter-verify_certificates:
 
       .. rst-class:: ansible-option-title
 
@@ -362,18 +402,25 @@ Examples
 
 .. code-block:: yaml+jinja
 
-    - name: Update a endpoint policy application point
-      junipernetworks.apstra.endpoint_policy_application_point:
+    - name: Update a resource group
+      junipernetworks.apstra.resource_group:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-          endpoint_policy: "AjAuUuVLylXCUgAqaQ"
-          application_point: "ABCuVLylXCUgA777"
+          group_type: "ip"
+          group_name: "sz:s1dQM4lDL8BBfxOsYQ,leaf_loopback_ips"
         body:
-          application_points:
-            - node_id: "AjAuUuVLylXCUgAqaQ"
-              used: true
-            - node_id: "ABCuVLylXCUgA777"
-              used: false
+          pool_ids:
+            - "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+            - "77777777-7f37-7e17-7d57-7f9c26f16967"
+        state: present
+
+    - name: Delete a resource group
+      junipernetworks.apstra.resource_group:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+          group_type: "ip"
+          group_name: "sz:s1dQM4lDL8BBfxOsYQ,leaf_loopback_ips"
+        state: absent
 
 
 
@@ -402,7 +449,7 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
         <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="return-changed"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__return-changed:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__return-changed:
 
       .. rst-class:: ansible-option-title
 
@@ -424,7 +471,7 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
 
         <div class="ansible-option-cell">
 
-      Indicates whether the module has made any changes. True if successful.
+      Indicates whether the module has made any changes.
 
 
       .. rst-class:: ansible-option-line
@@ -440,9 +487,49 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
   * - .. raw:: html
 
         <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-changes"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__return-changes:
+
+      .. rst-class:: ansible-option-title
+
+      **changes**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-changes" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Dictionary of updates that were applied.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` on update
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="return-msg"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__return-msg:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__return-msg:
 
       .. rst-class:: ansible-option-title
 
@@ -480,9 +567,54 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
   * - .. raw:: html
 
         <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-resource_group"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__return-resource_group:
+
+      .. rst-class:: ansible-option-title
+
+      **resource_group**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-resource_group" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      The resource group object details.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` on create or update
+
+      .. rst-class:: ansible-option-line
+      .. rst-class:: ansible-option-sample
+
+      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`{"name": "sz:s1dQM4lDL8BBfxOsYQ,leaf\_loopback\_ips", "pool\_ids": ["5f2a77f6-1f33-4e11-8d59-6f9c26f16962"], "type": "ip"}`
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="return-response"></div>
 
-      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_application_point_module__return-response:
+      .. _ansible_collections.junipernetworks.apstra.resource_group_module__return-response:
 
       .. rst-class:: ansible-option-title
 
@@ -504,12 +636,12 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
 
         <div class="ansible-option-cell">
 
-      The response from the Apstra API.
+      The resource group object details.
 
 
       .. rst-class:: ansible-option-line
 
-      :ansible-option-returned-bold:`Returned:` on update
+      :ansible-option-returned-bold:`Returned:` when state is present and changes are made
 
 
       .. raw:: html

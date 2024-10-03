@@ -6,13 +6,13 @@
 
 DOCUMENTATION = """
 ---
-module: tag
-short_description: Manage tags in Apstra
-version_added: "0.1.6"
+module: resource_group
+short_description: Manage resource groups in Apstra
+version_added: "0.1.0"
 author:
   - "Edwin Jacques (@edwinpjacques)"
 description:
-  - This module allows you to create, update, and delete tags in Apstra.
+  - This module allows you to update, and delete resource groups in Apstra.
 options:
   api_url:
     description:
@@ -46,17 +46,20 @@ options:
     default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
-      - Dictionary containing the blueprint and tag IDs.
+      - Dictionary containing the blueprint and resource group IDs.
+      - To identify the resource group, the resource_type and group_name fields are required.
+      - When creating a resource group, only the blueprint field is required, other fields
+      - are specified in the body.
     required: true
     type: dict
   body:
     description:
-      - Dictionary containing the tag object details.
+      - Dictionary containing the resource group object details.
     required: false
     type: dict
   state:
     description:
-      - Desired state of the tag.
+      - Desired state of the resource group.
     required: false
     type: str
     choices: ["present", "absent"]
@@ -64,30 +67,24 @@ options:
 """
 
 EXAMPLES = """
-- name: Create a tag (or update it if the label exists)
-  junipernetworks.apstra.tag:
+- name: Update a resource group
+  junipernetworks.apstra.resource_group:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+      group_type: "ip"
+      group_name: "sz:s1dQM4lDL8BBfxOsYQ,leaf_loopback_ips"
     body:
-      label: "example_tag"
-      description: "Example tag"
+      pool_ids:
+        - "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        - "77777777-7f37-7e17-7d57-7f9c26f16967"
     state: present
 
-- name: Update a tag
-  junipernetworks.apstra.tag:
+- name: Delete a resource group
+  junipernetworks.apstra.resource_group:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      tag: ""Ho9QACZ2tHyxsoWcBA""
-    body:
-      label: "example_tag_changed"
-      description: "Example tag UPDATE"
-    state: present
-
-- name: Delete a tag
-  junipernetworks.apstra.tag:
-    id:
-      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      tag: ""Ho9QACZ2tHyxsoWcBA""
+      group_type: "ip"
+      group_name: "sz:s1dQM4lDL8BBfxOsYQ,leaf_loopback_ips"
     state: absent
 """
 
@@ -101,26 +98,20 @@ changes:
   type: dict
   returned: on update
 response:
-  description: The tag object details.
+  description: The resource group object details.
   type: dict
   returned: when state is present and changes are made
-id:
-  description: The ID of the created tag.
-  returned: on create, or when object identified by label
-  type: dict
-  sample: {
-      "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
-      "tag": "Ho9QACZ2tHyxsoWcBA"
-  }
-tag:
-  description: The tag object details.
-  type: dict
+resource_group:
+  description: The resource group object details.
   returned: on create or update
+  type: dict
   sample: {
-      "id": "Ho9QACZ2tHyxsoWcBA",
-      "label": "example_tag",
-      "description": "Example tag"
-  }
+      type: "ip",
+      name: "sz:s1dQM4lDL8BBfxOsYQ,leaf_loopback_ips",
+      pool_ids: [
+        "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+      ]
+    }
 msg:
   description: The output message that the module generates.
   type: str
@@ -156,7 +147,7 @@ def main():
         # Instantiate the client factory
         client_factory = ApstraClientFactory.from_params(module)
 
-        object_type = "blueprints.tags"
+        object_type = "blueprints.resource_groups"
         leaf_object_type = singular_leaf_object_type(object_type)
 
         # Validate params
@@ -165,62 +156,43 @@ def main():
         state = module.params["state"]
 
         # Validate the id
-        missing_id = client_factory.validate_id(object_type, id)
-        if len(missing_id) > 1 or (
-            len(missing_id) == 1
-            and state == "absent"
-            and missing_id[0] != leaf_object_type
-        ):
-            raise ValueError(f"Invalid id: {id} for desired state of {state}.")
-        object_id = id.get(leaf_object_type, None)
+        if "blueprint" not in id:
+            raise ValueError("Must specify 'blueprint' in id")
+        if state == "absent" and ("group_type" not in id or "group_name" not in id):
+            raise ValueError(
+                "Must specify 'group_type' and 'group_name' in id to delete a resource group"
+            )
+        group_type = id.get("group_type", None)
+        group_name = id.get("group_name", None)
+
+        if group_type is None or group_name is None:
+            raise ValueError(
+                f"Must specify 'group_type' and 'group_name' in id to manage a {leaf_object_type}"
+            )
+
+        # Get the object
+        ra_client = client_factory.get_resource_allocation_client()
+        resource_group = ra_client.blueprints[id["blueprint"]].resource_groups[group_type][group_name]
 
         # Make the requested changes
         if state == "present":
             current_object = None
-            if object_id is None:
-                if body is None:
-                    raise ValueError(
-                        f"Must specify 'body' to create a {leaf_object_type}"
-                    )
-
-                # See if the object label exists
-                current_object = (
-                    client_factory.object_request(object_type, "get", id, body)
-                    if "label" in body
-                    else None
-                )
-                if current_object:
-                    id[leaf_object_type] = current_object["id"]
-                    result["id"] = id
-                else:
-                    # Create the object
-                    created_object = client_factory.object_request(
-                        object_type, "create", id, body
-                    )
-                    object_id = created_object["id"]
-                    id[leaf_object_type] = object_id
-                    result["id"] = id
-                    result["changed"] = True
-                    result["response"] = created_object
-                    result["msg"] = f"{leaf_object_type} created successfully"
-            else:
-                current_object = client_factory.object_request(object_type, "get", id)
+            current_object = resource_group.get()
 
             if current_object:
-                # Update the object
-                changes = {}
-                if client_factory.compare_and_update(current_object, body, changes):
-                    updated_object = client_factory.object_request(
-                        object_type, "patch", id, changes
-                    )
-                    result["changed"] = True
-                    if updated_object:
-                        result["response"] = updated_object
-                    result["changes"] = changes
-                    result["msg"] = f"{leaf_object_type} updated successfully"
-              
+                if body:
+                    # Update the object
+                    changes = {}
+                    if client_factory.compare_and_update(current_object, body, changes):
+                        updated_object = resource_group.update(changes)
+                        result["changed"] = True
+                        if updated_object:
+                            result["response"] = updated_object
+                        result["changes"] = changes
+                        result["msg"] = f"{leaf_object_type} updated successfully"
+
             # Return the final object state
-            result[leaf_object_type] = client_factory.object_request(object_type, "get", id)
+            result[leaf_object_type] = resource_group.get()
 
         # If we still don't have an id, there's a problem
         if id is None:

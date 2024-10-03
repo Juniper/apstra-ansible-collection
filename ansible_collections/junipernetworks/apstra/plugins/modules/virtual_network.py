@@ -124,6 +124,19 @@ id:
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
       "virtual_network": "AjAuUuVLylXCUgAqaQ"
   }
+virtual_network:
+  description: The virtual network object details.
+  returned: on create or update
+  type: dict
+  sample: {
+      "id": "AjAuUuVLylXCUgAqaQ",
+      "label": "Test-VN-label",
+      "description": "test VN description",
+      "ipv4_enabled": true,
+      "virtual_gateway_ipv4_enabled": true,
+      "vn_id": "16777214",
+      "vn_type": "vxlan"
+  }
 tag_response:
   description: The response from applying tags to the virtual network.
   type: list
@@ -235,6 +248,9 @@ def main():
                 result["tag_response"] = client_factory.update_tags(
                     id, leaf_object_type, tags
                 )
+
+            # Return the final object state
+            result[leaf_object_type] = client_factory.object_request(object_type, "get", id)
 
         # If we still don't have an id, there's a problem
         if id is None:

@@ -12,7 +12,7 @@ version_added: "0.1.0"
 author:
   - "Edwin Jacques (@edwinpjacques)"
 description:
-  - This module allows you to create, update, and delete endpoint policies in Apstra.
+  - This module allows you to create, update, and delete endpoint policies and application points in Apstra.
 options:
   api_url:
     description:
@@ -125,6 +125,26 @@ id:
       "blueprint": "5f2a77f6-1f33-4e11-8d59-6f9c26f16962",
       "endpoint_policy": "AjAuUuVLylXCUgAqaQ"
   }
+endpoint_policy:
+  description: The endpoint policy object details.
+  returned: on create or update
+  type: dict
+  sample: {
+      "id": "AjAuUuVLylXCUgAqaQ",
+      "description": "Example routing policy",
+      "expect_default_ipv4_route": true,
+      "expect_default_ipv6_route": true,
+      "export_policy": {
+        "l2edge_subnets": true,
+        "loopbacks": true,
+        "spine_leaf_links": false,
+        "spine_superspine_links": false,
+        "static_routes": false
+      },
+      "import_policy": "all",
+      "label": "example_policy",
+      "policy_type": "user_defined"
+    }
 tag_response:
   description: The response from applying tags to the endpoint policy.
   type: list
@@ -168,6 +188,12 @@ def main():
 
         object_type = "blueprints.endpoint_policies"
         leaf_object_type = singular_leaf_object_type(object_type)
+        application_points_object_type = (
+            "blueprints.endpoint_policies.application_points"
+        )
+        application_points_leaf_object_type = singular_leaf_object_type(
+            application_points_object_type
+        )
 
         # Validate params
         id = module.params["id"]
@@ -218,13 +244,43 @@ def main():
                 current_object = client_factory.object_request(object_type, "get", id)
 
             if current_object:
+                current_object[application_points_leaf_object_type] = (
+                    client_factory.object_request(
+                        application_points_object_type, "get", id
+                    )
+                )
                 if body:
+                    # Handle application points separately
+                    body_application_points = body.get(
+                        application_points_leaf_object_type, None
+                    )
                     # Update the object
                     changes = {}
                     if client_factory.compare_and_update(current_object, body, changes):
                         updated_object = client_factory.object_request(
                             object_type, "patch", id, changes
                         )
+                        # Need the response object to be a dict
+                        if not isinstance(dict, updated_object):
+                            updated_object = {}
+                        application_point_changes = {}
+
+                        # Update the application points if needed
+                        if body_application_points:
+                            if client_factory.compare_and_update(
+                                current_object[application_points_leaf_object_type],
+                                body_application_points,
+                                application_point_changes,
+                            ):
+                                updated_object[application_points_leaf_object_type] = (
+                                    client_factory.object_request(
+                                        application_points_object_type,
+                                        "patch",
+                                        id,
+                                        changes,
+                                    )
+                                )
+
                         result["changed"] = True
                         if updated_object:
                             result["response"] = updated_object
@@ -236,6 +292,11 @@ def main():
                 result["tag_response"] = client_factory.update_tags(
                     id, leaf_object_type, tags
                 )
+
+            # Return the final object state
+            result[leaf_object_type] = client_factory.object_request(
+                object_type, "get", id
+            )
 
         # If we still don't have an id, there's a problem
         if id is None:
