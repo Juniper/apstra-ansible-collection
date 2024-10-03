@@ -15,6 +15,7 @@
           template_id: "L2_Virtual_EVPN"
           design: "two_stage_l3clos"
           init_type: "template_reference"
+          label: "endpoint-test"
         lock_state: "locked"
         auth_token: "{{ auth.token }}"
       register: bp
@@ -85,9 +86,8 @@
       ansible.builtin.debug:
         var: vn
 
-    - name: Get endpoint_policy
+    - name: Get all endpoint_policies
       junipernetworks.apstra.apstra_facts:
-        id: "{{ bp.id }}"
         gather_network_facts:
           - blueprints.endpoint_policies
           - blueprints.endpoint_policies.application_points
@@ -96,42 +96,7 @@
 
     - name: Show endpoint policies
       ansible.builtin.debug:
-        var: ep
-
-    - name: Commit the blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "ignore"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_commit
-
-    - name: Show committed blueprint
-      ansible.builtin.debug:
-        var: blueprint_commit
-
-    - name: Delete the virtual_network
-      junipernetworks.apstra.virtual_network:
-        id: "{{ vn.id }}"
-        state: absent
-        auth_token: "{{ auth.token }}"
-      register: vn_delete
-
-    - name: Show deleted virtual_network
-      ansible.builtin.debug:
-        var: vn_delete
-
-    - name: Commit and unlock blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "unlocked"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_unlock
-
-    - name: Show unlocked blueprint
-      ansible.builtin.debug:
-        var: blueprint_unlock
+        var: ep.ansible_facts.apstra_facts.blueprints
 
     - name: Delete blueprint
       junipernetworks.apstra.blueprint:
