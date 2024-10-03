@@ -4,6 +4,21 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.11
+=======
+
+Major Changes
+-------------
+
+- Added the following apstra_facts:
+    - asn_pools
+    - device_pools
+    - integer_pools
+    - ip_pools
+    - ipv6_pools
+    - vlan_pools
+    - vni_pools
+
 v0.1.10
 =======
 

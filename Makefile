@@ -40,6 +40,7 @@ setup: clean-pipenv
 pipenv:
 	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
+	pipenv run ansible-galaxy collection install --ignore-certs --force community.general
 
 release-build: docs
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
@@ -93,7 +94,8 @@ install: build
 	test-routing_policy \
 	test-security_zone \
 	test-endpoint_policy \
-	test-tag
+	test-tag \
+	test-resource_group
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -122,7 +124,10 @@ test-endpoint_policy: install
 test-tag: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tag.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag
+test-resource_group: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/resource_group.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group
 
 clean-pipenv:
 	pipenv --rm || true

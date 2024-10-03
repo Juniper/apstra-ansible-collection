@@ -192,7 +192,7 @@ def main():
                         result["msg"] = f"{leaf_object_type} updated successfully"
 
             # Return the final object state
-            result[leaf_object_type] = resource_group.get()
+            result[leaf_object_type] = current_object
 
         # If we still don't have an id, there's a problem
         if id is None:

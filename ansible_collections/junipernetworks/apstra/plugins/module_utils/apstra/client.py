@@ -302,6 +302,15 @@ class ApstraClientFactory:
         # Map client to types. Dotted types are traversed.
         # Should be in topological order (e.g.-- blueprints before blueprints.config_templates)
         self._client_to_types = {
+            "base_client": [
+                "asn_pools",
+                "device_pools",
+                "integer_pools",
+                "ip_pools",
+                "ipv6_pools",
+                "vlan_pools",
+                "vni_pools",
+            ],
             "l3clos_client": [
                 "blueprints",
                 "blueprints.virtual_networks",
@@ -782,7 +791,9 @@ class ApstraClientFactory:
         changed = False
         for key, desired_value in desired.items():
             if key not in current:
-                self.module.fail_json(msg=f"Field '{key}' is missing in the current state.")
+                # Field is missing in the current state, probably only for create
+                self.module.debug(f"Field '{key}' missing in current state, ignoring it")
+                continue
             
             current_value = current[key]
             

@@ -13,6 +13,7 @@ antsibull-docs = "<3.0.0,>=2.0.0"
 sphinx-ansible-theme = ">=0.9.0"
 ansible-pygments = "*"
 sphinx = "*"
+jmespath = "*"
 
 [requires]
 python_version = "3.11"
