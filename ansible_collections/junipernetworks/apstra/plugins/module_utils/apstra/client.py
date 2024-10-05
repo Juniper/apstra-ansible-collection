@@ -175,14 +175,24 @@ def _get_parent_id(parents_db, object_attrs, id):
 _plural_to_singular = [("ies", "y"), ("s", "")]
 
 
+def plural_leaf_object_type(object_type):
+    """
+    Get the plural form of the leaf object type.
+    
+    :param object_type: The object type.
+    """
+    attrs = object_type.split(".")
+    return attrs[-1]
+
+
 def singular_leaf_object_type(object_type):
     """
     Get the singular form of the leaf object type.
     
     :param object_type: The object type.
     """
-    attrs = object_type.split(".")
-    return singular_object_type(attrs[-1])
+    plural_type = plural_leaf_object_type(object_type)
+    return singular_object_type(plural_type)
 
 
 def singular_to_plural_id(id):
@@ -308,15 +318,18 @@ class ApstraClientFactory:
                 "integer_pools",
                 "ip_pools",
                 "ipv6_pools",
+                "devices",
                 "vlan_pools",
                 "vni_pools",
             ],
             "l3clos_client": [
                 "blueprints",
+                "blueprints.nodes",
                 "blueprints.virtual_networks",
                 "blueprints.security_zones",
                 "blueprints.resource_groups",
                 "blueprints.routing_policies",
+                "blueprints.systems",
                 "blueprints.tags",
             ],
             "endpointpolicy_client": [
@@ -538,13 +551,19 @@ class ApstraClientFactory:
             if not leaf_type:
                 continue
 
+            # Determine the operation to perform
             op_attr = None
-            read_only = op in ["list", "get"]
-            no_arg = True if op in ["delete"] else read_only
+            # url is use to customize list request
+            url = None
+
             # Try list then get if id is not specified
+            read_only = op in ["list", "get"]
             if read_only:
                 try:
                     op_attr = getattr(obj, "list")
+                    # Blueprints are filtered to limit the data volume
+                    if object_type == "blueprints.nodes":
+                        url = f"?node_type={self.module.params.get('node_type')}"
                 except AttributeError:
                     try:
                         op_attr = getattr(obj, "get")
@@ -563,42 +582,56 @@ class ApstraClientFactory:
 
             # Call the op on the object
             try:
-                if no_arg:
-                    ret = op_attr()
-                    if read_only and label:
-                        iterable = None
-                        if isinstance(ret, list):
-                            iterable = ret
-                        elif isinstance(ret, dict):
-                            if "id" in ret:
-                                iterable = [ret]
-                            elif "items" in ret:
-                                iterable = ret["items"]
-                            else:
-                                iterable = ret.values()
-                        # Filter the result by label
-                        for object in iterable:
-                            if object.get("label") == label:
-                                return object
-                        return None
+                if read_only:
+                    if url:
+                        # a list request with a filter
+                        return op_attr(url=url)
                     else:
-                        return ret
+                        ret = op_attr()
+                        if label:
+                            iterable = None
+                            if isinstance(ret, list):
+                                iterable = ret
+                            elif isinstance(ret, dict):
+                                if "id" in ret:
+                                    iterable = [ret]
+                                elif "items" in ret:
+                                    iterable = ret["items"]
+                                else:
+                                    iterable = ret.values()
+                            # Filter the result by label
+                            for object in iterable:
+                                if object.get("label") == label:
+                                    return object
+                            return None
+                        else:
+                            return ret
                 else:
+                    # probably a create
                     return op_attr(data)
             except TypeError as te:
                 # Bug -- 404 results in None, which generated API blindly subscripts
                 if te.args[0] == "'NoneType' object is not subscriptable":
                     return None
 
-    # List all objects in the set of types and return them as a dictionary
-    # Method used by Ansible module uses singular object types, internally we use plural.
     def list_all_objects(self, object_types, object_id={}):
+        """
+        List all objects in the set of types and return them as a dictionary.
+        Method used by Ansible module uses singular object types, internally we use plural.
+        :param object_types: The object types.
+        :param object_id: The id dictionary.
+        :return: The objects as a dictionary.
+        """
         plural_object_id = singular_to_plural_id(object_id)
         return self._list_all_objects(object_types, plural_object_id)
 
-    # List all objects in the set of types and return them as a dictionary
-    # object_id types should be plural.
     def _list_all_objects(self, object_types, object_id={}):
+        """
+        List all objects in the set of types and return them as a dictionary.
+        :param object_types: The object types.
+        :param object_id: The id dictionary. The type names should be plural.
+        :return: The objects as a dictionary.
+        """
         # sort the object types in alphabetical order (also topological order)
         object_types.sort()
 

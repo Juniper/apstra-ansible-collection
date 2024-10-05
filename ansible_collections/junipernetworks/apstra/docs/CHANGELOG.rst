@@ -4,6 +4,20 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.12
+
+Major Changes
+-------------
+
+- Fixed the update of application-points by always patching the application-point object if data is supplied in the application_points field of the endpoint_policy module body field.
+- Added apstra_facts support for "blueprints.systems", "devices" and "nodes".
+
+Bug Fixes
+---------
+
+- Application point changes were not processed if the endpoints were not changed. Resolved.
+
+
 v0.1.11
 =======
 

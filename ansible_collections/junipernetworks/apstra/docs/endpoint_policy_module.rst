@@ -19,7 +19,7 @@ junipernetworks.apstra.endpoint_policy module -- Manage endpoint policies in Aps
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.11).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.12).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -179,6 +179,8 @@ Parameters
         <div class="ansible-option-cell">
 
       Dictionary containing the endpoint policy object details.
+
+      If the body contains an entry named "application\_points", it expected to be a list of dicts, each containing a "node\_id" string and a "used" boolean to be used to patch the application points.
 
 
       .. raw:: html
@@ -430,7 +432,7 @@ Examples
 
 .. code-block:: yaml+jinja
 
-    - name: Create a endpoint policy (or update it if the label exists)
+    - name: Create an endpoint policy (or update it if the label exists)
       junipernetworks.apstra.endpoint_policy:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -449,17 +451,26 @@ Examples
           policy_type: "user_defined"
         state: present
 
-    - name: Update a endpoint policy
+    - name: Update an endpoint policy
       junipernetworks.apstra.endpoint_policy:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
           endpoint_policy: "AjAuUuVLylXCUgAqaQ"
         body:
           description: "test VN description UPDATE"
-          import_policy: "extra_only"
+
+    - name: Update an endpoint policy application point
+      junipernetworks.apstra.endpoint_policy:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+          endpoint_policy: "AjAuUuVLylXCUgAqaQ"
+        body:
+          application_points:
+            - node_id: "j1Il2r77JebUuZQ7wQ"
+              used: true
         state: present
 
-    - name: Delete a endpoint policy
+    - name: Delete an endpoint policy
       junipernetworks.apstra.endpoint_policy:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"

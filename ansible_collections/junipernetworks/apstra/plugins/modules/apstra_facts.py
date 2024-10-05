@@ -57,6 +57,12 @@ options:
       - Dictionary containing identifiers to focus us.
     required: false
     type: dict
+  node_type:
+    description:
+      - Type of the node to return from the graph.
+    type: str
+    required: false
+    default: "system"
   available_network_facts:
     description:
       - If set to true, the module will return a list of available network objects.
@@ -128,6 +134,7 @@ def main():
         gather_network_facts=dict(
             type="list", elements="str", required=False, default=["blueprints"]
         ),
+        node_type=dict(type="str", required=False, default="system"),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | facts_module_args

@@ -52,6 +52,7 @@ options:
   body:
     description:
       - Dictionary containing the endpoint policy object details.
+      - If the body contains an entry named "application_points", it expected to be a list of dicts, each containing a "node_id" string and a "used" boolean to be used to patch the application points.
     required: false
     type: dict
   tags:
@@ -67,7 +68,7 @@ options:
 """
 
 EXAMPLES = """
-- name: Create a endpoint policy (or update it if the label exists)
+- name: Create an endpoint policy (or update it if the label exists)
   junipernetworks.apstra.endpoint_policy:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -86,17 +87,26 @@ EXAMPLES = """
       policy_type: "user_defined"
     state: present
 
-- name: Update a endpoint policy
+- name: Update an endpoint policy
   junipernetworks.apstra.endpoint_policy:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
       endpoint_policy: "AjAuUuVLylXCUgAqaQ"
     body:
       description: "test VN description UPDATE"
-      import_policy: "extra_only"
+
+- name: Update an endpoint policy application point
+  junipernetworks.apstra.endpoint_policy:
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+      endpoint_policy: "AjAuUuVLylXCUgAqaQ"
+    body:
+      application_points:
+        - node_id: "j1Il2r77JebUuZQ7wQ"
+          used: true
     state: present
 
-- name: Delete a endpoint policy
+- name: Delete an endpoint policy
   junipernetworks.apstra.endpoint_policy:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -162,6 +172,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     apstra_client_module_args,
     ApstraClientFactory,
     singular_leaf_object_type,
+    plural_leaf_object_type,
 )
 
 
@@ -191,7 +202,10 @@ def main():
         application_points_object_type = (
             "blueprints.endpoint_policies.application_points"
         )
-        application_points_leaf_object_type = singular_leaf_object_type(
+        application_point_leaf_object_type = singular_leaf_object_type(
+            application_points_object_type
+        )
+        application_points_leaf_object_type = plural_leaf_object_type(
             application_points_object_type
         )
 
@@ -244,16 +258,12 @@ def main():
                 current_object = client_factory.object_request(object_type, "get", id)
 
             if current_object:
-                current_object[application_points_leaf_object_type] = (
+                current_object[application_point_leaf_object_type] = (
                     client_factory.object_request(
                         application_points_object_type, "get", id
                     )
                 )
                 if body:
-                    # Handle application points separately
-                    body_application_points = body.get(
-                        application_points_leaf_object_type, None
-                    )
                     # Update the object
                     changes = {}
                     if client_factory.compare_and_update(current_object, body, changes):
@@ -263,29 +273,27 @@ def main():
                         # Need the response object to be a dict
                         if not isinstance(dict, updated_object):
                             updated_object = {}
-                        application_point_changes = {}
 
-                        # Update the application points if needed
-                        if body_application_points:
-                            if client_factory.compare_and_update(
-                                current_object[application_points_leaf_object_type],
-                                body_application_points,
-                                application_point_changes,
-                            ):
-                                updated_object[application_points_leaf_object_type] = (
-                                    client_factory.object_request(
-                                        application_points_object_type,
-                                        "patch",
-                                        id,
-                                        changes,
-                                    )
-                                )
+                    # Update the application points if needed
+                    if application_points_leaf_object_type in body:
+                        updated_object[application_point_leaf_object_type] = (
+                            client_factory.object_request(
+                                application_points_object_type,
+                                "patch",
+                                id,
+                                body[application_points_leaf_object_type],
+                            )
+                        )
+                        # Any ap changes are added to the changes dict
+                        changes[application_point_leaf_object_type] = body[
+                            application_points_leaf_object_type
+                        ]
 
-                        result["changed"] = True
-                        if updated_object:
-                            result["response"] = updated_object
-                        result["changes"] = changes
-                        result["msg"] = f"{leaf_object_type} updated successfully"
+                    result["changed"] = changes != {}
+                    if updated_object:
+                        result["response"] = updated_object
+                    result["changes"] = changes
+                    result["msg"] = f"{leaf_object_type} updated successfully"
 
             # Apply tags if specified
             if tags:

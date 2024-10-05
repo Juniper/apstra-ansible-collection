@@ -19,7 +19,7 @@ junipernetworks.apstra.apstra_facts module -- Gather facts from Apstra AOS
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.11).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.12).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -269,6 +269,44 @@ Parameters
 
       Dictionary containing identifiers to focus us.
 
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-node_type"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.apstra_facts_module__parameter-node_type:
+
+      .. rst-class:: ansible-option-title
+
+      **node_type**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-node_type" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`string`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Type of the node to return from the graph.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-default-bold:`Default:` :ansible-option-default:`"system"`
 
       .. raw:: html
 
