@@ -40,7 +40,7 @@ setup: clean-pipenv
 pipenv:
 	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
-	pipenv run ansible-galaxy collection install --ignore-certs --force community.general
+	pipenv run ansible-doc commmunity.general &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force community.general
 
 release-build: docs
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
