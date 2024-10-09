@@ -167,3 +167,7 @@ cython_debug/
 
 # developer-specific VS Code settings
 .vscode/settings.json
+
+# Apple crap
+.DS_Store
+.swp
