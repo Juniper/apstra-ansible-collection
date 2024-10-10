@@ -59,7 +59,7 @@ options:
     type: dict
   node_type:
     description:
-      - Type of the node to return from the graph.
+      - If getting nodes, the type of the node to return from the graph.
     type: str
     required: false
     default: "system"
