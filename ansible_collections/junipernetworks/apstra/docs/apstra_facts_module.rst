@@ -19,7 +19,7 @@ junipernetworks.apstra.apstra_facts module -- Gather facts from Apstra AOS
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.12).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.13).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -301,7 +301,7 @@ Parameters
 
         <div class="ansible-option-cell">
 
-      Type of the node to return from the graph.
+      If getting nodes, the type of the node to return from the graph.
 
 
       .. rst-class:: ansible-option-line

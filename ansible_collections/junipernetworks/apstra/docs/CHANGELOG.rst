@@ -4,7 +4,16 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.13
+=======
+
+Bug Fixes
+---------
+
+- Delete operation was not working for security zones and virtual networks. Resolved.
+
 v0.1.12
+=======
 
 Major Changes
 -------------

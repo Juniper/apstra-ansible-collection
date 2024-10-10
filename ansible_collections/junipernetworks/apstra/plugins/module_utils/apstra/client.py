@@ -607,8 +607,12 @@ class ApstraClientFactory:
                         else:
                             return ret
                 else:
-                    # probably a create
-                    return op_attr(data)
+                    if data:
+                        # create or update
+                        return op_attr(data)
+                    else:
+                        # delete
+                        return op_attr()
             except TypeError as te:
                 # Bug -- 404 results in None, which generated API blindly subscripts
                 if te.args[0] == "'NoneType' object is not subscriptable":

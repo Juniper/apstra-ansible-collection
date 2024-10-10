@@ -51,21 +51,27 @@
     - name: Use the leaf_nodes to set the svi_ips
       ansible.builtin.set_fact:
         svi_ips: >-
-          {%- set result = [] -%}
-          {%- for node in leaf_nodes -%}
-          {%- set _ = result.append({
-              'system_id': node,
+          {{
+            leaf_nodes | map('community.general.dict_kv', 'system_id') | map('combine', {
               'ipv4_mode': 'enabled',
               'ipv4_addr': None,
               'ipv6_mode': 'disabled',
               'ipv6_addr': None
-            }) -%}
-          {%- endfor -%}
-          {{ result }}
+            }) | list
+          }}
 
-    - name: Show svi_ips
+    - name: Use the leaf_nodes to set the bound_to
+      ansible.builtin.set_fact:
+        bound_to: >-
+          {{
+            leaf_nodes | map('community.general.dict_kv', 'system_id') | map('combine', {
+              'access_switch_node_ids': []
+            }) | list
+          }}
+
+    - name: Show bound_to
       ansible.builtin.debug:
-        var: svi_ips
+        var: bound_to
 
     - name: Create virtual_network
       junipernetworks.apstra.virtual_network:
@@ -77,8 +83,9 @@
           virtual_gateway_ipv4_enabled: true
           vn_id: "16777214"
           vn_type: "vxlan"
-          svi_ips: svi_ips
           dhcp_service: "dhcpServiceEnabled"
+          svi_ips: "{{ svi_ips }}"
+          bound_to: "{{ bound_to }}"
         auth_token: "{{ auth.token }}"
       register: vn
 
@@ -127,18 +134,6 @@
     - name: Show deleted virtual_network
       ansible.builtin.debug:
         var: vn_delete
-
-    - name: Commit blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "ignore"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_unlock
-
-    - name: Show blueprint
-      ansible.builtin.debug:
-        var: blueprint_unlock
 
     - name: Delete blueprint
       junipernetworks.apstra.blueprint:
