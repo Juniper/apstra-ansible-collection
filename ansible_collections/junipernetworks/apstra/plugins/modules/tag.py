@@ -77,7 +77,7 @@ EXAMPLES = """
   junipernetworks.apstra.tag:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      tag: ""Ho9QACZ2tHyxsoWcBA""
+      tag: "Ho9QACZ2tHyxsoWcBA"
     body:
       label: "example_tag_changed"
       description: "Example tag UPDATE"
@@ -87,7 +87,7 @@ EXAMPLES = """
   junipernetworks.apstra.tag:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      tag: ""Ho9QACZ2tHyxsoWcBA""
+      tag: "Ho9QACZ2tHyxsoWcBA"
     state: absent
 """
 
@@ -218,7 +218,7 @@ def main():
                         result["response"] = updated_object
                     result["changes"] = changes
                     result["msg"] = f"{leaf_object_type} updated successfully"
-              
+
             # Return the final object state
             result[leaf_object_type] = client_factory.object_request(object_type, "get", id)
 

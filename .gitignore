@@ -167,3 +167,6 @@ cython_debug/
 
 # developer-specific VS Code settings
 .vscode/settings.json
+
+# Mac mess
+.DS_Store

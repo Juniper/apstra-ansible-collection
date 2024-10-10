@@ -147,11 +147,11 @@ def _get_parent_id(parents_db, object_attrs, id):
     """
     Get the parent ids from the parent_db for an object identified by (plural) type and id.
     Ids of all parents are returned in the id dictionary.
-    
+
     :param parents_db: A dictionary of child_id to parent_id.
     :param object_attrs: A list of object types, from the root type to the last type in the id.
     :param id: The dictionary of ids.
-    
+
     :raises Exception: If the parent is not found or has no id.
     """
     # Walk backwards through the object types
@@ -178,7 +178,7 @@ _plural_to_singular = [("ies", "y"), ("s", "")]
 def plural_leaf_object_type(object_type):
     """
     Get the plural form of the leaf object type.
-    
+
     :param object_type: The object type.
     """
     attrs = object_type.split(".")
@@ -188,7 +188,7 @@ def plural_leaf_object_type(object_type):
 def singular_leaf_object_type(object_type):
     """
     Get the singular form of the leaf object type.
-    
+
     :param object_type: The object type.
     """
     plural_type = plural_leaf_object_type(object_type)
@@ -198,7 +198,7 @@ def singular_leaf_object_type(object_type):
 def singular_to_plural_id(id):
     """
     Get the plural form of the id.
-    
+
     :param id: The id dictionary.
     :return: The id dictionary with plural object types.
     """
@@ -211,7 +211,7 @@ def singular_to_plural_id(id):
 def plural_to_singular_id(id):
     """
     Get the singular form of the id.
-    
+
     :param id: The id dictionary.
     :return: The id dictionary with singular object types.
     """
@@ -224,7 +224,7 @@ def plural_to_singular_id(id):
 def singular_object_type(object_type):
     """
     Get the singular form of the object type.
-    
+
     :param object_type: The object type.
     :return: The singular form of the object type.
     """
@@ -238,7 +238,7 @@ def singular_object_type(object_type):
 def plural_object_type(object_type):
     """
     Get the plural form of the object type.
-    
+
     :param object_type: The object type.
     :return: The plural form of the object type.
     """
@@ -255,7 +255,7 @@ def plural_object_type(object_type):
 def _blueprint_lock_tag_name(blueprint_id):
     """
     Get the tag name for locking a blueprint.
-    
+
     :param blueprint_id: The ID of the blueprint.
     :return: The tag name.
     """
@@ -265,7 +265,7 @@ def _blueprint_lock_tag_name(blueprint_id):
 class ApstraClientFactory:
     """
     Factory class to create and manage Apstra clients.
-    
+
     :param module: The Ansible module.
     :param api_url: The URL of the AOS API.
     :param verify_certificates: Whether to verify SSL certificates.
@@ -354,7 +354,7 @@ class ApstraClientFactory:
     def from_params(cls, module):
         """
         Create an ApstraClientFactory from the module parameters.
-        
+
         :param module: The Ansible module.
         """
         api_url = module.params.get("api_url")
@@ -508,7 +508,7 @@ class ApstraClientFactory:
         """
         Call object op. If op is 'get', will get one object, or all objects of that type.
         Internal method uses the plural types to simplify logic
-        
+
         :param object_type: The object type.
         :param op: The operation to perform.
         :param id: The id dictionary.
@@ -720,7 +720,7 @@ class ApstraClientFactory:
         Lock the blueprint with the given ID.
         This is a "gentlemen's agreement" lock, not a true lock.
         A tag is used for locking.
-        
+
         :param id: The ID of the blueprint to lock.
         :param timeout: The maximum time to wait for the blueprint to be locked.
         :return: True if the blueprint was locked, False if not.
@@ -790,7 +790,7 @@ class ApstraClientFactory:
     def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
         """
         Commit the blueprint with the given ID.
-        
+
         :param id: The ID of the blueprint to commit.
         :param timeout: The maximum time to wait for the blueprint to be committed.
         :return: True if the blueprint was committed, False if not.
@@ -815,7 +815,7 @@ class ApstraClientFactory:
     def compare_and_update(self, current, desired, changes):
         """
         Recursively compare and update the current state to match the desired state.
-        
+
         :param current: The current state dictionary.
         :param desired: The desired state dictionary.
         :param changes: A dictionary to track changes.
@@ -827,9 +827,9 @@ class ApstraClientFactory:
                 # Field is missing in the current state, probably only for create
                 self.module.debug(f"Field '{key}' missing in current state, ignoring it")
                 continue
-            
+
             current_value = current[key]
-            
+
             if isinstance(desired_value, dict) and isinstance(current_value, dict):
                 # Recursively compare nested dictionaries
                 nested_changes = {}
@@ -848,7 +848,7 @@ class ApstraClientFactory:
                 current[key] = desired_value
                 changes[key] = desired_value
                 changed = True
-        
+
         return changed
 
     def extract_field(self, data, field_name):
@@ -863,10 +863,10 @@ class ApstraClientFactory:
         if field_name not in data:
             # Nothing to do
             return None
-        
+
         # Extract the field
         field_value = data.pop(field_name)
-        
+
         # Return the field in a new dictionary
         return {field_name: field_value}
 
@@ -887,7 +887,7 @@ class ApstraClientFactory:
         tags_client = self.get_tags_client()
         all_tags = tags_client.blueprints[blueprint_id].tags.list()
         all_tags_set = {tag['label'] for tag in all_tags if 'label' in tag}
-        
+
         # Create a set of requested tags for quick lookup
         tags_set = set(tags)
 

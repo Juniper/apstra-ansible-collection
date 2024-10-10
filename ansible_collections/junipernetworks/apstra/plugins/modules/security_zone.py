@@ -264,7 +264,7 @@ def main():
                 result["tag_response"] = client_factory.update_tags(
                     id, leaf_object_type, tags
                 )
-              
+
             # Return the final object state
             result[leaf_object_type] = client_factory.object_request(object_type, "get", id)
 

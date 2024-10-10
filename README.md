@@ -34,12 +34,13 @@ The following tools are recommended for development of this collection:
 1. [brew.sh](https://brew.sh/) -- Only needed for _Mac OS X_
 1. [pyenv](https://github.com/pyenv/pyenv/blob/master/README.md)
 2. [pipenv](https://github.com/pyenv/pyenv/blob/master/README.md)
+3. [pre-commit](https://github.com/pre-commit/pre-commit)
 
 ### Setup
 
 #### Mac OS X
 
-1. If you're on a Mac and don't have brew, install it: 
+1. If you're on a Mac and don't have brew, install it:
     ```bash
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     ```
@@ -66,7 +67,7 @@ The following tools are recommended for development of this collection:
 
 #### Linux-based Systems
 
-1. Install pyenv: 
+1. Install pyenv:
 
     ```bash
     curl https://pyenv.run | bash
@@ -152,7 +153,7 @@ Debugging Ansible modules in VSCode is easy. Simply use the `Debug: Ansible Modu
 1. Be sure to have a `.env` file as described in the [Test Configuration](#test-configuration) section.
 1. Open the code for the module you wish to debug in VS Code.
 2. Set your breakpoint as needed.
-3. _OPTIONAL:_ Create a `module_args/<your_module>.json` file with your (optional) additional parameters to debug. For example, here's a `module_args/authenticate.json` to debug the `authenticate` module: 
+3. _OPTIONAL:_ Create a `module_args/<your_module>.json` file with your (optional) additional parameters to debug. For example, here's a `module_args/authenticate.json` to debug the `authenticate` module:
     ```json
     {
       "ANSIBLE_MODULE_ARGS": {
@@ -170,12 +171,12 @@ Here's an example of how the Apstra SDK can be used to perform CRUD operations.
         # Instantiate the client
         client_factory = ApstraClientFactory.from_params(module.params)
         client = client_factory.l3clos_client()
-        
+
         # Gather facts using the persistent connection
 
         # Get /api/version
         version = client.version.get()
-        
+
         # Get /api/blueprints
         blueprints = client.blueprints
         blueprints_list = blueprints.list()
@@ -185,7 +186,7 @@ Here's an example of how the Apstra SDK can be used to perform CRUD operations.
         blueprint = client.blueprints['941660a1-2967-4550-ae3b-04d6d9fd71b4']
         # get the blueprint data
         bp_data = blueprint.get()
-        
+
         # prepare the security zone query
         security_zone = blueprint.security_zones['hJR2j7ExBhEHgWE2Cbg']
         # get the security zone data
@@ -205,16 +206,16 @@ Here's an example of how the Apstra SDK can be used to perform CRUD operations.
         # create a new security zone
         Routing_Zone_Name = "Example_RZ"
         new_sz = blueprint.security_zones.create(data={
-            "vrf_name": "{}".format(Routing_Zone_Name), 
-            # "vni_id": 90000, 
-            "vrf_description": "vrf desc for {}".format(Routing_Zone_Name), 
+            "vrf_name": "{}".format(Routing_Zone_Name),
+            # "vni_id": 90000,
+            "vrf_description": "vrf desc for {}".format(Routing_Zone_Name),
             "sz_type": "evpn",
             "label": "{}".format(Routing_Zone_Name)
         })
 
         # get the security zone
         new_sz_check = blueprint.security_zones[new_sz['id']].get()
-        
+
         # delete the security zone
         blueprint.security_zones[new_sz['id']].delete()
 ```
