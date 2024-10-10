@@ -561,9 +561,10 @@ class ApstraClientFactory:
             if read_only:
                 try:
                     op_attr = getattr(obj, "list")
-                    # Blueprints are filtered to limit the data volume
-                    if object_type == "blueprints.nodes":
-                        url = f"?node_type={self.module.params.get('node_type')}"
+                    # See if there's a filter for this type
+                    filter = self.module.params.get("filter", {}).get(object_type, None)
+                    if filter:
+                        url = f"?{filter}"
                 except AttributeError:
                     try:
                         op_attr = getattr(obj, "get")

@@ -57,12 +57,13 @@ options:
       - Dictionary containing identifiers to focus us.
     required: false
     type: dict
-  node_type:
+  filter:
     description:
-      - If getting nodes, the type of the node to return from the graph.
-    type: str
+      - Filter used to get the list of objects.
+      - Key is a type, value is a filter string.
+    type: dict
     required: false
-    default: "system"
+    default: "{'blueprints.nodes': 'node_type=system'}"
   available_network_facts:
     description:
       - If set to true, the module will return a list of available network objects.
@@ -87,6 +88,16 @@ EXAMPLES = """
       - virtual_networks
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+
+# Gather facts about system nodes in the blueprint
+- name: Gather system nodes
+  apstra_facts:
+    gather_network_facts:
+      - blueprints.nodes
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    filter:
+      blueprints.nodes: "node_type=system"
 
 # Get the list of available network objects
 - name: List available Apstra network objects
@@ -134,7 +145,7 @@ def main():
         gather_network_facts=dict(
             type="list", elements="str", required=False, default=["blueprints"]
         ),
-        node_type=dict(type="str", required=False, default="system"),
+        filter=dict(type="dict", required=False, default={"blueprints.nodes": "node_type=system"}),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | facts_module_args

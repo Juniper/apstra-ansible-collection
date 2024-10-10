@@ -3,7 +3,7 @@
 Junipernetworks.Apstra
 ======================
 
-Collection version 0.1.13
+Collection version 0.1.14
 
 .. contents::
    :local:
