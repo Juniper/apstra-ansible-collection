@@ -4,7 +4,54 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.17
+=======
+
+Minor Changes
+-------------
+
+- Only update the application points if needed.
+
+v0.1.16
+=======
+
+Minor Changes
+-------------
+
+- Add dependencies to community.general and kuberentes.core.
+
+v0.1.15
+=======
+
+Major Changes
+-------------
+
+- Update application points by label instead of ID.
+
+Minor Changes
+-------------
+
+- Find objects by label with the graph API.
+- Look up endpoint policies by virtual network label.
+
+v0.1.14
+=======
+
+Minor Changes
+-------------
+
+- Replace node_type parameter in apstra_facts with more generic filter parameter. Default behavior is unchanged for nodes.
+
+v0.1.13
+=======
+
+Bug Fixes
+---------
+
+- Delete operation was not working for security zones and virtual networks. Resolved.
+
 v0.1.12
+=======
 
 Major Changes
 -------------

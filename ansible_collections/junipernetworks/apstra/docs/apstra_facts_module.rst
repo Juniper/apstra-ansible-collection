@@ -19,7 +19,7 @@ junipernetworks.apstra.apstra_facts module -- Gather facts from Apstra AOS
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.12).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.17).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -207,6 +207,46 @@ Parameters
   * - .. raw:: html
 
         <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-filter"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.apstra_facts_module__parameter-filter:
+
+      .. rst-class:: ansible-option-title
+
+      **filter**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-filter" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Filter used to get the list of objects.
+
+      Key is a type, value is a filter string.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-default-bold:`Default:` :ansible-option-default:`{"blueprints.nodes": "node\_type=system"}`
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-gather_network_facts"></div>
 
       .. _ansible_collections.junipernetworks.apstra.apstra_facts_module__parameter-gather_network_facts:
@@ -269,44 +309,6 @@ Parameters
 
       Dictionary containing identifiers to focus us.
 
-
-      .. raw:: html
-
-        </div>
-
-  * - .. raw:: html
-
-        <div class="ansible-option-cell">
-        <div class="ansibleOptionAnchor" id="parameter-node_type"></div>
-
-      .. _ansible_collections.junipernetworks.apstra.apstra_facts_module__parameter-node_type:
-
-      .. rst-class:: ansible-option-title
-
-      **node_type**
-
-      .. raw:: html
-
-        <a class="ansibleOptionLink" href="#parameter-node_type" title="Permalink to this option"></a>
-
-      .. ansible-option-type-line::
-
-        :ansible-option-type:`string`
-
-      .. raw:: html
-
-        </div>
-
-    - .. raw:: html
-
-        <div class="ansible-option-cell">
-
-      Type of the node to return from the graph.
-
-
-      .. rst-class:: ansible-option-line
-
-      :ansible-option-default-bold:`Default:` :ansible-option-default:`"system"`
 
       .. raw:: html
 
@@ -460,6 +462,16 @@ Examples
           - virtual_networks
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+
+    # Gather facts about system nodes in the blueprint
+    - name: Gather system nodes
+      apstra_facts:
+        gather_network_facts:
+          - blueprints.nodes
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        filter:
+          blueprints.nodes: "node_type=system"
 
     # Get the list of available network objects
     - name: List available Apstra network objects

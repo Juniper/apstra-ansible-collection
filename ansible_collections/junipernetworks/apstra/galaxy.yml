@@ -1,7 +1,7 @@
 namespace: "junipernetworks"
 description: "This collection provides modules to interact with Apstra."
 name: "apstra"
-version: "0.1.12"
+version: "0.1.17"
 readme: "README.md"
 authors:
     - "Pratik Dave <pratikd@juniper.net>"
@@ -14,6 +14,9 @@ tags:
     - apstra
     - networking
     - aos
+dependencies:
+    "community.general": ">=9.5.0"
+    "kubernetes.core": ">=5.0.0"
 homepage: "https://www.juniper.net/us/en/products/network-automation/apstra.html"
 repository: "https://github.com/Juniper/apstra-ansible-collection"
 issues: "https://github.com/Juniper/apstra-ansible-collection/issues"

@@ -12,6 +12,7 @@ from aos.sdk.reference_design.extension.resource_allocation import (
 )
 from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
 from aos.sdk.graph import Graph
+from aos.sdk.graph import query
 import os
 import re
 import time
@@ -274,6 +275,7 @@ class ApstraClientFactory:
     :param password: The password for authentication.
     :param logout: Whether to log out after the operation.
     """
+
     def __init__(
         self,
         module,
@@ -349,6 +351,9 @@ class ApstraClientFactory:
                 self.network_objects.append(object_type)
                 # Map the object type to the client
                 self.network_objects_set[object_type] = object_client
+
+        # Blueprint query can be cached
+        self._blueprint_graph = None
 
     @classmethod
     def from_params(cls, module):
@@ -561,9 +566,10 @@ class ApstraClientFactory:
             if read_only:
                 try:
                     op_attr = getattr(obj, "list")
-                    # Blueprints are filtered to limit the data volume
-                    if object_type == "blueprints.nodes":
-                        url = f"?node_type={self.module.params.get('node_type')}"
+                    # See if there's a filter for this type
+                    filter = self.module.params.get("filter", {}).get(object_type, None)
+                    if filter:
+                        url = f"?{filter}"
                 except AttributeError:
                     try:
                         op_attr = getattr(obj, "get")
@@ -607,8 +613,12 @@ class ApstraClientFactory:
                         else:
                             return ret
                 else:
-                    # probably a create
-                    return op_attr(data)
+                    if data:
+                        # create or update
+                        return op_attr(data)
+                    else:
+                        # delete
+                        return op_attr()
             except TypeError as te:
                 # Bug -- 404 results in None, which generated API blindly subscripts
                 if te.args[0] == "'NoneType' object is not subscriptable":
@@ -749,13 +759,21 @@ class ApstraClientFactory:
                 if re.search(locked_pattern, error_message):
                     time_left = timeout - (time.time() - start_time)
                     if time_left <= 0:
-                        self.module.fail_json(msg=f"Failed to lock blueprint {id} within {timeout} seconds")
-                    self.module.debug(f"Blueprint {id} is locked, waiting up to {time_left} seconds for unlock...")
+                        self.module.fail_json(
+                            msg=f"Failed to lock blueprint {id} within {timeout} seconds"
+                        )
+                    self.module.debug(
+                        f"Blueprint {id} is locked, waiting up to {time_left} seconds for unlock..."
+                    )
                     time.sleep(interval)
                 else:
-                    self.module.fail_json(msg=f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {e}")
+                    self.module.fail_json(
+                        msg=f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {e}"
+                    )
             except Exception as e:
-                self.module.fail_json(msg=f"Unexpected Exception trying to lock blueprint {id} within {timeout} seconds: {e}")
+                self.module.fail_json(
+                    msg=f"Unexpected Exception trying to lock blueprint {id} within {timeout} seconds: {e}"
+                )
 
     def unlock_blueprint(self, id):
         """
@@ -803,8 +821,12 @@ class ApstraClientFactory:
             blueprint = blueprint_client.blueprints[id].get()
             time_left = timeout - (time.time() - start_time)
             if time_left <= 0:
-                self.module.fail_json(msg=f"Failed to commit blueprint {id} within {timeout} seconds")
-            self.module.debug(f"Waiting {time_left} seconds for blueprint to be committed...")
+                self.module.fail_json(
+                    msg=f"Failed to commit blueprint {id} within {timeout} seconds"
+                )
+            self.module.debug(
+                f"Waiting {time_left} seconds for blueprint to be committed..."
+            )
             time.sleep(interval)
 
         is_committed = blueprint.is_committed()
@@ -825,7 +847,9 @@ class ApstraClientFactory:
         for key, desired_value in desired.items():
             if key not in current:
                 # Field is missing in the current state, probably only for create
-                self.module.debug(f"Field '{key}' missing in current state, ignoring it")
+                self.module.debug(
+                    f"Field '{key}' missing in current state, ignoring it"
+                )
                 continue
 
             current_value = current[key]
@@ -833,7 +857,9 @@ class ApstraClientFactory:
             if isinstance(desired_value, dict) and isinstance(current_value, dict):
                 # Recursively compare nested dictionaries
                 nested_changes = {}
-                nested_changed = self.compare_and_update(current_value, desired_value, nested_changes)
+                nested_changed = self.compare_and_update(
+                    current_value, desired_value, nested_changes
+                )
                 if nested_changed:
                     changes[key] = nested_changes
                     changed = True
@@ -870,6 +896,19 @@ class ApstraClientFactory:
         # Return the field in a new dictionary
         return {field_name: field_value}
 
+    def get_blueprint_graph(self, blueprint_id):
+        """
+        Get the blueprint with the given ID.
+
+        :param blueprint_id: The ID of the blueprint to get.
+        :return: The blueprint.
+        """
+        if not self._blueprint_graph:
+            blueprint_client = self.get_client("blueprints")
+            self._blueprint_graph = blueprint_client.blueprints[blueprint_id].get()
+
+        return self._blueprint_graph
+
     def update_tags(self, id, leaf_type, tags):
         """
         Update the tags for a leaf object.
@@ -886,7 +925,7 @@ class ApstraClientFactory:
         # Get the set of tags for the blueprint
         tags_client = self.get_tags_client()
         all_tags = tags_client.blueprints[blueprint_id].tags.list()
-        all_tags_set = {tag['label'] for tag in all_tags if 'label' in tag}
+        all_tags_set = {tag["label"] for tag in all_tags if "label" in tag}
 
         # Create a set of requested tags for quick lookup
         tags_set = set(tags)
@@ -894,12 +933,75 @@ class ApstraClientFactory:
         # Make sure all requested tags are present
         if not all_tags_set.issuperset(tags_set):
             missing_tags = tags_set.difference(all_tags_set)
-            self.module.fail_json(msg=f"update_tags failed: missing tags: {missing_tags}")
+            self.module.fail_json(
+                msg=f"update_tags failed: missing tags: {missing_tags}"
+            )
 
         # Find out what tags are not set
         missing_tags = all_tags_set.difference(tags_set)
 
         # Update the tags
-        tags_client.blueprints[blueprint_id].tagging([id[leaf_type]], tags, list(missing_tags))
-        self.module.debug(f"Tags updated for {leaf_type} {id}, ADDED: {tags}, REMOVED: {missing_tags}")
+        tags_client.blueprints[blueprint_id].tagging(
+            [id[leaf_type]], tags, list(missing_tags)
+        )
+        self.module.debug(
+            f"Tags updated for {leaf_type} {id}, ADDED: {tags}, REMOVED: {missing_tags}"
+        )
         return tags
+
+    def query_blueprint(self, blueprint_id, graph_query):
+        """
+        Query the blueprint with the given ID.
+
+        :param blueprint_id: The ID of the blueprint to query.
+        :param query_string: The query string.
+        :return: The result of the query.
+        """
+        bp = self.get_blueprint_graph(blueprint_id)
+
+        result = list(query.iterate(bp, graph_query))
+        return result
+
+    def get_by_label(self, blueprint_id, obj_type, label, label_key="label"):
+        """
+        Find an object by label.
+
+        :param blueprint_id: The ID of the blueprint to query.
+        :param obj_type: The query string.
+        :param label: The label of the object to find.
+        :param label_key: The key to use for the label.
+        :return: The result of the query.
+        """
+        bp = self.get_blueprint_graph(blueprint_id)
+
+        get_query = query.node(type=obj_type, **{label_key: label}, name=obj_type)
+
+        result = list(query.iterate(bp, get_query))
+        if not result:
+            self.module.debug(f"Object with {label_key} {label} not found")
+            return result
+
+        if len(result) > 1:
+            self.module.fail_json(
+                msg=f"Multiple objects with {label_key} {label} found"
+            )
+
+        if obj_type not in result[0]:
+            self.module.fail_json(msg=f"Object missing key {obj_type}: {result[0]}")
+
+        return result[0][obj_type]
+
+    def get_id_by_label(self, blueprint_id, obj_type, label, label_key="label"):
+        """
+        Find an object by label and return its ID.
+
+        :param blueprint_id: The ID of the blueprint to query.
+        :param obj_type: The query string.
+        :param label: The label of the object to find.
+        :param label_key: The key to use for the label.
+        :return: The ID of the object.
+        """
+        obj = self.get_by_label(blueprint_id, obj_type, label, label_key)
+        if not obj:
+            return None
+        return obj.id
