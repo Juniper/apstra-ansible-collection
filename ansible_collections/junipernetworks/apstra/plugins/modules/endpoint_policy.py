@@ -320,28 +320,75 @@ def main():
                     )
                 )
                 if body:
-                    # Update the object
+                    # Track changes
                     changes = {}
-                    updated_object = {}
-                    if client_factory.compare_and_update(current_object, body, changes):
-                        updated_object = client_factory.object_request(
-                            object_type, "patch", id, changes
-                        )
-                        # Need the response object to be a dict
-                        if not isinstance(dict, updated_object):
-                            updated_object = {}
 
                     # Update the application points if needed
                     if application_points_leaf_object_type in body:
+                        if not virtual_network_label:
+                            module.fail_json(
+                                f"Must specify 'virtual_network_label' to update {application_points_leaf_object_type}"
+                            )
                         app_points = []
                         for body_ap in body[application_points_leaf_object_type]:
                             ap = {}
-                            ap["id"] = client_factory.get_id_by_label(
-                                blueprint_id=id["blueprint"],
-                                obj_type="interface",
-                                label=body_ap["if_name"],
-                                label_key="if_name",
+                            if_name = body_ap["if_name"]
+                            used = False
+
+                            # Custom query to determine if the interface is associated with the virtual_network.
+                            if_to_vn = (
+                                query.node(
+                                    type="interface", if_name=if_name, name="interface"
+                                )
+                                .out(type="ep_member_of")
+                                .node(type="ep_group")
+                                .in_(type="ep_affected_by")
+                                .node(type="ep_application_instance")
+                                .out(type="ep_nested")
+                                .node(type="ep_endpoint_policy")
+                                .out(type="vn_to_attach")
+                                .node(
+                                    type="virtual_network",
+                                    label=virtual_network_label,
+                                    name="virtual_network",
+                                )
                             )
+
+                            if_to_vn_found = client_factory.query_blueprint(
+                                id["blueprint"], if_to_vn
+                            )
+
+                            if if_to_vn_found:
+                                if len(if_to_vn_found) > 1:
+                                    module.fail_json(
+                                        msg=f"Multiple interface {if_name} to virtual_network {virtual_network_label} relations found: {if_to_vn_found}"
+                                    )
+                                if not "interface" in if_to_vn_found[0]:
+                                    module.fail_json(
+                                        msg=f"Object missing key 'interface': {if_to_vn_found[0]}"
+                                    )
+                                if not "virtual_network" in if_to_vn_found[0]:
+                                    module.fail_json(
+                                        msg=f"Object missing key 'virtual_network': {if_to_vn_found[0]}"
+                                    )
+                                # Mark this application point as in use
+                                used = True
+
+                            # If we are already at the desired state, skip the update
+                            if used == body_ap["used"]:
+                                continue
+
+                            if if_to_vn_found and if_to_vn_found[0]:
+                                # If we already know the interface id, use it
+                                ap["id"] = if_to_vn_found[0]["interface"].id
+                            else:
+                                # Need to look up the interface id by label
+                                ap["id"] = client_factory.get_id_by_label(
+                                    blueprint_id=id["blueprint"],
+                                    obj_type="interface",
+                                    label=body_ap["if_name"],
+                                    label_key="if_name",
+                                )
                             if not ap["id"]:
                                 module.fail_json(
                                     msg=f"Interface with label {body_ap['if_name']} not found"
@@ -354,22 +401,36 @@ def main():
                             ]
                             app_points.append(ap)
 
-                        client_factory.get_endpointpolicy_client().blueprints[
-                            id["blueprint"]
-                        ].obj_policy_batch_apply.patch(
-                            {"application_points": app_points}
+                        if app_points:
+                            client_factory.get_endpointpolicy_client().blueprints[
+                                id["blueprint"]
+                            ].obj_policy_batch_apply.patch(
+                                {"application_points": app_points}
+                            )
+                            # Any ap changes are added to the changes dict
+                            changes[application_point_leaf_object_type] = app_points
+
+                    # Update the object
+                    updated_object = {}
+                    ep_changes = {}
+                    if client_factory.compare_and_update(
+                        current_object, body, ep_changes
+                    ):
+                        updated_object = client_factory.object_request(
+                            object_type, "patch", id, ep_changes
                         )
+                        # Need the response object to be a dict
+                        if not isinstance(dict, updated_object):
+                            updated_object = {}
+                        changes[leaf_object_type] = ep_changes
 
-                        # Any ap changes are added to the changes dict
-                        changes[application_point_leaf_object_type] = body[
-                            application_points_leaf_object_type
-                        ]
-
-                    result["changed"] = changes or app_points
-                    if updated_object:
-                        result["response"] = updated_object
-                    result["changes"] = changes
-                    result["msg"] = f"{leaf_object_type} updated successfully"
+                    changed = True if app_points or ep_changes else False
+                    result["changed"] = changed
+                    if changed:
+                        if updated_object:
+                            result["response"] = updated_object
+                        result["changes"] = changes
+                        result["msg"] = f"{leaf_object_type} updated successfully"
 
             # Apply tags if specified
             if tags:
@@ -381,8 +442,8 @@ def main():
             result[leaf_object_type] = client_factory.object_request(
                 object_type, "get", id
             )
-            result[leaf_object_type][application_points_leaf_object_type] = client_factory.object_request(
-                application_points_object_type, "get", id
+            result[leaf_object_type][application_points_leaf_object_type] = (
+                client_factory.object_request(application_points_object_type, "get", id)
             )
 
         # If we still don't have an id, there's a problem

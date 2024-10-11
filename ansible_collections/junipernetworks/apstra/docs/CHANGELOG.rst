@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.17
+=======
+
+Minor Changes
+-------------
+
+- Only update the application points if needed.
+
 v0.1.16
 =======
 
