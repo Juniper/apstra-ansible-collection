@@ -48,7 +48,7 @@ options:
     description:
       - Dictionary containing the blueprint and endpoint policy IDs.
       - If only the blueprint ID is provided, the module will attempt to find the endpoint policy by label.
-      - If the label is not provided, but a virtual_network_label parameter is given, the label will be 
+      - If the label is not provided, but a virtual_network_label parameter is given, the label will be
         used to find the endpoint policy associated with the virtual network with the matching label.
     required: true
     type: dict
