@@ -47,12 +47,20 @@ options:
   id:
     description:
       - Dictionary containing the blueprint and endpoint policy IDs.
+      - If only the blueprint ID is provided, the module will attempt to find the endpoint policy by label.
+      - If the label is not provided, but a virtual_network_label parameter is given, the label will be 
+        used to find the endpoint policy associated with the virtual network with the matching label.
     required: true
     type: dict
+  virtual_network_label:
+    description:
+      - The label of the virtual network to find the endpoint policy for. Used if the endpoing policy id and endpoint label are not provided.
+    required: false
+    type: str
   body:
     description:
       - Dictionary containing the endpoint policy object details.
-      - If the body contains an entry named "application_points", it expected to be a list of dicts, each containing a "node_id" string and a "used" boolean to be used to patch the application points.
+      - If the body contains an entry named "application_points", it expected to be a list of dicts, each containing a "if_name" string and a "used" boolean to be used to patch the application points.
     required: false
     type: dict
   tags:
@@ -99,10 +107,10 @@ EXAMPLES = """
   junipernetworks.apstra.endpoint_policy:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-      endpoint_policy: "AjAuUuVLylXCUgAqaQ"
+    virtual_network_label: "vn25"
     body:
       application_points:
-        - node_id: "j1Il2r77JebUuZQ7wQ"
+        - if_name: "xe-0/0/37"
           used: true
     state: present
 
@@ -175,11 +183,14 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     plural_leaf_object_type,
 )
 
+from aos.sdk.graph import query
+
 
 def main():
     object_module_args = dict(
         id=dict(type="dict", required=True),
         body=dict(type="dict", required=False),
+        virtual_network_label=dict(type="str", required=False),
         state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
         ),
@@ -214,6 +225,7 @@ def main():
         body = module.params.get("body", None)
         state = module.params["state"]
         tags = module.params.get("tags", None)
+        virtual_network_label = module.params.get("virtual_network_label", None)
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -229,19 +241,63 @@ def main():
         if state == "present":
             current_object = None
             if object_id is None:
-                if body is None:
+                if body is None and not virtual_network_label:
                     raise ValueError(
                         f"Must specify 'body' to create a {leaf_object_type}"
                     )
 
                 # See if the object label exists
-                current_object = (
-                    client_factory.object_request(object_type, "get", id, body)
-                    if "label" in body
-                    else None
-                )
+                current_object = None
+                if body and "label" in body:
+                    id_found = client_factory.get_id_by_label(
+                        id["blueprint"], "ep_endpoint_policy", body["label"]
+                    )
+                    if id_found:
+                        id[leaf_object_type] = id_found
+                        current_object = client_factory.object_request(
+                            object_type, "get", id
+                        )
+                elif virtual_network_label:
+                    # Get the endpoint id by label
+                    ep_policy_by_vn = (
+                        query.node(type="virtual_network", label=virtual_network_label)
+                        .in_(type="vn_to_attach")
+                        .node(type="ep_endpoint_policy")
+                        .in_(type="ep_first_subpolicy")
+                        .node(type="ep_endpoint_policy", policy_type_name="pipeline")
+                        .in_(type="ep_subpolicy")
+                        .node(
+                            type="ep_endpoint_policy",
+                            policy_type_name="batch",
+                            name=leaf_object_type,
+                        )
+                    )
+                    ep_found = client_factory.query_blueprint(
+                        id["blueprint"], ep_policy_by_vn
+                    )
+
+                    if not ep_found:
+                        module.fail_json(
+                            msg=f"ep_endpoint_policy for virtual_network {virtual_network_label} not found"
+                        )
+
+                    if len(ep_found) > 1:
+                        module.fail_json(
+                            msg=f"Multiple ep_endpoint_policy object matching virtual_network {virtual_network_label} found: {ep_found}"
+                        )
+
+                    if leaf_object_type not in ep_found[0]:
+                        module.fail_json(
+                            msg=f"Object missing key {leaf_object_type}: {result[0]}"
+                        )
+
+                    # Finally, save the endpoint policy id
+                    id[leaf_object_type] = ep_found[0][leaf_object_type].id
+
+                    current_object = client_factory.object_request(
+                        object_type, "get", id
+                    )
                 if current_object:
-                    id[leaf_object_type] = current_object["id"]
                     result["id"] = id
                 else:
                     # Create the object
@@ -266,6 +322,7 @@ def main():
                 if body:
                     # Update the object
                     changes = {}
+                    updated_object = {}
                     if client_factory.compare_and_update(current_object, body, changes):
                         updated_object = client_factory.object_request(
                             object_type, "patch", id, changes
@@ -276,20 +333,39 @@ def main():
 
                     # Update the application points if needed
                     if application_points_leaf_object_type in body:
-                        updated_object[application_point_leaf_object_type] = (
-                            client_factory.object_request(
-                                application_points_object_type,
-                                "patch",
-                                id,
-                                body[application_points_leaf_object_type],
+                        app_points = []
+                        for body_ap in body[application_points_leaf_object_type]:
+                            ap = {}
+                            ap["id"] = client_factory.get_id_by_label(
+                                blueprint_id=id["blueprint"],
+                                obj_type="interface",
+                                label=body_ap["if_name"],
+                                label_key="if_name",
                             )
+                            if not ap["id"]:
+                                module.fail_json(
+                                    msg=f"Interface with label {body_ap['if_name']} not found"
+                                )
+                            ap["policies"] = [
+                                {
+                                    "policy": id[leaf_object_type],
+                                    "used": body_ap["used"],
+                                }
+                            ]
+                            app_points.append(ap)
+
+                        client_factory.get_endpointpolicy_client().blueprints[
+                            id["blueprint"]
+                        ].obj_policy_batch_apply.patch(
+                            {"application_points": app_points}
                         )
+
                         # Any ap changes are added to the changes dict
                         changes[application_point_leaf_object_type] = body[
                             application_points_leaf_object_type
                         ]
 
-                    result["changed"] = changes != {}
+                    result["changed"] = changes or app_points
                     if updated_object:
                         result["response"] = updated_object
                     result["changes"] = changes
@@ -304,6 +380,9 @@ def main():
             # Return the final object state
             result[leaf_object_type] = client_factory.object_request(
                 object_type, "get", id
+            )
+            result[leaf_object_type][application_points_leaf_object_type] = client_factory.object_request(
+                application_points_object_type, "get", id
             )
 
         # If we still don't have an id, there's a problem

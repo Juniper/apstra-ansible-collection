@@ -27,7 +27,8 @@
         id: "{{ bp.id }}"
         gather_network_facts:
           - 'blueprints.nodes'
-        node_type: 'system'
+        filter:
+          blueprints.nodes: 'node_type=system'
 
     - name: Show the systems
       ansible.builtin.debug:

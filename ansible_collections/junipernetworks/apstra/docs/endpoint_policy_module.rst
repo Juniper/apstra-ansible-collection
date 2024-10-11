@@ -19,7 +19,7 @@ junipernetworks.apstra.endpoint_policy module -- Manage endpoint policies in Aps
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.14).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.15).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -180,7 +180,7 @@ Parameters
 
       Dictionary containing the endpoint policy object details.
 
-      If the body contains an entry named "application\_points", it expected to be a list of dicts, each containing a "node\_id" string and a "used" boolean to be used to patch the application points.
+      If the body contains an entry named "application\_points", it expected to be a list of dicts, each containing a "if\_name" string and a "used" boolean to be used to patch the application points.
 
 
       .. raw:: html
@@ -215,6 +215,10 @@ Parameters
         <div class="ansible-option-cell">
 
       Dictionary containing the blueprint and endpoint policy IDs.
+
+      If only the blueprint ID is provided, the module will attempt to find the endpoint policy by label.
+
+      If the label is not provided, but a virtual\_network\_label parameter is given, the label will be used to find the endpoint policy associated with the virtual network with the matching label.
 
 
       .. raw:: html
@@ -415,6 +419,40 @@ Parameters
 
         </div>
 
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-virtual_network_label"></div>
+
+      .. _ansible_collections.junipernetworks.apstra.endpoint_policy_module__parameter-virtual_network_label:
+
+      .. rst-class:: ansible-option-title
+
+      **virtual_network_label**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-virtual_network_label" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`string`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      The label of the virtual network to find the endpoint policy for. Used if the endpoing policy id and endpoint label are not provided.
+
+
+      .. raw:: html
+
+        </div>
+
 
 .. Attributes
 
@@ -463,10 +501,10 @@ Examples
       junipernetworks.apstra.endpoint_policy:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-          endpoint_policy: "AjAuUuVLylXCUgAqaQ"
+        virtual_network_label: "vn25"
         body:
           application_points:
-            - node_id: "j1Il2r77JebUuZQ7wQ"
+            - if_name: "xe-0/0/37"
               used: true
         state: present
 

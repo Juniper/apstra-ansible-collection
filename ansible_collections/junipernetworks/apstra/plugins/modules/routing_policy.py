@@ -215,13 +215,17 @@ def main():
                     )
 
                 # See if the object label exists
-                current_object = (
-                    client_factory.object_request(object_type, "get", id, body)
-                    if "label" in body
-                    else None
-                )
+                current_object = None
+                if "label" in body:
+                    id_found = client_factory.get_id_by_label(
+                        id["blueprint"], leaf_object_type, body["label"]
+                    )
+                    if id_found:
+                        id[leaf_object_type] = id_found
+                        current_object = client_factory.object_request(
+                            object_type, "get", id
+                        )
                 if current_object:
-                    id[leaf_object_type] = current_object["id"]
                     result["id"] = id
                 else:
                     # Create the object
@@ -258,7 +262,9 @@ def main():
                 )
 
             # Return the final object state
-            result[leaf_object_type] = client_factory.object_request(object_type, "get", id)
+            result[leaf_object_type] = client_factory.object_request(
+                object_type, "get", id
+            )
 
         # If we still don't have an id, there's a problem
         if id is None:
