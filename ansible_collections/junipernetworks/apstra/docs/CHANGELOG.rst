@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.16
+=======
+
+Minor Changes
+-------------
+
+- Add dependencies to community.general and kuberentes.core.
+
 v0.1.15
 =======
 

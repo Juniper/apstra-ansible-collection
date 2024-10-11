@@ -37,10 +37,13 @@ setup: clean-pipenv
 	pip install pipenv
 	$(MAKE) pipenv
 
+define install_collection_if_missing
+	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)
+endef
+
 pipenv:
 	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
-	pipenv run ansible-doc commmunity.general &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force community.general
 
 release-build: docs
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
@@ -85,7 +88,7 @@ $(APSTRA_COLLECTION_ROOT)/docs/requirements.txt: Pipfile Makefile
 	pipenv install --dev
 	
 install: build
-	pipenv run ansible-galaxy collection install --force $(APSTRA_COLLECTION)
+	pipenv run ansible-galaxy collection install --ignore-certs --force $(APSTRA_COLLECTION)
 
 .PHONY: test \
 	test-apstra_facts \

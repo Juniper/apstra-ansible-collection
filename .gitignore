@@ -169,5 +169,5 @@ cython_debug/
 .vscode/settings.json
 
 # Apple crap
-.DS_Store
-.swp
+**/.DS_Store
+**/*.swp
