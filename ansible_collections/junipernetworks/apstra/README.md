@@ -4,7 +4,7 @@
 
 This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra platform.
 
-This collection has been validated on Juniper Astra version 5.0.
+This collection has been validated on Juniper Apstra version 5.0.
 
 ## Support
 
@@ -44,9 +44,10 @@ Name | Description
 [junipernetworks.apstra.authenticate](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/authenticate_module.rst) | Authenticate to Apstra API
 [junipernetworks.apstra.blueprint](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/blueprint_module.rst) | Manage blueprints
 [junipernetworks.apstra.endpoint_policy](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/endpoint_policy_module.rst) | Manage endpoint policies
-[junipernetworks.apstra.endpoint_policy_application_point](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/endpoint_policy_application_point_module.rst) | Manage endpoint policy application points
+[junipernetworks.apstra.resource_group](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/resource_group_module.rst) | Manage resource groups
 [junipernetworks.apstra.routing_policy](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/routing_policy_module.rst) | Manage routing policies
 [junipernetworks.apstra.security_zone](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/security_zone_module.rst) | Manage security zones
+[junipernetworks.apstra.tag](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/tag_module.rst) | Manage tags
 [junipernetworks.apstra.virtual_network](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/virtual_network_module.rst) | Manage virtual networks
 
 Click the `Content` button to see the list of content included in this collection.
@@ -70,7 +71,7 @@ collections:
 You can ensure that the [required packages](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/requirements.txt) are installed via pip. For example, if your collection is installed in the default location:
 
 ```shell
-pip install -r ~/junipernetworks/apstra/docs/requirements.txt
+pip install -r ~/.ansible/collections/ansible_collections/junipernetworks/apstra/docs/requirements.txt
 ```
 
 ## Usage

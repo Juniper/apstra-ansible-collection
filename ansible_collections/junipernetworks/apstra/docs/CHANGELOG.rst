@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.18
+=======
+
+Bug Fixes
+---------
+
+- Fix various documentation issues (spelling, links, etc.)
+
 v0.1.17
 =======
 

@@ -19,7 +19,7 @@ junipernetworks.apstra.blueprint module -- Manage Apstra blueprints
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.17).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.18).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -528,21 +528,21 @@ Examples
     - name: Delete blueprint
       blueprint:
         id:
-            blueprint: blueprint-123
+          blueprint: blueprint-123
         state: absent
 
     # Lock a blueprint
     - name: Lock blueprint
       blueprint:
         id:
-            blueprint: blueprint-123
+          blueprint: blueprint-123
         state: present
 
     # Unlock a blueprint
     - name: Unlock blueprint
       blueprint:
         id:
-            blueprint: blueprint-123
+          blueprint: blueprint-123
         lock_state: unlocked
         state: present
 

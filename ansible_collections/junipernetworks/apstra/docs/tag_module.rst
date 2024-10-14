@@ -19,7 +19,7 @@ junipernetworks.apstra.tag module -- Manage tags in Apstra
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.17).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.18).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -409,7 +409,7 @@ Examples
       junipernetworks.apstra.tag:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-          tag: ""Ho9QACZ2tHyxsoWcBA""
+          tag: "Ho9QACZ2tHyxsoWcBA"
         body:
           label: "example_tag_changed"
           description: "Example tag UPDATE"
@@ -419,7 +419,7 @@ Examples
       junipernetworks.apstra.tag:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-          tag: ""Ho9QACZ2tHyxsoWcBA""
+          tag: "Ho9QACZ2tHyxsoWcBA"
         state: absent
 
 

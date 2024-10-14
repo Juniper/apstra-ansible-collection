@@ -3,7 +3,7 @@
 Junipernetworks.Apstra
 ======================
 
-Collection version 0.1.17
+Collection version 0.1.18
 
 .. contents::
    :local:
@@ -21,7 +21,7 @@ This collection provides modules to interact with Apstra.
 
 **Supported ansible-core versions:**
 
-* 2.15 or newer
+* 2.15.0 or newer
 
 .. ansible-links::
 
