@@ -78,7 +78,7 @@ pip install -r ~/junipernetworks/apstra/docs/requirements.txt
 You can call modules by their Fully Qualified Collection Namespace (FQCN), such as `junipernetworks.apstra.authenticate`.
 The following example plays show how to log in to Apstra, create a blueprint and gather facts.
 
-The collection is simply an Ansible interface to specific Apstra API. This is why 
+The collection is simply an Ansible interface to specific Apstra API. This is why
 
 ### Login
 

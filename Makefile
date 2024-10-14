@@ -16,7 +16,7 @@ OS := $(shell uname -s)
 ifeq ($(OS),Darwin)
 PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
 else
-# Unix 
+# Unix
 export LDFLAGS := -Wl,-rpath,$(shell brew --prefix openssl)/lib
 export CPPFLAGS := -I$(shell brew --prefix openssl)/include
 export CONFIGURE_OPTS := --with-openssl=$(shell brew --prefix openssl)
@@ -34,8 +34,9 @@ setup: clean-pipenv
 	pyenv uninstall --force $(PY_VERSION)
 	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
 	$(PYENV_INSTALL_PREFIX) pyenv install --force $(PY_VERSION)
-	pip install pipenv
+	pip install pipenv pre-commit
 	$(MAKE) pipenv
+	pre-commit install
 
 define install_collection_if_missing
 	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)
@@ -86,7 +87,7 @@ $(APSTRA_COLLECTION_ROOT)/docs/requirements.txt: Pipfile Makefile
 	sed -e 's/==/~=/' "$@.tmp" > "$@"
 	rm "$@.tmp"
 	pipenv install --dev
-	
+
 install: build
 	pipenv run ansible-galaxy collection install --ignore-certs --force $(APSTRA_COLLECTION)
 

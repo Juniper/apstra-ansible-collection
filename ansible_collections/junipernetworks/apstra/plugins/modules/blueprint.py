@@ -94,21 +94,21 @@ EXAMPLES = """
 - name: Delete blueprint
   blueprint:
     id:
-        blueprint: blueprint-123
+      blueprint: blueprint-123
     state: absent
 
 # Lock a blueprint
 - name: Lock blueprint
   blueprint:
     id:
-        blueprint: blueprint-123
+      blueprint: blueprint-123
     state: present
 
 # Unlock a blueprint
 - name: Unlock blueprint
   blueprint:
     id:
-        blueprint: blueprint-123
+      blueprint: blueprint-123
     lock_state: unlocked
     state: present
 """
