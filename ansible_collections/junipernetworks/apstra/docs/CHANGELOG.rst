@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.20
+=======
+
+Bug Fixes
+---------
+
+- Blueprint commit reports failure if commit is not successful.
+
 v0.1.19
 =======
 

@@ -66,12 +66,6 @@ options:
     required: false
     type: int
     default: 60
-  commit_timeout:
-    description:
-      - The timeout in seconds for committing the blueprint.
-    required: false
-    type: int
-    default: 120
   state:
     description:
       - The desired state of the blueprint.
@@ -151,7 +145,6 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     apstra_client_module_args,
     ApstraClientFactory,
     DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
-    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
 )
 
 
@@ -167,9 +160,6 @@ def main():
         ),
         lock_timeout=dict(
             type="int", required=False, default=DEFAULT_BLUEPRINT_LOCK_TIMEOUT
-        ),
-        commit_timeout=dict(
-            type="int", required=False, default=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT
         ),
         unlock=dict(type="bool", required=False, default=False),
         state=dict(
@@ -198,7 +188,6 @@ def main():
         state = module.params["state"]
         lock_state = module.params["lock_state"]
         lock_timeout = module.params["lock_timeout"]
-        commit_timeout = module.params["commit_timeout"]
 
         # Make the requested changes
         if state != "absent":
@@ -254,7 +243,7 @@ def main():
 
         if state == "committed":
             # Commit the blueprint
-            committed = client_factory.commit_blueprint(blueprint_id, commit_timeout)
+            committed = client_factory.commit_blueprint(blueprint_id)
             result["changed"] = committed
             result["msg"] = "blueprint committed successfully"
 

@@ -25,7 +25,6 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
-DEFAULT_BLUEPRINT_COMMIT_TIMEOUT = 120
 
 
 def apstra_client_module_args():
@@ -805,34 +804,30 @@ class ApstraClientFactory:
         tag = tags_client.blueprints[id].tags.get(label=_blueprint_lock_tag_name(id))
         return tag is not None
 
-    def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
+    def commit_blueprint(self, id):
         """
         Commit the blueprint with the given ID.
 
         :param id: The ID of the blueprint to commit.
-        :param timeout: The maximum time to wait for the blueprint to be committed.
-        :return: True if the blueprint was committed, False if not.
         """
         blueprint_client = self.get_client("blueprints")
-        start_time = time.time()
-        interval = 5
-        blueprint = None
-        while True:
-            blueprint = blueprint_client.blueprints[id].get()
-            if blueprint:
-                break
-            time_left = timeout - (time.time() - start_time)
-            if time_left <= 0:
-                self.module.fail_json(
-                    msg=f"Failed to commit blueprint {id} within {timeout} seconds"
-                )
-            self.module.debug(
-                f"Blueprint get failed, will retry for {time_left} seconds..."
-            )
-            time.sleep(interval)
+        blueprint = blueprint_client.blueprints[id]
         
-        # Commit the blueprint
-        blueprint_client.blueprints[id].deploy(data={"version": blueprint.version})
+        deploy = blueprint.get_deploy()
+        deploy_state = deploy["state"]
+        deploy_version = deploy["version"]
+        if deploy_state == "failure":
+            # Validation failed
+            self.module.fail_json(
+                msg=f"commit blueprint version {deploy_version} failed: {deploy['error']}"
+            )
+        elif deploy_state == "success":
+            # Commit the blueprint
+            blueprint.deploy(data={"version": deploy_version})
+        else:
+            self.module.fail_json(
+                msg=f"commit blueprint version {deploy_version} in unexpected state: {deploy_state}"
+            )
 
     def compare_and_update(self, current, desired, changes):
         """

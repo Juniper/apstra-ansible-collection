@@ -19,7 +19,7 @@ junipernetworks.apstra.blueprint module -- Manage Apstra blueprints
 .. Collection note
 
 .. note::
-    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.19).
+    This module is part of the `junipernetworks.apstra collection <https://galaxy.ansible.com/ui/repo/published/junipernetworks/apstra/>`_ (version 0.1.20).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -180,44 +180,6 @@ Parameters
 
       A dictionary representing the blueprint to create.
 
-
-      .. raw:: html
-
-        </div>
-
-  * - .. raw:: html
-
-        <div class="ansible-option-cell">
-        <div class="ansibleOptionAnchor" id="parameter-commit_timeout"></div>
-
-      .. _ansible_collections.junipernetworks.apstra.blueprint_module__parameter-commit_timeout:
-
-      .. rst-class:: ansible-option-title
-
-      **commit_timeout**
-
-      .. raw:: html
-
-        <a class="ansibleOptionLink" href="#parameter-commit_timeout" title="Permalink to this option"></a>
-
-      .. ansible-option-type-line::
-
-        :ansible-option-type:`integer`
-
-      .. raw:: html
-
-        </div>
-
-    - .. raw:: html
-
-        <div class="ansible-option-cell">
-
-      The timeout in seconds for committing the blueprint.
-
-
-      .. rst-class:: ansible-option-line
-
-      :ansible-option-default-bold:`Default:` :ansible-option-default:`120`
 
       .. raw:: html
 
