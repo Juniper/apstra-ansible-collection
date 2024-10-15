@@ -4,6 +4,14 @@
   gather_facts: false
   connection: local
   tasks:
+    - name: Get local hostname
+      command: hostname
+      register: local_hostname
+    
+    - name: Set blueprint name fact
+      set_fact:
+        blueprint_name: "test_blueprint_{{ local_hostname.stdout }}"
+
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
         logout: false
@@ -12,7 +20,7 @@
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
         body:
-          label: "test_blueprint"
+          label: "{{ blueprint_name }}"
           design: "two_stage_l3clos"
         lock_state: "locked"
         auth_token: "{{ auth.token }}"
@@ -21,7 +29,7 @@
     - name: Create blueprint -- no change
       junipernetworks.apstra.blueprint:
         body:
-          label: "test_blueprint"
+          label: "{{ blueprint_name }}"
           design: "two_stage_l3clos"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
@@ -33,7 +41,7 @@
     - name: Create blueprint -- no change
       junipernetworks.apstra.blueprint:
         body:
-          label: "test_blueprint"
+          label: "{{ blueprint_name }}"
           design: "two_stage_l3clos"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"

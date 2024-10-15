@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.21
+=======
+
+Minor Changes
+-------------
+
+- Remove dependency on kubernetes.core (not needed yet).
+
 v0.1.20
 =======
 

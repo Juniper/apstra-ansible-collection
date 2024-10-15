@@ -4,6 +4,14 @@
   gather_facts: false
   connection: local
   tasks:
+    - name: Get local hostname
+      command: hostname
+      register: local_hostname
+    
+    - name: Set blueprint name fact
+      set_fact:
+        blueprint_name: "test_endpoint_{{ local_hostname.stdout }}"
+
     - name: Connect to Apstra
       junipernetworks.apstra.authenticate:
         logout: false
@@ -15,7 +23,7 @@
           template_id: "L2_Virtual_EVPN"
           design: "two_stage_l3clos"
           init_type: "template_reference"
-          label: "endpoint-test"
+          label: "{{ blueprint_name }}"
         lock_state: "locked"
         auth_token: "{{ auth.token }}"
       register: bp
