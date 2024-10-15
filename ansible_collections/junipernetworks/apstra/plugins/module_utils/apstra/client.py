@@ -817,22 +817,22 @@ class ApstraClientFactory:
         start_time = time.time()
         interval = 5
         blueprint = None
-        while blueprint == None:
+        while True:
             blueprint = blueprint_client.blueprints[id].get()
+            if blueprint:
+                break
             time_left = timeout - (time.time() - start_time)
             if time_left <= 0:
                 self.module.fail_json(
                     msg=f"Failed to commit blueprint {id} within {timeout} seconds"
                 )
             self.module.debug(
-                f"Waiting {time_left} seconds for blueprint to be committed..."
+                f"Blueprint get failed, will retry for {time_left} seconds..."
             )
             time.sleep(interval)
-
-        is_committed = blueprint.is_committed()
-        if not is_committed:
-            blueprint.commit()
-        return not is_committed
+        
+        # Commit the blueprint
+        blueprint_client.blueprints[id].deploy(data={"version": blueprint.version})
 
     def compare_and_update(self, current, desired, changes):
         """

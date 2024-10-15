@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.19
+=======
+
+Bug Fixes
+---------
+
+- Blueprint commit was never working. Happy-path works now.
+
 v0.1.18
 =======
 
