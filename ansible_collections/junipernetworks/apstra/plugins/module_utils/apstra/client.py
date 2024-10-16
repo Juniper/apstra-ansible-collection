@@ -812,7 +812,7 @@ class ApstraClientFactory:
         """
         blueprint_client = self.get_client("blueprints")
         blueprint = blueprint_client.blueprints[id]
-        
+
         deploy = blueprint.get_deploy()
         deploy_state = deploy["state"]
         deploy_version = deploy["version"]

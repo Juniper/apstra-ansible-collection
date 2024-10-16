@@ -145,7 +145,11 @@ def main():
         gather_network_facts=dict(
             type="list", elements="str", required=False, default=["blueprints"]
         ),
-        filter=dict(type="dict", required=False, default={"blueprints.nodes": "node_type=system"}),
+        filter=dict(
+            type="dict",
+            required=False,
+            default={"blueprints.nodes": "node_type=system"},
+        ),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | facts_module_args

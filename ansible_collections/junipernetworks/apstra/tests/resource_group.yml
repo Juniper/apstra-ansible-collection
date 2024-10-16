@@ -7,7 +7,7 @@
     - name: Get local hostname
       command: hostname
       register: local_hostname
-    
+
     - name: Set blueprint name fact
       set_fact:
         blueprint_name: "test_rg_{{ local_hostname.stdout }}"
