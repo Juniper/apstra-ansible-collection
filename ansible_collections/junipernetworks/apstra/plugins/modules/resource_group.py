@@ -172,7 +172,9 @@ def main():
 
         # Get the object
         ra_client = client_factory.get_resource_allocation_client()
-        resource_group = ra_client.blueprints[id["blueprint"]].resource_groups[group_type][group_name]
+        resource_group = ra_client.blueprints[id["blueprint"]].resource_groups[
+            group_type
+        ][group_name]
 
         # Make the requested changes
         if state == "present":

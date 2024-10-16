@@ -17,3 +17,8 @@ repos:
         verbose: true
         entry: python3 -m ansiblelint -v --force-color
         additional_dependencies: ['jmespath']
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 24.8.0
+    hooks:
+      - id: black
+        language_version: python3.11
