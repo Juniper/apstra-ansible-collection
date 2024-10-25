@@ -1,0 +1,1 @@
+See [CHANGELOG.rst.](docs/CHANGELOG.rst)

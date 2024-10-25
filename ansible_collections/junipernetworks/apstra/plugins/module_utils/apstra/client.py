@@ -25,6 +25,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
+DEFAULT_BLUEPRINT_COMMIT_TIMEOUT = 30
 
 
 def apstra_client_module_args():
@@ -804,7 +805,7 @@ class ApstraClientFactory:
         tag = tags_client.blueprints[id].tags.get(label=_blueprint_lock_tag_name(id))
         return tag is not None
 
-    def commit_blueprint(self, id):
+    def commit_blueprint(self, id, timeout = DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
         """
         Commit the blueprint with the given ID.
 
@@ -813,21 +814,8 @@ class ApstraClientFactory:
         blueprint_client = self.get_client("blueprints")
         blueprint = blueprint_client.blueprints[id]
 
-        deploy = blueprint.get_deploy()
-        deploy_state = deploy["state"]
-        deploy_version = deploy["version"]
-        if deploy_state == "failure":
-            # Validation failed
-            self.module.fail_json(
-                msg=f"commit blueprint version {deploy_version} failed: {deploy['error']}"
-            )
-        elif deploy_state == "success":
-            # Commit the blueprint
-            blueprint.deploy(data={"version": deploy_version})
-        else:
-            self.module.fail_json(
-                msg=f"commit blueprint version {deploy_version} in unexpected state: {deploy_state}"
-            )
+        # Commit the blueprint
+        blueprint.deploy_blueprint(timeout)
 
     def compare_and_update(self, current, desired, changes):
         """
