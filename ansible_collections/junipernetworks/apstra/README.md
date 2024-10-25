@@ -137,7 +137,7 @@ Please read and familiarize yourself with this document.
 
 ## Release Notes
 
-Release notes are available [here](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/CHANGELOG.rst).
+Release notes are available [here](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/CHANGELOG.rst).
 
 ## Roadmap
 

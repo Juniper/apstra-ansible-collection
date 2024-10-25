@@ -190,7 +190,7 @@ def main():
                         id["blueprint"], leaf_object_type, body["label"]
                     )
                     if id_found:
-                        id_found[leaf_object_type] = id_found
+                        id[leaf_object_type] = id_found
                         current_object = client_factory.object_request(
                             object_type, "get", id
                         )

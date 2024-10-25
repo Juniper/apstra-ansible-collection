@@ -4,11 +4,20 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.23
+=======
+
+Bug Fixes
+---------
+
+- Creating tags was not idempotent. Fixed.
+
 v0.1.22
 =======
 
 Bug Fixes
 ---------
+
 - Use proper API from SDK to ensure blueprint commit works.
 
 v0.1.21
