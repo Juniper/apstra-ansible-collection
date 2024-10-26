@@ -20,9 +20,9 @@
     - name: Create blueprint
       junipernetworks.apstra.blueprint:
         body:
-          template_id: "L2_Virtual_EVPN"
           design: "two_stage_l3clos"
           init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
           label: "{{ blueprint_name }}"
         lock_state: "locked"
         auth_token: "{{ auth.token }}"
@@ -114,18 +114,6 @@
       ansible.builtin.debug:
         var: sz_modify
 
-    - name: Commit the blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "ignore"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_commit
-
-    - name: Show committed blueprint
-      ansible.builtin.debug:
-        var: blueprint_commit
-
     - name: Delete the security_zone
       junipernetworks.apstra.security_zone:
         id: "{{ sz.id }}"
@@ -137,11 +125,10 @@
       ansible.builtin.debug:
         var: sz_delete
 
-    - name: Commit and unlock blueprint
+    - name: Unlock the blueprint
       junipernetworks.apstra.blueprint:
         id: "{{ bp.id }}"
         lock_state: "unlocked"
-        state: committed
         auth_token: "{{ auth.token }}"
       register: blueprint_unlock
 

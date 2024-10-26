@@ -151,7 +151,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     apstra_client_module_args,
     ApstraClientFactory,
     DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
-    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT
+    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
 )
 
 
@@ -204,7 +204,9 @@ def main():
         if state != "absent":
             if id is None:
                 if body is None:
-                    raise ValueError("Must specify 'body' to create a blueprint")
+                    raise ValueError(
+                        "Must specify 'body' with a 'label' property if blueprint id is unspecified"
+                    )
 
                 # See if the object label exists
                 blueprint = (

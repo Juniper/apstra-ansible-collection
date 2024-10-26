@@ -237,81 +237,91 @@ def main():
             raise ValueError(f"Invalid id: {id} for desired state of {state}.")
         object_id = id.get(leaf_object_type, None)
 
-        # Make the requested changes
-        if state == "present":
-            current_object = None
-            if object_id is None:
-                if body is None and not virtual_network_label:
-                    raise ValueError(
-                        f"Must specify 'body' to create a {leaf_object_type}"
-                    )
-
-                # See if the object label exists
-                current_object = None
-                if body and "label" in body:
-                    id_found = client_factory.get_id_by_label(
-                        id["blueprint"], "ep_endpoint_policy", body["label"]
-                    )
-                    if id_found:
-                        id[leaf_object_type] = id_found
-                        current_object = client_factory.object_request(
-                            object_type, "get", id
-                        )
-                elif virtual_network_label:
-                    # Get the endpoint id by label
-                    ep_policy_by_vn = (
-                        query.node(type="virtual_network", label=virtual_network_label)
-                        .in_(type="vn_to_attach")
-                        .node(type="ep_endpoint_policy")
-                        .in_(type="ep_first_subpolicy")
-                        .node(type="ep_endpoint_policy", policy_type_name="pipeline")
-                        .in_(type="ep_subpolicy")
-                        .node(
-                            type="ep_endpoint_policy",
-                            policy_type_name="batch",
-                            name=leaf_object_type,
-                        )
-                    )
-                    ep_found = client_factory.query_blueprint(
-                        id["blueprint"], ep_policy_by_vn
-                    )
-
-                    if not ep_found:
-                        module.fail_json(
-                            msg=f"ep_endpoint_policy for virtual_network {virtual_network_label} not found"
-                        )
-
-                    if len(ep_found) > 1:
-                        module.fail_json(
-                            msg=f"Multiple ep_endpoint_policy object matching virtual_network {virtual_network_label} found: {ep_found}"
-                        )
-
-                    if leaf_object_type not in ep_found[0]:
-                        module.fail_json(
-                            msg=f"Object missing key {leaf_object_type}: {result[0]}"
-                        )
-
-                    # Finally, save the endpoint policy id
-                    id[leaf_object_type] = ep_found[0][leaf_object_type].id
-
+        # See if the object exists
+        current_object = None
+        if object_id is None:
+            if (not body is None) and ("label" in body):
+                id_found = client_factory.get_id_by_label(
+                    id["blueprint"], leaf_object_type, body["label"]
+                )
+                if id_found:
+                    id[leaf_object_type] = id_found
                     current_object = client_factory.object_request(
                         object_type, "get", id
                     )
-                if current_object:
-                    result["id"] = id
-                else:
-                    # Create the object
-                    created_object = client_factory.object_request(
-                        object_type, "create", id, body
+            elif virtual_network_label:
+                # Get the endpoint id by label
+                ep_policy_by_vn = (
+                    query.node(type="virtual_network", label=virtual_network_label)
+                    .in_(type="vn_to_attach")
+                    .node(type="ep_endpoint_policy")
+                    .in_(type="ep_first_subpolicy")
+                    .node(type="ep_endpoint_policy", policy_type_name="pipeline")
+                    .in_(type="ep_subpolicy")
+                    .node(
+                        type="ep_endpoint_policy",
+                        policy_type_name="batch",
+                        name=leaf_object_type,
                     )
-                    object_id = created_object["id"]
-                    id[leaf_object_type] = object_id
-                    result["id"] = id
-                    result["changed"] = True
-                    result["response"] = created_object
-                    result["msg"] = f"{leaf_object_type} created successfully"
-            else:
+                )
+                ep_found = client_factory.query_blueprint(
+                    id["blueprint"], ep_policy_by_vn
+                )
+
+                if not ep_found:
+                    module.fail_json(
+                        msg=f"ep_endpoint_policy for virtual_network {virtual_network_label} not found"
+                    )
+
+                if len(ep_found) > 1:
+                    module.fail_json(
+                        msg=f"Multiple ep_endpoint_policy object matching virtual_network {virtual_network_label} found: {ep_found}"
+                    )
+
+                if leaf_object_type not in ep_found[0]:
+                    module.fail_json(
+                        msg=f"Object missing key {leaf_object_type}: {result[0]}"
+                    )
+
+                # Finally, save the endpoint policy id
+                id[leaf_object_type] = ep_found[0][leaf_object_type].id
+
                 current_object = client_factory.object_request(object_type, "get", id)
+        else:
+            current_object = client_factory.object_request(object_type, "get", id)
+
+        # Make the requested changes
+        if state == "present":
+            if current_object:
+                result["id"] = id
+                if body:
+                    # Update the object
+                    changes = {}
+                    if client_factory.compare_and_update(current_object, body, changes):
+                        updated_object = client_factory.object_request(
+                            object_type, "patch", id, changes
+                        )
+                        result["changed"] = True
+                        if updated_object:
+                            result["response"] = updated_object
+                        result["changes"] = changes
+                        result["msg"] = f"{leaf_object_type} updated successfully"
+                else:
+                    result["changed"] = False
+                    result["msg"] = f"No changes specified for {leaf_object_type}"
+            else:
+                if body is None:
+                    raise ValueError(
+                        f"Must specify 'body' to create a {leaf_object_type}"
+                    )
+                # Create the object
+                object = client_factory.object_request(object_type, "create", id, body)
+                object_id = object["id"]
+                id[leaf_object_type] = object_id
+                result["id"] = id
+                result["changed"] = True
+                result["response"] = object
+                result["msg"] = f"{leaf_object_type} created successfully"
 
             if current_object:
                 current_object[application_point_leaf_object_type] = (

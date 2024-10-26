@@ -40,6 +40,14 @@
       ansible.builtin.debug:
         var: bp
 
+    - name: Create a tag -- no change
+      junipernetworks.apstra.tag:
+        id: "{{ bp.id }}"
+        body:
+          label: "test_tag"
+          description: "test tag description"
+        auth_token: "{{ auth.token }}"
+
     - name: Create routing_policy
       junipernetworks.apstra.routing_policy:
         id: "{{ bp.id }}"
@@ -121,18 +129,6 @@
       ansible.builtin.debug:
         var: ep
 
-    - name: Commit the blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "ignore"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_commit
-
-    - name: Show committed blueprint
-      ansible.builtin.debug:
-        var: blueprint_commit
-
     - name: Delete the virtual_network
       junipernetworks.apstra.virtual_network:
         id: "{{ vn.id }}"
@@ -144,22 +140,11 @@
       ansible.builtin.debug:
         var: vn_delete
 
-    - name: Commit and unlock blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "unlocked"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_unlock
-
-    - name: Show unlocked blueprint
-      ansible.builtin.debug:
-        var: blueprint_unlock
-
     - name: Delete blueprint
       junipernetworks.apstra.blueprint:
         id: "{{ bp.id }}"
         state: absent
+        lock_state: "unlocked"
         auth_token: "{{ auth.token }}"
       register: blueprint_delete
 

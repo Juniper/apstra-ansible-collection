@@ -21,18 +21,10 @@
       junipernetworks.apstra.blueprint:
         body:
           label: "{{ blueprint_name }}"
-          design: "two_stage_l3clos"
+          design: "freeform"
         lock_state: "locked"
         auth_token: "{{ auth.token }}"
       register: blueprint_create
-
-    - name: Create blueprint -- no change
-      junipernetworks.apstra.blueprint:
-        body:
-          label: "{{ blueprint_name }}"
-          design: "two_stage_l3clos"
-        lock_state: "ignore"
-        auth_token: "{{ auth.token }}"
 
     - name: Show created blueprint
       ansible.builtin.debug:
@@ -42,7 +34,7 @@
       junipernetworks.apstra.blueprint:
         body:
           label: "{{ blueprint_name }}"
-          design: "two_stage_l3clos"
+          design: "freeform"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
 

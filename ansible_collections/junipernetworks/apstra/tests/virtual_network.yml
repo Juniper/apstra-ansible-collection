@@ -121,18 +121,6 @@
           description: "test VN description edwin wuz here"
         auth_token: "{{ auth.token }}"
 
-    - name: Commit the blueprint
-      junipernetworks.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "ignore"
-        state: committed
-        auth_token: "{{ auth.token }}"
-      register: blueprint_commit
-
-    - name: Show committed blueprint
-      ansible.builtin.debug:
-        var: blueprint_commit
-
     - name: Delete the virtual_network
       junipernetworks.apstra.virtual_network:
         id: "{{ vn.id }}"

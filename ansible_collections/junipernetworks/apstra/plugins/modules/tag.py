@@ -174,54 +174,53 @@ def main():
             raise ValueError(f"Invalid id: {id} for desired state of {state}.")
         object_id = id.get(leaf_object_type, None)
 
+        # See if the object exists
+        current_object = None
+        if object_id is None:
+            if (not body is None) and ("label" in body):
+                id_found = client_factory.get_id_by_label(
+                    id["blueprint"], leaf_object_type, body["label"]
+                )
+                if id_found:
+                    id[leaf_object_type] = id_found
+                    current_object = client_factory.object_request(
+                        object_type, "get", id
+                    )
+        else:
+            current_object = client_factory.object_request(object_type, "get", id)
+
         # Make the requested changes
         if state == "present":
-            current_object = None
-            if object_id is None:
+            if current_object:
+                result["id"] = id
+                if body:
+                    # Update the object
+                    changes = {}
+                    if client_factory.compare_and_update(current_object, body, changes):
+                        updated_object = client_factory.object_request(
+                            object_type, "patch", id, changes
+                        )
+                        result["changed"] = True
+                        if updated_object:
+                            result["response"] = updated_object
+                        result["changes"] = changes
+                        result["msg"] = f"{leaf_object_type} updated successfully"
+                else:
+                    result["changed"] = False
+                    result["msg"] = f"No changes specified for {leaf_object_type}"
+            else:
                 if body is None:
                     raise ValueError(
                         f"Must specify 'body' to create a {leaf_object_type}"
                     )
-
-                # See if the object label exists
-                current_object = None
-                if "label" in body:
-                    id_found = client_factory.get_id_by_label(
-                        id["blueprint"], leaf_object_type, body["label"]
-                    )
-                    if id_found:
-                        id[leaf_object_type] = id_found
-                        current_object = client_factory.object_request(
-                            object_type, "get", id
-                        )
-                if current_object:
-                    result["id"] = id
-                else:
-                    # Create the object
-                    created_object = client_factory.object_request(
-                        object_type, "create", id, body
-                    )
-                    object_id = created_object["id"]
-                    id[leaf_object_type] = object_id
-                    result["id"] = id
-                    result["changed"] = True
-                    result["response"] = created_object
-                    result["msg"] = f"{leaf_object_type} created successfully"
-            else:
-                current_object = client_factory.object_request(object_type, "get", id)
-
-            if current_object:
-                # Update the object
-                changes = {}
-                if client_factory.compare_and_update(current_object, body, changes):
-                    updated_object = client_factory.object_request(
-                        object_type, "patch", id, changes
-                    )
-                    result["changed"] = True
-                    if updated_object:
-                        result["response"] = updated_object
-                    result["changes"] = changes
-                    result["msg"] = f"{leaf_object_type} updated successfully"
+                # Create the object
+                object = client_factory.object_request(object_type, "create", id, body)
+                object_id = object["id"]
+                id[leaf_object_type] = object_id
+                result["id"] = id
+                result["changed"] = True
+                result["response"] = object
+                result["msg"] = f"{leaf_object_type} created successfully"
 
             # Return the final object state
             result[leaf_object_type] = client_factory.object_request(

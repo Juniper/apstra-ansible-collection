@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.24
+=======
+
+Minor Changes
+-------------
+
+- Add ability to delete by label for virtual networks, security zones, routing policies, endpoint policies, and tags.
+
 v0.1.23
 =======
 
