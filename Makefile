@@ -13,10 +13,11 @@ APSTRA_COLLECTION = junipernetworks-apstra-$(VERSION).tar.gz
 
 # OS-specific settings
 OS := $(shell uname -s)
+BREW := $(shell which brew 2>/dev/null)
 ifeq ($(OS),Darwin)
 PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
-else
-# Unix
+else ifneq ($(BREW),"")
+# Use brew if it exists
 export LDFLAGS := -Wl,-rpath,$(shell brew --prefix openssl)/lib
 export CPPFLAGS := -I$(shell brew --prefix openssl)/include
 export CONFIGURE_OPTS := --with-openssl=$(shell brew --prefix openssl)

@@ -17,7 +17,7 @@
       register: auth_response
 
     - name: Create VRF in bluprint name apstra
-      junipernetworks.apstra.routing_zone:
+      junipernetworks.apstra.security_zone:
         auth_token: "{{ auth_response.auth_token }}"
         blueprint_label: "eda-bp"
         routing_zone_name: "myvrf"
