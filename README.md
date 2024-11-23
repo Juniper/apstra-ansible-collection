@@ -95,7 +95,7 @@ The following tools are recommended for development of this collection:
    ```
 3. On _Ubuntu_, you'll need to install a package to build Python properly:
       ```bash
-      sudo apt -y install build-essential liblzma-dev libbz2-dev zlib1g zlib1g-dev libssl-dev libffi-dev
+      sudo apt -y install build-essential liblzma-dev libbz2-dev zlib1g zlib1g-dev libssl-dev libffi-dev libsqlite3-dev
       ```
 #### All Systems
 
