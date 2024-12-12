@@ -5,7 +5,8 @@ name = "pypi"
 
 [packages]
 ansible-core = "2.15.12"
-aos-sdk = {file = "https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.0.0-RC5/aos_sdk-0.1.0-py3-none-any.whl"}
+#TODO: Add aos-client when it comes available.
+aos-sdk = {file = "wheels/aos_sdk-0.1.0-py3-none-any.whl"}
 kubernetes = ">=24.2.0"
 requests-oauthlib = "*"
 jsonpatch = "*"

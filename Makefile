@@ -43,13 +43,19 @@ define install_collection_if_missing
 	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)
 endef
 
-pipenv:
+pipenv: wheels/aos_sdk-0.1.0-py3-none-any.whl
 	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
 
+wheels:
+	mkdir -p wheels
+
+wheels/aos_sdk-0.1.0-py3-none-any.whl: wheels
+	# If this fails, download the wheel from juniper.net to the wheels directory...
+	(test -r "$@" && touch "$@") || curl -fso "$@" https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.0.0-RC5/aos_sdk-0.1.0-py3-none-any.whl 2>/dev/null
+
 release-build: docs
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
-	make clean-pipenv
 	pipenv install
 	make build
 
@@ -81,13 +87,8 @@ $(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/docs/req
 	pipenv run ansible-galaxy collection build $(APSTRA_COLLECTION_ROOT)
 	touch "$@"
 
-$(APSTRA_COLLECTION_ROOT)/docs/requirements.txt: Pipfile Makefile
-	pipenv --rm &>/dev/null || true
-	pipenv install
-	pipenv run pip freeze > "$@.tmp"
-	sed -e 's/==/~=/' "$@.tmp" > "$@"
-	rm "$@.tmp"
-	pipenv install --dev
+$(APSTRA_COLLECTION_ROOT)/docs/requirements.txt: Pipfile Makefile pipenv
+	pipenv clean && pipenv requirements > "$@"
 
 install: build
 	pipenv run ansible-galaxy collection install --ignore-certs --force $(APSTRA_COLLECTION)
@@ -135,8 +136,7 @@ test-resource_group: install
 test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group
 
 clean-pipenv:
-	pipenv --rm || true
-	PIPENV_VENV_IN_PROJECT= pipenv --rm || true
+	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true
 	rm -rf .venv
 
 clean: clean-pipenv
