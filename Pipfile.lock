@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "f17815db75d91427457f9228050d71fcf691531fc317395ed146e6fd155790ef"
+            "sha256": "8c30d8977dfa2cfc496cc176020f62deb059fa7c0c70827a69c64448bbb90ea5"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -26,7 +26,7 @@
             "version": "==2.15.12"
         },
         "aos-sdk": {
-            "file": "wheels/aos_sdk-0.1.0-py3-none-any.whl",
+            "file": "build/wheels/aos_sdk-0.1.0-py3-none-any.whl",
             "hashes": [
                 "sha256:d8cbbc47669dc7c249a7ebd545d3fb7d2b432e786c082507879399337f86413b"
             ]
@@ -863,11 +863,11 @@
         },
         "aiosignal": {
             "hashes": [
-                "sha256:54cd96e15e1649b75d6c87526a6ff0b6c1b0dd3459f43d9ca11d48c339b68cfc",
-                "sha256:f8376fb07dd1e86a584e4fcdec80b36b7f81aac666ebc724e2c090300dd83b17"
+                "sha256:45cde58e409a301715980c2b01d0c28bdde3770d8290b5eb2173759d9acb31a5",
+                "sha256:a8c255c66fafb1e499c9351d0bf32ff2d8a0321595ebac3b93713656d2436f54"
             ],
-            "markers": "python_version >= '3.7'",
-            "version": "==1.3.1"
+            "markers": "python_version >= '3.9'",
+            "version": "==1.3.2"
         },
         "alabaster": {
             "hashes": [

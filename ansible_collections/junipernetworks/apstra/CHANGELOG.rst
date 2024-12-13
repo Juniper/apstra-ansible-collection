@@ -4,7 +4,7 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
-v0.1.25
+v0.1.26
 =======
 
 Minor Changes

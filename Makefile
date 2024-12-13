@@ -43,14 +43,14 @@ define install_collection_if_missing
 	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)
 endef
 
-pipenv: wheels/aos_sdk-0.1.0-py3-none-any.whl
+pipenv: build/wheels/aos_sdk-0.1.0-py3-none-any.whl
 	pipenv --help &>/dev/null || pip install pipenv
 	pipenv install --dev
 
-wheels:
-	mkdir -p wheels
+build/wheels:
+	mkdir -p build/wheels
 
-wheels/aos_sdk-0.1.0-py3-none-any.whl: wheels
+build/wheels/aos_sdk-0.1.0-py3-none-any.whl: build/wheels
 	# If this fails, download the wheel from juniper.net to the wheels directory...
 	(test -r "$@" && touch "$@") || curl -fso "$@" https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.0.0-RC5/aos_sdk-0.1.0-py3-none-any.whl 2>/dev/null
 
