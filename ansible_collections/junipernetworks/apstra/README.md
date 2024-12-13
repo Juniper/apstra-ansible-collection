@@ -68,10 +68,10 @@ collections:
   - name: junipernetworks.apstra
 ```
 
-You can ensure that the [required packages](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/docs/requirements.txt) are installed via pip. For example, if your collection is installed in the default location:
+You can ensure that the [required packages](https://ssd-git.juniper.net/engprod/apstra-eda/apstra-ansible-collection/-/tree/main/ansible_collections/junipernetworks/apstra/requirements.txt) are installed via pip. For example, if your collection is installed in the default location:
 
 ```shell
-pip install -r ~/.ansible/collections/ansible_collections/junipernetworks/apstra/docs/requirements.txt
+pip install -r ~/.ansible/collections/ansible_collections/junipernetworks/apstra/requirements.txt
 ```
 
 ## Usage

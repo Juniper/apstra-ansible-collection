@@ -82,13 +82,13 @@ docs: pipenv install
 	pipenv run $(APSTRA_COLLECTION_DOCS_BUILD)/build.sh
 	cp $(APSTRA_COLLECTION_DOCS_BUILD)/rst/*.rst $(APSTRA_COLLECTION_ROOT)/docs/
 
-$(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/docs/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
+$(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
 	rm -f junipernetworks-apstra-*.tar.gz
 	pipenv run ansible-galaxy collection build $(APSTRA_COLLECTION_ROOT)
 	touch "$@"
 
-$(APSTRA_COLLECTION_ROOT)/docs/requirements.txt: Pipfile Makefile pipenv
-	pipenv clean && pipenv requirements > "$@"
+$(APSTRA_COLLECTION_ROOT)/requirements.txt: Pipfile Makefile pipenv
+	pipenv clean && pipenv requirements --from-pipfile > "$@"
 
 install: build
 	pipenv run ansible-galaxy collection install --ignore-certs --force $(APSTRA_COLLECTION)
@@ -140,7 +140,7 @@ clean-pipenv:
 	rm -rf .venv
 
 clean: clean-pipenv
-	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/docs/requirements.txt junipernetworks-apstra-*.tar.gz
+	rm -rf $(APSTRA_COLLECTION_ROOT)/.apstra-collection $(APSTRA_COLLECTION_ROOT)/requirements.txt junipernetworks-apstra-*.tar.gz
 
 demo: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) demo/security_zone.yml

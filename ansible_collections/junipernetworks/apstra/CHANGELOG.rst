@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.25
+=======
+
+Minor Changes
+-------------
+
+- Limit dependency specification.
+
 v0.1.24
 =======
 

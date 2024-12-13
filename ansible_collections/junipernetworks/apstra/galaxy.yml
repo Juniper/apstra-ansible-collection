@@ -1,7 +1,7 @@
 namespace: "junipernetworks"
 description: "This collection provides modules to interact with Apstra."
 name: "apstra"
-version: "0.1.24"
+version: "0.1.25"
 readme: "README.md"
 authors:
     - "Pratik Dave <pratikd@juniper.net>"
@@ -23,6 +23,5 @@ build_ignore:
     - antsibull-docs.cfg
     - .apstra-collection
     - conf.py
-    - requirements.txt
     - _build
     - .gitignore
