@@ -99,12 +99,16 @@ The following tools are recommended for development of this collection:
       ```
 #### All Systems
 
-1. Run the setup `make` target:
+1. Download the aos-sdk, from the [Juniper Download page for Apstra](https://support.juniper.net/support/downloads/?p=apstra). Select the option for the [Apstra Automation Python 3 SDK](https://webdownload.juniper.net/swdl/dl/secure/site/1/record/179819.html?pf=Apstra%20Fabric%20Conductor). The SDK is a closed-source project. Juniper Networks is actively working to split the Apstra client code out and open-source it, as that is the only part needed for this collection.
+
+2. The file that's downloaded will have either a 'whl' or a 'dms' extension. Just move the file to the expected location. For example: `mv ~/Downloads/aos_sdk-0.1.0-py3-none-any.dms build/wheels/aos_sdk-0.1.0-py3-none-any.whl`.
+
+3. Run the setup `make` target:
    ```bash
    make setup
    ```
 
-2. Optional: Follow [pipenv command completion setup instructions](https://pipenv.pypa.io/en/stable/shell.html#shell-completion).
+3. Optional: Follow [pipenv command completion setup instructions](https://pipenv.pypa.io/en/stable/shell.html#shell-completion).
 
 ### Usage
 
