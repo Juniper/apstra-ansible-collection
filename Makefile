@@ -1,3 +1,5 @@
+REMOTE ?= origin
+
 APSTRA_COLLECTION_ROOT := ansible_collections/junipernetworks/apstra
 
 # Get all .py files in the APSTRA_COLLECTION_ROOT directory
@@ -9,7 +11,7 @@ PY_VERSION := $(shell cat .python-version)
 
 APSTRA_COLLECTION = junipernetworks-apstra-$(VERSION).tar.gz
 
-.PHONY: setup build release-build install clean clean-pipenv pipenv docs
+.PHONY: setup build release-build install clean clean-pipenv pipenv docs tag
 
 # OS-specific settings
 OS := $(shell uname -s)
@@ -54,7 +56,12 @@ build/wheels/aos_sdk-0.1.0-py3-none-any.whl: build/wheels
 	# If this fails, download the wheel from juniper.net to the wheels directory...
 	(test -r "$@" && touch "$@") || curl -fso "$@" https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.0.0-RC5/aos_sdk-0.1.0-py3-none-any.whl 2>/dev/null
 
-release-build: docs
+tag:
+	git tag -a $(VERSION) -m "Release $(VERSION)"
+	git push $(REMOTE) $(VERSION)
+	git push --tags
+
+release-build: tag docs
 	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 	pipenv install
 	make build
