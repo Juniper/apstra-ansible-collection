@@ -2,34 +2,30 @@ REMOTE ?= origin
 
 APSTRA_COLLECTION_ROOT := ansible_collections/junipernetworks/apstra
 
+VERSION := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)
+
+APSTRA_COLLECTION := $(APSTRA_COLLECTION_ROOT)/junipernetworks-apstra-$(VERSION).tar.gz
+
 # Get all .py files in the APSTRA_COLLECTION_ROOT directory
 PY_FILES := $(shell find $(APSTRA_COLLECTION_ROOT) -name *.py)
-
-VERSION := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)
 
 PY_VERSION := $(shell cat .python-version)
 
 APSTRA_COLLECTION = junipernetworks-apstra-$(VERSION).tar.gz
 
-.PHONY: setup build release-build install clean clean-pipenv pipenv docs tag
+.PHONY: setup build release-build install clean clean-pipenv pipenv docs tag image
 
 # OS-specific settings
 OS := $(shell uname -s)
-BREW := $(shell which brew 2>/dev/null)
 ifeq ($(OS),Darwin)
 PYENV_INSTALL_PREFIX := PYTHON_CONFIGURE_OPTS=--enable-framework
-else ifneq ($(BREW),"")
-# Use brew if it exists
-export LDFLAGS := -Wl,-rpath,$(shell brew --prefix openssl)/lib
-export CPPFLAGS := -I$(shell brew --prefix openssl)/include
-export CONFIGURE_OPTS := --with-openssl=$(shell brew --prefix openssl)
 endif
 
 # By default use .venv in the current directory
 export PIPENV_VENV_IN_PROJECT=1
 
 # Needed for antsi-build doc build
-CERT_PATH := $(shell python -m certifi)
+CERT_PATH = $(shell python -m certifi 2>/dev/null)
 export SSL_CERT_FILE=$(CERT_PATH)
 export REQUESTS_CA_BUNDLE=$(CERT_PATH)
 
@@ -46,8 +42,7 @@ define install_collection_if_missing
 endef
 
 pipenv: build/wheels/aos_sdk-0.1.0-py3-none-any.whl
-	pipenv --help &>/dev/null || pip install pipenv
-	pipenv install --dev
+	pipenv check 2>/dev/null || (pip install pipenv && pipenv install --dev)
 
 build/wheels:
 	mkdir -p build/wheels
@@ -61,9 +56,13 @@ tag:
 	git push $(REMOTE) $(VERSION)
 	git push --tags
 
-release-build: tag docs
-	rm -f $(APSTRA_COLLECTION_ROOT)/.apstra-collection
-	pipenv install
+image: build
+	mkdir -p build/collections
+	rm -f build/collections/junipernetworks-apstra.tar.gz
+	cp "$(APSTRA_COLLECTION)" build/collections/junipernetworks-apstra.tar.gz
+	TAG=$(VERSION) pipenv run build/build_image.sh
+
+release-build: docs
 	make build
 
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
@@ -71,8 +70,9 @@ build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 APSTRA_COLLECTION_DOCS_BUILD := ansible_collections/junipernetworks/apstra/_build
 
 docs: pipenv install
-	rm -rf "$(APSTRA_COLLECTION_DOCS_BUILD)"
+	rm -rf "$(APSTRA_COLLECTION_DOCS_BUILD)" "$(APSTRA_COLLECTION_ROOT)/.apstra-collection"
 	mkdir -p $(APSTRA_COLLECTION_ROOT)/_build
+	chmod og-rwx $(APSTRA_COLLECTION_ROOT)/_build
 	pipenv run antsibull-docs sphinx-init \
 		--dest-dir $(APSTRA_COLLECTION_DOCS_BUILD) \
 		--no-indexes \

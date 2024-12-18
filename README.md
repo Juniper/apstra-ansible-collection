@@ -73,30 +73,13 @@ The following tools are recommended for development of this collection:
     curl https://pyenv.run | bash
     ```
 
-2. Follow the instructions given on the screen to finish the installation. For example:
-   ```bash
-    WARNING: seems you still have not added 'pyenv' to the load path.
+2. To set it up in your shell follow these instructions: https://github.com/pyenv/pyenv?tab=readme-ov-file#b-set-up-your-shell-environment-for-pyenv
 
-    # Load pyenv automatically by appending
-    # the following to
-    # ~/.bash_profile if it exists, otherwise ~/.profile (for login shells)
-    # and ~/.bashrc (for interactive shells) :
-
-    export PYENV_ROOT="$HOME/.pyenv"
-    [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv init -)"
-
-    # Restart your shell for the changes to take effect.
-
-    # Load pyenv automatically by adding
-    # the following to ~/.bashrc:
-
-    eval "$(pyenv init -)"
-   ```
-3. On _Ubuntu_, you'll need to install a package to build Python properly:
+3. On _Ubuntu_, you'll need to install some packages to build Python properly:
       ```bash
       sudo apt -y install build-essential liblzma-dev libbz2-dev zlib1g zlib1g-dev libssl-dev libffi-dev libsqlite3-dev
       ```
+
 #### All Systems
 
 1. Download the aos-sdk, from the [Juniper Download page for Apstra](https://support.juniper.net/support/downloads/?p=apstra). Select the option for the [Apstra Automation Python 3 SDK](https://webdownload.juniper.net/swdl/dl/secure/site/1/record/179819.html?pf=Apstra%20Fabric%20Conductor). The SDK is a closed-source project. Juniper Networks is actively working to split the Apstra client code out and open-source it, as that is the only part needed for this collection.
@@ -108,7 +91,7 @@ The following tools are recommended for development of this collection:
    make setup
    ```
 
-3. Optional: Follow [pipenv command completion setup instructions](https://pipenv.pypa.io/en/stable/shell.html#shell-completion).
+4. Optional: Follow [pipenv command completion setup instructions](https://pipenv.pypa.io/en/stable/shell.html#shell-completion). Only do it if pipenv is installed in your global Python interpreter.
 
 ### Usage
 
@@ -134,6 +117,29 @@ APSTRA_PASSWORD="TenaciousFlyingfish1#"
 APSTRA_VERIFY_CERTIFICATES=0
 ```
 
+### Image Build
+
+To build the image, docker is required.
+
+To build an image, you'll need to set the environment variables `RH_USERNAME` and `RH_PASSWORD` in the .env file at the root of your repo.  For example:
+
+```bash
+RH_USERNAME=jsmith
+RH_PASSWORD=XXXXXXXXXXXXXX
+```
+
+Then `make image` will create an image named `apstra-ee:latest`.
+
+### Image Publish
+
+To publish an image, you'll need to set the REGISTRY_URL in your .env file to point to the location of the docker registry you use to publish Execution Environments. For example:
+
+```bash
+REGISTRY_URL=s-artifactory.juniper.net/ee/apstra-ansible-collection
+```
+
+Then, simply run `make image` again, and in addition to rebuilding (if needed), the image `apstra-ee:latest` will be tagged and pushed to the location specified in the `REGISTRY_URL`.
+
 ### Building/Testing
 
 The following `make` targets are supported to build, install and test an ansible galaxy package.
@@ -143,6 +149,7 @@ The following `make` targets are supported to build, install and test an ansible
 |setup|Setup the build/test execution environment.|
 |build|Create package `junipernetworks-apstra-$(VERSION).tar.gz.`|
 |install|Install package `junipernetworks-apstra-$(VERSION).tar.gz.`|
+|image|Build an execution environment (container) image `apstra-ee:latest`, and optionally tag/publish if `REGISTRY_URL` is set.|
 |test|Test the collection.|
 |clean|Clean up created files.|
 |release-build|Force rebuilding the collection for release.|
