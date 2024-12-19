@@ -1,7 +1,7 @@
 namespace: "junipernetworks"
 description: "This collection provides modules to interact with Apstra."
 name: "apstra"
-version: "0.1.26"
+version: "0.1.28"
 readme: "README.md"
 authors:
     - "Pratik Dave <pratikd@juniper.net>"

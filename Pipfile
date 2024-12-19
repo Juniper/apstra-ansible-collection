@@ -4,13 +4,12 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-ansible-core = "2.15.12"
-#TODO: Add aos-client when it comes available.
 aos-sdk = {file = "build/wheels/aos_sdk-0.1.0-py3-none-any.whl"}
-kubernetes = ">=24.2.0"
 requests-oauthlib = "*"
 jsonpatch = "*"
 jmespath = "*"
+kubernetes = "*"
+ansible-core = "*"
 
 [dev-packages]
 ansible-lint = "*"
@@ -19,6 +18,8 @@ sphinx-ansible-theme = ">=0.9.0"
 ansible-pygments = "*"
 sphinx = "*"
 jmespath = "*"
+ansible-core = "*"
+ansible-builder = "*"
 
 [requires]
 python_version = "3.11"

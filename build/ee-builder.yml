@@ -1,0 +1,49 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: "registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel8:latest"
+
+additional_build_files:
+  - src: collections/junipernetworks-apstra.tar.gz
+    dest: collections/
+  - src: wheels/aos_sdk-0.1.0-py3-none-any.whl
+    dest: aos-sdk/
+
+dependencies:
+  galaxy:
+    collections:
+      - source: collections/junipernetworks-apstra.tar.gz
+        type: file
+      - kubernetes.core
+
+  python_interpreter:
+    package_system: "python3.11"
+
+  system:
+    - pkgconf-pkg-config [platform:rpm]
+    - systemd-devel [platform:rpm]
+    - gcc [platform:rpm]
+    - python3.11-devel [platform:rpm]
+
+options:
+  package_manager_path: /usr/bin/microdnf
+
+additional_build_steps:
+  prepend_base:
+    # Configure repo needed for openshift-clients package
+    - ARG RH_USERNAME
+    - ARG RH_PASSWORD
+    - RUN microdnf install -y subscription-manager
+    - RUN subscription-manager register --username "$RH_USERNAME" --password "$RH_PASSWORD" || (cat /var/log/rhsm/rhsm.log && exit 1)
+    - RUN subscription-manager repos --enable=rhocp-4.17-for-rhel-8-`uname -m`-rpms
+  prepend_builder:
+    # Copy whl file to the path pip expects based on apstra collection requirements.txt
+    - COPY _build/aos-sdk/aos_sdk-0.1.0-py3-none-any.whl /tmp/src/build/wheels/aos_sdk-0.1.0-py3-none-any.whl
+  prepend_final:
+    - COPY _build/aos-sdk/aos_sdk-0.1.0-py3-none-any.whl /runner/build/wheels/aos_sdk-0.1.0-py3-none-any.whl
+  append_final:
+    # Python requirements may be installed into /usr/local/lib
+    - RUN echo "import sys" >> /usr/lib/python3.11/site-packages/sitecustomize.py
+    - RUN echo "sys.path.append(\"/usr/local/lib/python3.11/site-packages\")" >> /usr/lib/python3.11/site-packages/sitecustomize.py

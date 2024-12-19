@@ -4,6 +4,22 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.28
+=======
+
+Major Changes
+-------------
+
+- Add execution environment image build.
+
+v0.1.27
+=======
+
+Minor Changes
+-------------
+
+- Update documentation links to github.com.
+
 v0.1.26
 =======
 
