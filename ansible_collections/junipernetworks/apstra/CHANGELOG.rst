@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.29
+=======
+
+Minor Changes
+-------------
+
+- Report stack trace when debug is enabled and an exception is raised.
+
 v0.1.28
 =======
 
