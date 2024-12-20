@@ -3,6 +3,7 @@ inventory.yml
 junipernetworks-apstra-*.gz
 .apstra-collection
 _build
+output
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

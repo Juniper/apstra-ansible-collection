@@ -153,6 +153,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
     DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
 )
+import traceback
 
 
 def main():
@@ -272,6 +273,8 @@ def main():
         result["lock_state"] = lock_state
 
     except Exception as e:
+        tb = traceback.format_exc()
+        module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)

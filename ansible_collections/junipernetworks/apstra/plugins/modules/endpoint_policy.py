@@ -54,13 +54,15 @@ options:
     type: dict
   virtual_network_label:
     description:
-      - The label of the virtual network to find the endpoint policy for. Used if the endpoing policy id and endpoint label are not provided.
+      - The label of the virtual network to find the endpoint policy for. Used if the endpoing policy id
+        and endpoint label are not provided.
     required: false
     type: str
   body:
     description:
       - Dictionary containing the endpoint policy object details.
-      - If the body contains an entry named "application_points", it expected to be a list of dicts, each containing a "if_name" string and a "used" boolean to be used to patch the application points.
+      - If the body contains an entry named "application_points", it expected to be a list of dicts, each
+        containing a "if_name" string and a "used" boolean to be used to patch the application points.
     required: false
     type: dict
   tags:
@@ -185,6 +187,8 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
 
 from aos.sdk.graph import query
 
+import traceback
+
 
 def main():
     object_module_args = dict(
@@ -240,7 +244,7 @@ def main():
         # See if the object exists
         current_object = None
         if object_id is None:
-            if (not body is None) and ("label" in body):
+            if (body is not None) and ("label" in body):
                 id_found = client_factory.get_id_by_label(
                     id["blueprint"], leaf_object_type, body["label"]
                 )
@@ -373,11 +377,11 @@ def main():
                                     module.fail_json(
                                         msg=f"Multiple interface {if_name} to virtual_network {virtual_network_label} relations found: {if_to_vn_found}"
                                     )
-                                if not "interface" in if_to_vn_found[0]:
+                                if "interface" not in if_to_vn_found[0]:
                                     module.fail_json(
                                         msg=f"Object missing key 'interface': {if_to_vn_found[0]}"
                                     )
-                                if not "virtual_network" in if_to_vn_found[0]:
+                                if "virtual_network" not in if_to_vn_found[0]:
                                     module.fail_json(
                                         msg=f"Object missing key 'virtual_network': {if_to_vn_found[0]}"
                                     )
@@ -467,6 +471,8 @@ def main():
             result["msg"] = f"{leaf_object_type} deleted successfully"
 
     except Exception as e:
+        tb = traceback.format_exc()
+        module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)

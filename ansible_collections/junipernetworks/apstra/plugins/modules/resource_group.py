@@ -125,6 +125,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+import traceback
 
 
 def main():
@@ -207,6 +208,8 @@ def main():
             result["msg"] = f"{leaf_object_type} deleted successfully"
 
     except Exception as e:
+        tb = traceback.format_exc()
+        module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)

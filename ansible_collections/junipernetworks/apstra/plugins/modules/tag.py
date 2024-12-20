@@ -134,6 +134,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+import traceback
 
 
 def main():
@@ -177,7 +178,7 @@ def main():
         # See if the object exists
         current_object = None
         if object_id is None:
-            if (not body is None) and ("label" in body):
+            if (body is not None) and ("label" in body):
                 id_found = client_factory.get_id_by_label(
                     id["blueprint"], leaf_object_type, body["label"]
                 )
@@ -238,6 +239,8 @@ def main():
             result["msg"] = f"{leaf_object_type} deleted successfully"
 
     except Exception as e:
+        tb = traceback.format_exc()
+        module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)

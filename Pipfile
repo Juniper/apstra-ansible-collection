@@ -18,8 +18,8 @@ sphinx-ansible-theme = ">=0.9.0"
 ansible-pygments = "*"
 sphinx = "*"
 jmespath = "*"
-ansible-core = "*"
 ansible-builder = "*"
+black = "*"
 
 [requires]
 python_version = "3.11"

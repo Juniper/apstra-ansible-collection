@@ -17,7 +17,6 @@ import os
 import re
 import time
 from datetime import datetime
-from ansible.module_utils.basic import AnsibleModule
 
 import urllib3
 
@@ -70,6 +69,8 @@ def _add_objects_to_db(objects_db, full_object_type, objects):
         full_object_type (str): The type of the object.
         objects (dict or list): The objects to add.
     """
+    if objects is None:
+        return
     if full_object_type not in objects_db:
         objects_db[full_object_type] = {}
     if isinstance(objects, Graph):
@@ -203,6 +204,8 @@ def singular_to_plural_id(id):
     :param id: The id dictionary.
     :return: The id dictionary with plural object types.
     """
+    if not id:
+        return {}
     new_id = {}
     for key, value in id.items():
         new_id[plural_object_type(key)] = value
@@ -216,6 +219,8 @@ def plural_to_singular_id(id):
     :param id: The id dictionary.
     :return: The id dictionary with singular object types.
     """
+    if not id:
+        return {}
     new_id = {}
     for key, value in id.items():
         new_id[singular_object_type(key)] = value
@@ -490,7 +495,7 @@ class ApstraClientFactory:
                 missing.append(singular_attr)
         return missing
 
-    def object_request(self, object_type, op="get", id={}, data=None):
+    def object_request(self, object_type, op="get", id=None, data=None):
         """
         Call object op. If op is 'get', will get one object, or all objects of that type.
         If data is supplied, it will be passed into the operation on create or update.
@@ -509,7 +514,7 @@ class ApstraClientFactory:
         plural_id = singular_to_plural_id(id)
         return self._object_request(object_type, op, plural_id, data)
 
-    def _object_request(self, object_type, op="get", id={}, data=None):
+    def _object_request(self, object_type, op="get", id=None, data=None):
         """
         Call object op. If op is 'get', will get one object, or all objects of that type.
         Internal method uses the plural types to simplify logic
@@ -624,7 +629,7 @@ class ApstraClientFactory:
                 if te.args[0] == "'NoneType' object is not subscriptable":
                     return None
 
-    def list_all_objects(self, object_types, object_id={}):
+    def list_all_objects(self, object_types, object_id=None):
         """
         List all objects in the set of types and return them as a dictionary.
         Method used by Ansible module uses singular object types, internally we use plural.
@@ -635,7 +640,7 @@ class ApstraClientFactory:
         plural_object_id = singular_to_plural_id(object_id)
         return self._list_all_objects(object_types, plural_object_id)
 
-    def _list_all_objects(self, object_types, object_id={}):
+    def _list_all_objects(self, object_types, object_id=None):
         """
         List all objects in the set of types and return them as a dictionary.
         :param object_types: The object types.
@@ -672,7 +677,7 @@ class ApstraClientFactory:
                 # Only add the object we care about
                 # If we get by ID, we'll get a graph object.
                 # Not what we want.
-                if root_type in object_id:
+                if object_id and root_type in object_id:
                     for root_object in root_objects:
                         if root_object["id"] == object_id[root_type]:
                             _add_objects_to_db(objects_db, root_type, root_object)
@@ -712,6 +717,8 @@ class ApstraClientFactory:
                         children = self._object_request(
                             child_full_object_type, "list", id
                         )
+                        if children is None:
+                            continue
                         parent_value[child_attr] = children
                         _add_objects_to_db(
                             objects_db,
@@ -768,7 +775,7 @@ class ApstraClientFactory:
                     time.sleep(interval)
                 else:
                     self.module.fail_json(
-                        msg=f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {e}"
+                        msg=f"Unexpected ClientError trying to lock blueprint {id} within {timeout} seconds: {ce}"
                     )
             except Exception as e:
                 self.module.fail_json(
@@ -805,7 +812,7 @@ class ApstraClientFactory:
         tag = tags_client.blueprints[id].tags.get(label=_blueprint_lock_tag_name(id))
         return tag is not None
 
-    def commit_blueprint(self, id, timeout = DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
+    def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
         """
         Commit the blueprint with the given ID.
 

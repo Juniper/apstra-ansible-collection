@@ -33,16 +33,17 @@ setup: clean-pipenv
 	pyenv uninstall --force $(PY_VERSION)
 	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
 	$(PYENV_INSTALL_PREFIX) pyenv install --force $(PY_VERSION)
-	pip install pipenv pre-commit
 	$(MAKE) pipenv
-	pre-commit install
 
 define install_collection_if_missing
 	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)
 endef
 
 pipenv: build/wheels/aos_sdk-0.1.0-py3-none-any.whl
-	pipenv check 2>/dev/null || (pip install pipenv && pipenv install --dev)
+	pipenv check 2>/dev/null || \
+		(pip install pipenv pre-commit && \
+		 pre-commit install && \
+		 pipenv install --dev)
 
 build/wheels:
 	mkdir -p build/wheels

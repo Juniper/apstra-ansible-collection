@@ -87,6 +87,7 @@ from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.clie
     apstra_client_module_args,
     ApstraClientFactory,
 )
+import traceback
 
 
 def main():
@@ -111,6 +112,8 @@ def main():
         # Return the auth token
         module.exit_json(changed=True, token=client_factory.auth_token)
     except Exception as e:
+        tb = traceback.format_exc()
+        module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)
