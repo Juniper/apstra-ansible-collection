@@ -50,7 +50,7 @@ build/wheels:
 
 build/wheels/aos_sdk-0.1.0-py3-none-any.whl: build/wheels
 	# If this fails, download the wheel from juniper.net to the wheels directory...
-	(test -r "$@" && touch "$@") || curl -fso "$@" https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.0.0-RC5/aos_sdk-0.1.0-py3-none-any.whl 2>/dev/null
+	(test -r "$@" && touch "$@") || curl -fso "$@" https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.1.0/aos_sdk-0.1.0-py3-none-any.whl 2>/dev/null
 
 tag:
 	git tag -a $(VERSION) -m "Release $(VERSION)"
