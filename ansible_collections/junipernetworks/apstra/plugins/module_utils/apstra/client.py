@@ -698,7 +698,9 @@ class ApstraClientFactory:
                 id = object_id.copy() if object_id else {}
 
                 parent_db = objects_db.get(parent_full_object_type, {})
-                if not parent_db:
+                # no parents found, just list all the objects
+                # if id is provided, or this is a root type
+                if not parent_db and (id or len(object_attrs) == 2):
                     objects_db[parent_full_object_type] = parent_db
                     parent_objects = self._object_request(
                         parent_full_object_type, "list", id
