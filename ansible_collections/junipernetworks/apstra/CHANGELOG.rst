@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.30
+=======
+
+Minor Changes
+-------------
+
+- Upgraded to AOS SDK 5.1
+
 v0.1.29
 =======
 
