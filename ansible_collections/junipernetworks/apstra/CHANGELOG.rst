@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.31
+=======
+
+Minor Changes
+-------------
+
+- Add retry logic to improve reliability.
+
 v0.1.30
 =======
 

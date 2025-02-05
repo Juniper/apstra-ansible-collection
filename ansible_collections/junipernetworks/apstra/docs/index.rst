@@ -3,7 +3,7 @@
 Junipernetworks.Apstra
 ======================
 
-Collection version 0.1.30
+Collection version 0.1.31
 
 .. contents::
    :local:
@@ -50,7 +50,7 @@ These are the plugins in the junipernetworks.apstra collection:
 Modules
 ~~~~~~~
 
-* :ansplugin:`apstra_facts module <junipernetworks.apstra.apstra_facts#module>` -- Gather facts from Apstra AOS
+* :ansplugin:`apstra_facts module <junipernetworks.apstra.apstra_facts#module>` --
 * :ansplugin:`authenticate module <junipernetworks.apstra.authenticate#module>` -- Apstra authentication
 * :ansplugin:`blueprint module <junipernetworks.apstra.blueprint#module>` -- Manage Apstra blueprints
 * :ansplugin:`endpoint_policy module <junipernetworks.apstra.endpoint_policy#module>` -- Manage endpoint policies in Apstra
