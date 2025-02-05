@@ -536,6 +536,9 @@ class ApstraClientFactory:
                 result = self._object_request(object_type, op, plural_id, data)
                 break  # Exit loop if successful
             except Exception as e:
+                self.module.debug(
+                    f"Failed to {op} {object_type}, attempt {attempt + 1} of {max_tries}: {e}"
+                )
                 if attempt == max_tries - 1:
                     raise  # Raise exception on the last try
                 else:
