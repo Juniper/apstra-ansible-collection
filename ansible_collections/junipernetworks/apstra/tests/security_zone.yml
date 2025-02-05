@@ -24,7 +24,7 @@
           init_type: "template_reference"
           template_id: "L2_Virtual_EVPN"
           label: "{{ blueprint_name }}"
-        lock_state: "locked"
+        lock_state: "ignore"
         auth_token: "{{ auth.token }}"
       register: bp
 

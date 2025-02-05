@@ -4,6 +4,16 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
+from __future__ import absolute_import, division, print_function
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+
 DOCUMENTATION = """
 ---
 module: virtual_network
@@ -149,15 +159,6 @@ msg:
 """
 
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type,
-)
-import traceback
-
-
 def main():
     object_module_args = dict(
         id=dict(type="dict", required=True),
@@ -252,9 +253,9 @@ def main():
                     id, leaf_object_type, tags
                 )
 
-            # Return the final object state
+            # Return the final object state (may take a few tries)
             result[leaf_object_type] = client_factory.object_request(
-                object_type, "get", id
+                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
             )
 
         # If we still don't have an id, there's a problem

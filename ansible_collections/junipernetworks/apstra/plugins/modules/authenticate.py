@@ -4,6 +4,16 @@
 # Copyright (c) 2024, Juniper Networks
 # MIT License
 
+from __future__ import absolute_import, division, print_function
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+
 DOCUMENTATION = """
 ---
 module: apstra_authenticate
@@ -82,16 +92,13 @@ token:
   sample: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 """
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-import traceback
-
 
 def main():
-    module_args = apstra_client_module_args()
+    authenticate_module_args = dict(
+        logout=dict(type="bool", required=False, default=False),
+    )
+    client_module_args = apstra_client_module_args()
+    module_args = client_module_args | authenticate_module_args
 
     result = dict(changed=False, response="")
 

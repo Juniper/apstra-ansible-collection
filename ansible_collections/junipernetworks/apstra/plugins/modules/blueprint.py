@@ -4,6 +4,20 @@
 # Copyright (c) 2024, Juniper Networks
 # MIT License
 
+from __future__ import absolute_import, division, print_function
+
+from time import sleep
+
+from ansible.module_utils.basic import AnsibleModule
+import traceback
+
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
+    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
+)
+
 DOCUMENTATION = """
 ---
 module: blueprint
@@ -146,16 +160,6 @@ response:
 """
 
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
-    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
-)
-import traceback
-
-
 def main():
     blueprint_module_args = dict(
         id=dict(type="dict", required=False),
@@ -231,6 +235,8 @@ def main():
                         "blueprints", "create", {}, body
                     )
                     result["changed"] = True
+                    sleep(5)  # Wait for the blueprint to be created
+
                 blueprint_id = blueprint["id"]
                 id = {"blueprint": blueprint_id}
                 result["id"] = id

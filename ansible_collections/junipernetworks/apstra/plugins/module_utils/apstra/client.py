@@ -1,27 +1,40 @@
-from aos.sdk.client import (
-    Client,
-    ClientError,
-)
-from aos.sdk.reference_design.two_stage_l3clos import Client as l3closClient
-from aos.sdk.reference_design.freeform.client import Client as freeformClient
-from aos.sdk.reference_design.extension.endpoint_policy import (
-    Client as endpointPolicyClient,
-)
-from aos.sdk.reference_design.extension.resource_allocation import (
-    Client as resourceAllocationClient,
-)
-from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
-from aos.sdk.graph import Graph
-from aos.sdk.graph import query
+from __future__ import absolute_import, division, print_function
+from time import sleep
+
+try:
+    from aos.sdk.client import (
+        Client,
+        ClientError,
+    )
+    from aos.sdk.reference_design.two_stage_l3clos import Client as l3closClient
+    from aos.sdk.reference_design.freeform.client import Client as freeformClient
+    from aos.sdk.reference_design.extension.endpoint_policy import (
+        Client as endpointPolicyClient,
+    )
+    from aos.sdk.reference_design.extension.resource_allocation import (
+        Client as resourceAllocationClient,
+    )
+    from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
+    from aos.sdk.graph import Graph
+    from aos.sdk.graph import query
+except ImportError as imp_exc:
+    AOS_IMPORT_ERROR = imp_exc
+else:
+    AOS_IMPORT_ERROR = None
+
+try:
+    import urllib3
+except ImportError as imp_exc:
+    URLLIB3_IMPORT_ERROR = imp_exc
+else:
+    URLLIB3_IMPORT_ERROR = None
+    # Disable warnings about unverified HTTPS requests
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 import os
 import re
 import time
 from datetime import datetime
-
-import urllib3
-
-# Disable warnings about unverified HTTPS requests
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
 DEFAULT_BLUEPRINT_COMMIT_TIMEOUT = 30
@@ -56,7 +69,6 @@ def apstra_client_module_args():
             no_log=True,
             default=os.getenv("APSTRA_PASSWORD"),
         ),
-        logout=dict(type="bool", required=False, default=False),
     )
 
 
@@ -375,8 +387,8 @@ class ApstraClientFactory:
 
         # Do not log out if auth_token is already set
         logout = module.params.get("logout")
-        if logout is None:
-            logout = not bool(auth_token)
+        if logout is None and auth_token is not None:
+            logout = False
 
         return cls(
             module=module,
@@ -495,7 +507,9 @@ class ApstraClientFactory:
                 missing.append(singular_attr)
         return missing
 
-    def object_request(self, object_type, op="get", id=None, data=None):
+    def object_request(
+        self, object_type, op="get", id=None, data=None, retry=0, retry_delay=3
+    ):
         """
         Call object op. If op is 'get', will get one object, or all objects of that type.
         If data is supplied, it will be passed into the operation on create or update.
@@ -509,10 +523,25 @@ class ApstraClientFactory:
         :param op: The operation to perform.
         :param id: The id dictionary.
         :param data: The data to pass to the operation.
+        :param retry: The number of times to retry the operation.
+        :param retry_delay: The delay between retries in seconds.
         :return: The result of the operation.
         """
         plural_id = singular_to_plural_id(id)
-        return self._object_request(object_type, op, plural_id, data)
+        # Return the final object state (may take a few tries)
+        max_tries = 1 + retry
+        result = None
+        for attempt in range(max_tries):
+            try:
+                result = self._object_request(object_type, op, plural_id, data)
+                break  # Exit loop if successful
+            except Exception as e:
+                if attempt == max_tries - 1:
+                    raise  # Raise exception on the last try
+                else:
+                    sleep(retry_delay)
+                    continue  # Retry on failure
+        return result
 
     def _object_request(self, object_type, op="get", id=None, data=None):
         """
@@ -747,9 +776,7 @@ class ApstraClientFactory:
         tags_client = self.get_tags_client()
         start_time = time.time()
         interval = 5
-        locked_pattern = (
-            r"(Tag with label '(.+)' already exists|Blueprint is still being created)"
-        )
+        locked_pattern = r"(Tag with label '(.+)' already exists|Blueprint is still being created|not found)"
 
         while True:
             try:

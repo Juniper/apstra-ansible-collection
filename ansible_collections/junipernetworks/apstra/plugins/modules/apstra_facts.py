@@ -4,6 +4,16 @@
 # Copyright (c) 2024, Juniper Networks
 # MIT License
 
+from __future__ import absolute_import, division, print_function
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+
+from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+
 DOCUMENTATION = """
 ---
 module: apstra_facts
@@ -20,7 +30,8 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
+    env:
+      - name: APSTRA_API_URL
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -32,19 +43,22 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
+    env:
+      - name: APSTRA_USERNAME
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
+    env:
+      - name: APSTRA_PASSWORD
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
+    env:
+      - name: APSTRA_AUTH_TOKEN
   gather_network_facts:
     description:
       - List of network objects to gather facts about.
@@ -52,11 +66,13 @@ options:
     type: list
     elements: str
     required: true
+    default: ['blueprints']
   id:
     description:
       - Dictionary containing identifiers to focus us.
     required: false
     type: dict
+    default: {}
   filter:
     description:
       - Filter used to get the list of objects.
@@ -130,13 +146,6 @@ ansible_facts:
     }
   }
 """
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.junipernetworks.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-import traceback
 
 
 def main():

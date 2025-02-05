@@ -40,10 +40,9 @@ define install_collection_if_missing
 endef
 
 pipenv: build/wheels/aos_sdk-0.1.0-py3-none-any.whl
-	pipenv check 2>/dev/null || \
-		(pip install pipenv pre-commit && \
-		 pre-commit install && \
-		 pipenv install --dev)
+	(pip install pipenv pre-commit && \
+	 pre-commit install && \
+	 pipenv install --dev)
 
 build/wheels:
 	mkdir -p build/wheels
