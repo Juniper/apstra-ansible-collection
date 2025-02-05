@@ -4,6 +4,14 @@ Junipernetworks Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.32
+=======
+
+Minor Changes
+-------------
+
+- Add debug logging of retry attempts.
+
 v0.1.31
 =======
 
