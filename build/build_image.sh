@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/bin/bash -ex
+set -o pipefail
 
 : ${TAG:="latest"}
 
@@ -28,6 +29,11 @@ push_image() {
   echo "Decision environment image is pushed at $REGISTRY_URL/apstra-ee:$TAG"
 }
 
+# Function to export the Docker image
+export_image() {
+  docker save apstra-ee:latest | gzip > apstra-ee-$TAG.image.tgz
+}
+
 if [[ -n "$REGISTRY_URL" ]]; then
   echo "Using REGISTRU_URL: $REGISTRY_URL"
 else
@@ -40,23 +46,25 @@ collection_version=$(echo $TAG | cut -d'-' -f 1)
 if [[ ! "$collecion_version" == "latest" ]]; then
   ansible_galaxy_version_arg="==$collection_version"
 fi
-if [[ ! -r collections/junipernetworks-apstra.tar.gz ]]; then
+if [[ ! -r collections/juniper-apstra.tar.gz ]]; then
   # otherwise, download the specific version
-  ansible-galaxy collection download junipernetworks.apstra${ansible_galaxy_version_arg}
-  mv collections/junipernetworks-apstra-*.tar.gz collections/junipernetworks-apstra.tar.gz
+  ansible-galaxy collection download juniper.apstra${ansible_galaxy_version_arg}
+  mv collections/juniper-apstra-*.tar.gz collections/juniper-apstra.tar.gz
 fi
 
 # Build the image
 build_image
 
+# Export the image
+export_image
+
 # Tag and push the image if REGISTRY_URL is set
 if [[  -n "$REGISTRY_URL" ]]; then
   # Tag the image
-  tag_image "$REGISTRY_URL" "$TAG"
+  tag_image
 
   # Push the image
-  push_image "$REGISTRY_URL" "$TAG"
+  push_image
 else
   echo "Skipping pushing the image to registry"
-  exit 0
 fi

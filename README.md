@@ -14,6 +14,8 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
       - [All Systems](#all-systems)
     - [Usage](#usage)
     - [Test Configuration](#test-configuration)
+    - [Image Build](#image-build)
+    - [Image Publish](#image-publish)
     - [Building/Testing](#buildingtesting)
     - [Debugging](#debugging)
     - [Using the Apstra SDK in the Ansible Collection](#using-the-apstra-sdk-in-the-ansible-collection)
@@ -22,7 +24,7 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
 
 ## Installation and Usage
 
-See [README](ansible_collections/junipernetworks/apstra/README.md).
+See [README](ansible_collections/juniper/apstra/README.md).
 
 ## Contributing
 
@@ -147,8 +149,8 @@ The following `make` targets are supported to build, install and test an ansible
 |Target|Purpose|
 |---|---|
 |setup|Setup the build/test execution environment.|
-|build|Create package `junipernetworks-apstra-$(VERSION).tar.gz.`|
-|install|Install package `junipernetworks-apstra-$(VERSION).tar.gz.`|
+|build|Create package `juniper-apstra-$(VERSION).tar.gz.`|
+|install|Install package `juniper-apstra-$(VERSION).tar.gz.`|
 |image|Build an execution environment (container) image `apstra-ee:latest`, and optionally tag/publish if `REGISTRY_URL` is set.|
 |test|Test the collection.|
 |clean|Clean up created files.|

@@ -6,7 +6,7 @@ images:
     name: "registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel8:latest"
 
 additional_build_files:
-  - src: collections/junipernetworks-apstra.tar.gz
+  - src: collections/juniper-apstra.tar.gz
     dest: collections/
   - src: wheels/aos_sdk-0.1.0-py3-none-any.whl
     dest: aos-sdk/
@@ -14,7 +14,7 @@ additional_build_files:
 dependencies:
   galaxy:
     collections:
-      - source: collections/junipernetworks-apstra.tar.gz
+      - source: collections/juniper-apstra.tar.gz
         type: file
       - kubernetes.core
 

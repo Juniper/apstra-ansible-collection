@@ -1,6 +1,6 @@
 # Ansible configuration
 inventory.yml
-junipernetworks-apstra-*.gz
+juniper*-apstra-*.gz
 .apstra-collection
 _build
 output

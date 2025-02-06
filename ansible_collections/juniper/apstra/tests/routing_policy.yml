@@ -1,0 +1,122 @@
+---
+- name: Test create/update/delete routing_policy
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      command: hostname
+      register: local_hostname
+
+    - name: Set blueprint name fact
+      set_fact:
+        blueprint_name: "test_rp_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    - name: Create routing_policy
+      juniper.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        body:
+          description: "Example routing policy"
+          expect_default_ipv4_route: true
+          expect_default_ipv6_route: true
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          import_policy: "all"
+          label: "example_policy"
+          policy_type: "user_defined"
+        auth_token: "{{ auth.token }}"
+      register: rp
+
+    - name: Show created routing policy
+      ansible.builtin.debug:
+        var: rp
+
+    - name: Create routing_policy (no change)
+      juniper.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        body:
+          description: "Example routing policy"
+          expect_default_ipv4_route: true
+          expect_default_ipv6_route: true
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          import_policy: "all"
+          label: "example_policy"
+          policy_type: "user_defined"
+        auth_token: "{{ auth.token }}"
+
+    - name: Modify routing_policy
+      juniper.apstra.routing_policy:
+        id: "{{ rp.id }}"
+        body:
+          description: "Example routing policy edwin wuz here"
+        auth_token: "{{ auth.token }}"
+      register: rp_modify
+
+    - name: Show modified routing policy
+      ansible.builtin.debug:
+        var: rp_modify
+
+    - name: Delete the routing_policy
+      juniper.apstra.routing_policy:
+        id: "{{ rp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: rp_delete
+
+    - name: Show deleted routing_policy
+      ansible.builtin.debug:
+        var: rp_delete
+
+    - name: Unlock the blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"

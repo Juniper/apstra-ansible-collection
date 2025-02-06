@@ -5,19 +5,19 @@
   connection: local
   tasks:
     - name: Connect to Apstra
-      junipernetworks.apstra.authenticate:
+      juniper.apstra.authenticate:
         logout: false
       register: auth
 
     - name: Get blueprint
-      junipernetworks.apstra.blueprint:
+      juniper.apstra.blueprint:
         body:
           label: "eda-bp"
         auth_token: "{{ auth.token }}"
       register: bp
 
     - name: Create security_zone
-      junipernetworks.apstra.security_zone:
+      juniper.apstra.security_zone:
         id: "{{ bp.id }}"
         body:
           vrf_name: "eda-demo-sample"
@@ -29,7 +29,7 @@
       register: sz
 
     - name: Create virtual_network
-      junipernetworks.apstra.virtual_network:
+      juniper.apstra.virtual_network:
         id: "{{ bp.id }}"
         body:
           label: "eda-demo-sample"
@@ -40,7 +40,7 @@
       register: vn
 
     - name: Commit the blueprint
-      junipernetworks.apstra.blueprint:
+      juniper.apstra.blueprint:
         id: "{{ bp.id }}"
         lock_state: "unlocked"
         state: committed
@@ -48,6 +48,6 @@
       register: blueprint_commit
 
     - name: Logout of Apstra
-      junipernetworks.apstra.authenticate:
+      juniper.apstra.authenticate:
         logout: true
         auth_token: "{{ auth.token }}"

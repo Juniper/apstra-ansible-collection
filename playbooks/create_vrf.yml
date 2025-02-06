@@ -11,13 +11,13 @@
     namespace: "{{ ns }}"
   tasks:
     - name: Connect to Apstra
-      junipernetworks.apstra.authenticate:
+      juniper.apstra.authenticate:
         verify_certificates: false
         logout: false
       register: auth_response
 
     - name: Create VRF in bluprint name apstra
-      junipernetworks.apstra.security_zone:
+      juniper.apstra.security_zone:
         auth_token: "{{ auth_response.auth_token }}"
         blueprint_label: "eda-bp"
         routing_zone_name: "myvrf"
@@ -26,6 +26,6 @@
         state: present
 
     - name: Logout of Apstra
-      junipernetworks.apstra.authenticate:
+      juniper.apstra.authenticate:
         logout: true
         verify_certificates: false

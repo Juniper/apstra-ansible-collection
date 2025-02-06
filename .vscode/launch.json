@@ -15,7 +15,7 @@
                 "${workspaceFolder}/module_args/${fileBasenameNoExtension}.json"
             ],
             "env": {
-                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/ansible_collections/junipernetworks/apstra"
+                "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/ansible_collections/juniper/apstra"
             },
             "justMyCode": false
         }

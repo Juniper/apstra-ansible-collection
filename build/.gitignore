@@ -4,3 +4,4 @@ context
 requirements.yaml
 requirements.txt
 *.whl
+*.tgz

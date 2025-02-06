@@ -1,0 +1,96 @@
+---
+- name: Test update resource_group
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      command: hostname
+      register: local_hostname
+
+    - name: Set blueprint name fact
+      set_fact:
+        blueprint_name: "test_rg_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          template_id: "L2_Virtual_EVPN"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    - name: Get the resource_groups
+      juniper.apstra.apstra_facts:
+        id: "{{ bp.id }}"
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - blueprints.resource_groups
+          - ip_pools
+
+    - name: Show resource_groups
+      ansible.builtin.debug:
+        var: ansible_facts.apstra_facts.blueprints[bp.id.blueprint].resource_groups
+
+    - name: Show the ip_pools
+      ansible.builtin.debug:
+        var: ansible_facts.apstra_facts.ip_pools
+
+    - name: Get one resource_group
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        auth_token: "{{ auth.token }}"
+      register: rg_get
+
+    - name: Show singular resource_group
+      ansible.builtin.debug:
+        var: rg_get.resource_group
+
+    - name: Extract list of ip_pool ids
+      ansible.builtin.set_fact:
+        ip_pools: "{{ ansible_facts.apstra_facts.ip_pools | json_query('keys(@)') }}"
+
+    - name: Show ip_pool_ids
+      ansible.builtin.debug:
+        var: ip_pools
+
+    - name: Update resource_group
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        body:
+          description: "Updated description"
+          pool_ids: "{{ ip_pools }}"
+      register: rg_update
+
+    - name: Show updated resource_group
+      ansible.builtin.debug:
+        var: rg_update.resource_group
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"

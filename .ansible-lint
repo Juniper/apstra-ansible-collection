@@ -2,4 +2,4 @@
 profile: min
 
 mock_modules:
-  - junipernetworks
+  - juniper
