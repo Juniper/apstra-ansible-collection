@@ -1,7 +1,13 @@
-#!/bin/bash -ex
+#!/bin/bash -e
 set -o pipefail
 
 : ${TAG:="latest"}
+
+PLATFORM=$(uname -p)
+if [[ -z $PLATFORM ]]; then
+  echo "PLATFORM undefined"
+  exit 1
+fi
 
 # Change to script directory
 cd "${0%/*}"
@@ -31,13 +37,13 @@ push_image() {
 
 # Function to export the Docker image
 export_image() {
-  docker save apstra-ee:latest | gzip > apstra-ee-$TAG.image.tgz
+  docker save apstra-ee:latest | gzip > apstra-ee-$PLATFORM-$TAG.image.tgz
 }
 
 if [[ -n "$REGISTRY_URL" ]]; then
-  echo "Using REGISTRU_URL: $REGISTRY_URL"
+  echo "Using REGISTRY_URL: $REGISTRY_URL"
 else
-  echo "REGISTRU_URL is not set. Tag/push will be skipped."
+  echo "REGISTRY_URL is not set. Tag/push will be skipped."
 fi
 echo "Using TAG: $TAG"
 
@@ -53,13 +59,13 @@ if [[ ! -r collections/juniper-apstra.tar.gz ]]; then
 fi
 
 # Build the image
-build_image
+[[ -n $SKIP_BUILD ]] || build_image
 
 # Export the image
 export_image
 
 # Tag and push the image if REGISTRY_URL is set
-if [[  -n "$REGISTRY_URL" ]]; then
+if [[  -n "$REGISTRY_URL" ]] && [[ -z $SKIP_BUILD ]]; then
   # Tag the image
   tag_image
 
