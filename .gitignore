@@ -167,9 +167,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# developer-specific VS Code settings
-.vscode/settings.json
-
 # Apple crap
 **/.DS_Store
 **/*.swp
