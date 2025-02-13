@@ -4,6 +4,13 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v0.1.34
+=======
+
+Major Changes
+-------------
+- Add required field remote_host for updating application point.
+
 v0.1.33
 =======
 

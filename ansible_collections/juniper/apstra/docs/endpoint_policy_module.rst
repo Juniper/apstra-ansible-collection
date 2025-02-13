@@ -19,7 +19,7 @@ juniper.apstra.endpoint_policy module -- Manage endpoint policies in Apstra
 .. Collection note
 
 .. note::
-    This module is part of the `juniper.apstra collection <https://galaxy.ansible.com/ui/repo/published/juniper/apstra/>`_ (version 0.1.33).
+    This module is part of the `juniper.apstra collection <https://galaxy.ansible.com/ui/repo/published/juniper/apstra/>`_ (version 0.1.34).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
@@ -504,7 +504,8 @@ Examples
         virtual_network_label: "vn25"
         body:
           application_points:
-            - if_name: "xe-0/0/37"
+            - remote_host: eda-rack-001-leaf3
+              if_name: "xe-0/0/37"
               used: true
         state: present
 

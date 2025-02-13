@@ -18,6 +18,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 
 if not AOS_IMPORT_ERROR:
     from aos.sdk.graph import query
+    from aos.sdk.graph.matchers import aeq
 
 DOCUMENTATION = """
 ---
@@ -127,7 +128,8 @@ EXAMPLES = """
     virtual_network_label: "vn25"
     body:
       application_points:
-        - if_name: "xe-0/0/37"
+        - remote_host: eda-rack-001-leaf3
+          if_name: "xe-0/0/37"
           used: true
     state: present
 
@@ -348,14 +350,51 @@ def main():
                         app_points = []
                         for body_ap in body[application_points_leaf_object_type]:
                             ap = {}
-                            if_name = body_ap["if_name"]
+                            if_name = body_ap.get("if_name")
+                            if not if_name:
+                                module.fail_json(
+                                    msg=f"Missing 'if_name' in {application_points_leaf_object_type}"
+                                )
+                            remote_host = body_ap.get("remote_host")
+                            if not remote_host:
+                                module.fail_json(
+                                    msg=f"Missing 'remote_host' in {application_points_leaf_object_type}"
+                                )
                             used = False
+
+                            # Find the remote interface
+                            find_remote_if = (
+                                query.node(
+                                    type="interface",
+                                    description=aeq(f"*{remote_host}:{if_name}"),
+                                )
+                                .out(type="link")
+                                .node(type="link")
+                                .in_(type="link")
+                                .node(
+                                    type="interface", if_name=if_name, name="interface"
+                                )
+                            )
+                            remote_ifs_found = client_factory.query_blueprint(
+                                id["blueprint"], find_remote_if
+                            )
+                            if not remote_ifs_found:
+                                module.fail_json(
+                                    msg=f"Remote interface {remote_host}:{if_name} not found"
+                                )
+                            if len(remote_ifs_found) > 1:
+                                module.fail_json(
+                                    msg=f"Multiple remote interfaces {remote_host}:{if_name} found: {remote_ifs_found}"
+                                )
+                            if "interface" not in remote_ifs_found[0]:
+                                module.fail_json(
+                                    msg=f"Object missing key 'interface': {remote_ifs_found[0]}"
+                                )
+                            remote_if_id = remote_ifs_found[0]["interface"].id
 
                             # Custom query to determine if the interface is associated with the virtual_network.
                             if_to_vn = (
-                                query.node(
-                                    type="interface", if_name=if_name, name="interface"
-                                )
+                                query.node(id=remote_if_id)
                                 .out(type="ep_member_of")
                                 .node(type="ep_group")
                                 .in_(type="ep_affected_by")
@@ -369,19 +408,13 @@ def main():
                                     name="virtual_network",
                                 )
                             )
-
                             if_to_vn_found = client_factory.query_blueprint(
                                 id["blueprint"], if_to_vn
                             )
-
                             if if_to_vn_found:
                                 if len(if_to_vn_found) > 1:
                                     module.fail_json(
                                         msg=f"Multiple interface {if_name} to virtual_network {virtual_network_label} relations found: {if_to_vn_found}"
-                                    )
-                                if "interface" not in if_to_vn_found[0]:
-                                    module.fail_json(
-                                        msg=f"Object missing key 'interface': {if_to_vn_found[0]}"
                                     )
                                 if "virtual_network" not in if_to_vn_found[0]:
                                     module.fail_json(
@@ -394,21 +427,7 @@ def main():
                             if used == body_ap["used"]:
                                 continue
 
-                            if if_to_vn_found and if_to_vn_found[0]:
-                                # If we already know the interface id, use it
-                                ap["id"] = if_to_vn_found[0]["interface"].id
-                            else:
-                                # Need to look up the interface id by label
-                                ap["id"] = client_factory.get_id_by_label(
-                                    blueprint_id=id["blueprint"],
-                                    obj_type="interface",
-                                    label=body_ap["if_name"],
-                                    label_key="if_name",
-                                )
-                            if not ap["id"]:
-                                module.fail_json(
-                                    msg=f"Interface with label {body_ap['if_name']} not found"
-                                )
+                            ap["id"] = remote_if_id
                             ap["policies"] = [
                                 {
                                     "policy": id[leaf_object_type],
