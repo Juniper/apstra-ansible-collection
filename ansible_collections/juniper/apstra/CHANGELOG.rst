@@ -4,6 +4,13 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.0
+======
+
+Minor Changes
+-------------
+- Upgrading version for uploading to redhat automation hub
+
 v0.1.34
 =======
 
