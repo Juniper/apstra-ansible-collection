@@ -19,7 +19,7 @@ juniper.apstra.routing_policy module -- Manage routing policies in Apstra
 .. Collection note
 
 .. note::
-    This module is part of the `juniper.apstra collection <https://galaxy.ansible.com/ui/repo/published/juniper/apstra/>`_ (version 0.1.34).
+    This module is part of the `juniper.apstra collection <https://galaxy.ansible.com/ui/repo/published/juniper/apstra/>`_ (version 1.0.0).
 
     It is not included in ``ansible-core``.
     To check whether it is installed, run :code:`ansible-galaxy collection list`.
