@@ -4,6 +4,13 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.1
+======
+
+Minor Changes
+-------------
+- removed duplicate support readme
+
 v1.0.0
 ======
 
