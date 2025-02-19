@@ -17,6 +17,7 @@ dependencies:
       - source: collections/juniper-apstra.tar.gz
         type: file
       - kubernetes.core
+      - community.general
 
   python_interpreter:
     package_system: "python3.11"

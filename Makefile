@@ -34,6 +34,8 @@ setup: clean-pipenv
 	rm -rf $(HOME)/.pyenv/versions/$(PY_VERSION)
 	$(PYENV_INSTALL_PREFIX) pyenv install --force $(PY_VERSION)
 	$(MAKE) pipenv
+	# Needed for tests
+	pipenv run ansible-galaxy collection install --ignore-certs --force community.general
 
 define install_collection_if_missing
 	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)

@@ -14,8 +14,6 @@ tags:
     - apstra
     - networking
     - aos
-dependencies:
-    "community.general": ">=9.5.0"
 homepage: "https://www.juniper.net/us/en/products/network-automation/apstra.html"
 repository: "https://github.com/Juniper/apstra-ansible-collection"
 issues: "https://github.com/Juniper/apstra-ansible-collection/issues"
