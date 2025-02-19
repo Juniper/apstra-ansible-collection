@@ -97,7 +97,7 @@ $(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirem
 	touch "$@"
 
 $(APSTRA_COLLECTION_ROOT)/requirements.txt: Pipfile Makefile pipenv
-	pipenv clean && pipenv requirements --from-pipfile > "$@"
+	pipenv clean && pipenv requirements --from-pipfile --exclude-markers | sed -e 's:==:>=:' > "$@"
 
 install: build
 	pipenv run ansible-galaxy collection install --ignore-certs --force $(APSTRA_COLLECTION)
