@@ -5,11 +5,12 @@
   connection: local
   tasks:
     - name: Get local hostname
-      command: hostname
+      ansible.builtin.command: hostname
       register: local_hostname
+      changed_when: false
 
     - name: Set blueprint name fact
-      set_fact:
+      ansible.builtin.set_fact:
         blueprint_name: "test_endpoint_{{ local_hostname.stdout }}"
 
     - name: Connect to Apstra

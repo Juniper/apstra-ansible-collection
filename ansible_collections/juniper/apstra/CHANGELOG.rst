@@ -4,6 +4,17 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.2
+======
+
+Minor Changes
+-------------
+- removed community.general dependency
+- added fqdn to command output
+- resolved missing:metaclass error
+- updated license to Apache-2.0
+- upadted document for IRC link
+
 v1.0.1
 ======
 

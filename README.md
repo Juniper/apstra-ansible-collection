@@ -21,6 +21,7 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
     - [Using the Apstra SDK in the Ansible Collection](#using-the-apstra-sdk-in-the-ansible-collection)
     - [Locking the Blueprint](#locking-the-blueprint)
   - [License](#license)
+  - [Community and Support](#community-and-support)
 
 ## Installation and Usage
 
@@ -239,4 +240,8 @@ The Terrform plugin implementation provides a model for how we will lock the blu
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [Apache 2.0 License](LICENSE).
+
+## Community and Support
+
+For community support, join us on Matrix: [#network:ansible.com](https://matrix.to/#/#network:ansible.com)

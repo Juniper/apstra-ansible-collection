@@ -6,6 +6,8 @@
 
 from __future__ import absolute_import, division, print_function
 
+__metaclass__ = type
+
 from time import sleep
 
 from ansible.module_utils.basic import AnsibleModule
