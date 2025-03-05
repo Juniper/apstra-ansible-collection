@@ -3,7 +3,7 @@
 Juniper.Apstra
 ==============
 
-Collection version 1.0.3
+Collection version 1.0.4
 
 .. contents::
    :local:

@@ -4,6 +4,13 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.4
+======
+
+Minor Changes
+-------------
+- updated virtual_networks module to support no-changed-when
+
 v1.0.3
 ======
 

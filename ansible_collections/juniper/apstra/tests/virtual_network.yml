@@ -7,6 +7,7 @@
     - name: Get local hostname
       ansible.builtin.command: hostname
       register: local_hostname
+      changed_when: false
 
     - name: Set blueprint name fact
       ansible.builtin.set_fact:
