@@ -1,13 +1,17 @@
 namespace: "juniper"
 description: "This collection provides modules to interact with Apstra."
 name: "apstra"
-version: "1.0.2"
+version: "1.0.3"
 readme: "README.md"
 authors:
     - "Pratik Dave <pratikd@juniper.net>"
     - "Edwin Jacques <ejacques@juniper.net>"
 license:
-    - "Apache License 2.0"
+    - "Apache-2.0"
+    - "MIT"
+    - "GPL-3.0-or-later"
+    - "BSD-3-Clause"
+
 tags:
     - juniper
     - junipernetworks

@@ -4,6 +4,13 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.3
+======
+
+Minor Changes
+-------------
+- updated galaxy yaml for all licenses
+
 v1.0.2
 ======
 
