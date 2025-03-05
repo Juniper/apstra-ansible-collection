@@ -4,6 +4,13 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.5
+======
+
+Minor Changes
+-------------
+- updated config.yml for supported python version
+
 v1.0.4
 ======
 
