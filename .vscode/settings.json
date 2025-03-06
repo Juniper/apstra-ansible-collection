@@ -1,5 +1,5 @@
 {
     "ansible.python.interpreterPath": "${workspaceFolder}/.venv/bin/python",
     "makefile.configureOnOpen": false,
-    "github.copilot.chat.experimental.codeGeneration.instructions": []
+    "github.copilot.chat.codeGeneration.instructions": []
 }
