@@ -68,6 +68,7 @@ release-build: docs
 	make build
 
 build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
+
 NEWVER := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)-$(SHORT_COMMIT)
 update-version:
 	sed -i "s/^version: \".*\"/version: \"$(NEWVER)\"/" $(APSTRA_COLLECTION_ROOT)/galaxy.yml	
