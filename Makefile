@@ -41,17 +41,34 @@ define install_collection_if_missing
 	pipenv run ansible-doc $(1) &>/dev/null || pipenv run ansible-galaxy collection install --ignore-certs --force $(1)
 endef
 
-pipenv: build/wheels/aos_sdk-0.1.0-py3-none-any.whl
+AOS_SDK_DEFAULT_WHL := aos_sdk-0.1.0-py3-none-any.whl
+AOS_SDK_DEFAULT_URL := https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.1.0/$(AOS_SDK_DEFAULT_WHL)
+
+pipenv: build/wheels
+	@# Pick the highest-versioned aos_sdk wheel; fall back to downloading the default
+	@AOS_SDK_WHL=$$(ls build/wheels/aos_sdk-*.whl 2>/dev/null | grep -v '$(AOS_SDK_DEFAULT_WHL)' | sort -V | tail -1); \
+	if [ -z "$$AOS_SDK_WHL" ]; then \
+		AOS_SDK_WHL=$$(ls build/wheels/$(AOS_SDK_DEFAULT_WHL) 2>/dev/null); \
+	fi; \
+	if [ -z "$$AOS_SDK_WHL" ]; then \
+		echo "No aos_sdk wheel found in build/wheels/, downloading default $(AOS_SDK_DEFAULT_WHL)..."; \
+		curl -fso "build/wheels/$(AOS_SDK_DEFAULT_WHL)" "$(AOS_SDK_DEFAULT_URL)"; \
+		AOS_SDK_WHL="build/wheels/$(AOS_SDK_DEFAULT_WHL)"; \
+	fi; \
+	AOS_SDK_BASENAME=$$(basename $$AOS_SDK_WHL); \
+	echo "Using aos_sdk wheel: $$AOS_SDK_BASENAME"; \
+	CURRENT=$$(sed -n 's/.*aos-sdk = {file = "build\/wheels\/\(aos_sdk-[^"]*\.whl\)".*/\1/p' Pipfile); \
+	if [ "$$CURRENT" != "$$AOS_SDK_BASENAME" ]; then \
+		echo "Updating Pipfile: $$CURRENT -> $$AOS_SDK_BASENAME"; \
+		sed -i "s|aos-sdk = {file = \"build/wheels/aos_sdk-[^\"]*\.whl\"}|aos-sdk = {file = \"build/wheels/$$AOS_SDK_BASENAME\"}|" Pipfile; \
+		rm -f Pipfile.lock; \
+	fi
 	(pip install pipenv pre-commit && \
 	 pre-commit install && \
 	 pipenv install --dev)
 
 build/wheels:
 	mkdir -p build/wheels
-
-build/wheels/aos_sdk-0.1.0-py3-none-any.whl: build/wheels
-	# If this fails, download the wheel from juniper.net to the wheels directory...
-	(test -r "$@" && touch "$@") || curl -fso "$@" https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.1.0/aos_sdk-0.1.0-py3-none-any.whl 2>/dev/null
 
 tag:
 	git tag -a $(VERSION) -m "Release $(VERSION)"
@@ -71,7 +88,7 @@ build: $(APSTRA_COLLECTION_ROOT)/.apstra-collection
 
 NEWVER := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)-$(SHORT_COMMIT)
 update-version:
-	sed -i "s/^version: \".*\"/version: \"$(NEWVER)\"/" $(APSTRA_COLLECTION_ROOT)/galaxy.yml	
+	sed -i "s/^version: \".*\"/version: \"$(NEWVER)\"/" $(APSTRA_COLLECTION_ROOT)/galaxy.yml
 APSTRA_COLLECTION_DOCS_BUILD := ansible_collections/juniper/apstra/_build
 
 docs: pipenv install

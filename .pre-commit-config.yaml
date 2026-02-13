@@ -8,7 +8,7 @@ repos:
       - id: check-added-large-files
 
   - repo: https://github.com/ansible/ansible-lint.git
-    rev: v24.9.2
+    rev: v24.12.2
     hooks:
       - id: ansible-lint
         files: \.(yaml|yml)$
@@ -16,7 +16,7 @@ repos:
         description: Run configurations on .ansible-lint file
         verbose: true
         entry: python3 -m ansiblelint -v --force-color
-        additional_dependencies: ['jmespath']
+        additional_dependencies: ['jmespath', 'ansible-core<2.19']
   - repo: https://github.com/psf/black-pre-commit-mirror
     rev: 24.8.0
     hooks:
