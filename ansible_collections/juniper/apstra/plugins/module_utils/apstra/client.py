@@ -374,6 +374,9 @@ class ApstraClientFactory:
         # Blueprint query can be cached
         self._blueprint_graph = None
 
+        # Cache of blueprint design by id (e.g. 'freeform', 'two_stage_l3clos')
+        self._blueprint_design = {}
+
     @classmethod
     def from_params(cls, module):
         """
@@ -438,15 +441,62 @@ class ApstraClientFactory:
         self._login(client_instance)
         return client_instance
 
-    def get_client(self, object_type):
+    def set_blueprint_design(self, blueprint_id, design):
+        """
+        Cache the design type for a blueprint.
+        :param blueprint_id: The blueprint ID.
+        :param design: The design type (e.g. 'freeform', 'two_stage_l3clos').
+        """
+        if blueprint_id and design:
+            self._blueprint_design[blueprint_id] = design
+
+    def get_blueprint_design(self, blueprint_id):
+        """
+        Get the cached design type for a blueprint, or fetch it from the API.
+        :param blueprint_id: The blueprint ID.
+        :return: The design type string.
+        """
+        if blueprint_id in self._blueprint_design:
+            return self._blueprint_design[blueprint_id]
+        # Fetch from the API if not cached
+        try:
+            base_client = self.get_base_client()
+            bp_info = base_client.blueprints[blueprint_id].get()
+            design = bp_info.get("design", "two_stage_l3clos")
+            self._blueprint_design[blueprint_id] = design
+            return design
+        except Exception:
+            return "two_stage_l3clos"
+
+    def _get_blueprint_client(self, blueprint_id=None, design=None):
+        """
+        Get the appropriate blueprint client based on the design type.
+        :param blueprint_id: The blueprint ID (used to look up cached design).
+        :param design: The design type override.
+        :return: The client instance.
+        """
+        if design is None and blueprint_id:
+            design = self.get_blueprint_design(blueprint_id)
+        if design == "freeform":
+            return self._get_client("freeform_client", freeformClient)
+        return self._get_client("l3clos_client", l3closClient)
+
+    def get_client(self, object_type, blueprint_id=None, design=None):
         """
         Get the client for the given object type.
         :param object_type: The object type.
+        :param blueprint_id: Optional blueprint ID for design-aware client selection.
+        :param design: Optional design type override.
         :return: The client instance.
         """
         client_attr = self.network_objects_set.get(object_type)
         if client_attr is None:
             raise Exception("Unsupported object type: {}".format(object_type))
+        # Only apply design-aware routing for types normally mapped to l3clos_client.
+        # Other blueprint sub-types (endpoint_policies, tags, resource_groups) have
+        # their own dedicated clients and must not be overridden.
+        if client_attr == "l3clos_client" and (blueprint_id or design):
+            return self._get_blueprint_client(blueprint_id, design)
         client_type = self._client_types.get(client_attr)
         if client_type is None:
             raise Exception("Unsupported client type: {}".format(client_attr))
@@ -559,7 +609,10 @@ class ApstraClientFactory:
         :param data: The data to pass to the operation.
         :return: The result of the operation.
         """
-        client = self.get_client(object_type)
+        # Determine design and blueprint_id for proper client selection
+        design = data.get("design") if isinstance(data, dict) else None
+        blueprint_id = id.get("blueprints") if isinstance(id, dict) else None
+        client = self.get_client(object_type, blueprint_id=blueprint_id, design=design)
 
         # Traverse nested object_type, using attrs to walk to object hierarchy
         attrs = object_type.split(".")
@@ -850,13 +903,98 @@ class ApstraClientFactory:
         """
         Commit the blueprint with the given ID.
 
+        Implements a backward-compatible deploy that works across Apstra
+        versions.  The SDK 6.1 ``deploy_blueprint()`` asserts that the
+        errors response contains ``errors_count`` and ``warnings_count``
+        fields, which older Apstra servers (e.g. 5.1) do not return.
+        By driving the deploy sequence ourselves we only check that the
+        ``nodes`` and ``relationships`` dicts are empty, which is the
+        meaningful indicator of a clean blueprint on every version.
+
         :param id: The ID of the blueprint to commit.
         """
-        blueprint_client = self.get_client("blueprints")
+        import time
+
+        blueprint_client = self.get_client("blueprints", blueprint_id=id)
         blueprint = blueprint_client.blueprints[id]
 
-        # Commit the blueprint
-        blueprint.deploy_blueprint(timeout)
+        min_delay = 0.2
+        max_delay = 2.0
+        deadline = time.monotonic() + timeout
+
+        # ---- Phase 1: wait for build errors to clear ----
+        last_exc = None
+        while True:
+            try:
+                errors = blueprint.errors.list()
+                if errors is None:
+                    errors = {}
+                # Remove keys that are not error indicators
+                errors.pop("version", None)
+                errors.pop("errors_count", None)
+                errors.pop("warnings_count", None)
+
+                has_errors = False
+                for key, value in errors.items():
+                    if value:  # non-empty dict / list / truthy
+                        has_errors = True
+                        break
+
+                if has_errors:
+                    raise RuntimeError("Blueprint has build errors: %s" % errors)
+
+                bp_version = blueprint.get_version()
+                if bp_version <= 0:
+                    raise RuntimeError("Blueprint version is still 0")
+
+                # ---- Phase 2: deploy ----
+                deploy_response = blueprint.deploy(
+                    {"version": bp_version}, params={"async": "full"}
+                )
+                task_id = deploy_response["task_id"]
+
+                # ---- Phase 3: wait for deploy task ----
+                task_deadline = time.monotonic() + timeout
+                task_delay = min_delay
+                while True:
+                    task = blueprint.tasks[task_id].get()
+                    if task["status"] in ("succeeded", "failed", "timeout"):
+                        break
+                    if time.monotonic() >= task_deadline:
+                        raise RuntimeError(
+                            "Deploy task did not finish in time: %s" % task
+                        )
+                    wait = min(task_delay, max(0, task_deadline - time.monotonic()))
+                    sleep(wait)
+                    task_delay = min(task_delay * 2, max_delay)
+
+                if task["status"] != "succeeded":
+                    raise RuntimeError("Deploy task failed: %s" % task)
+
+                # ---- Phase 4: verify deploy status ----
+                deploy_status = blueprint.get_deploy()
+                if deploy_status.get("state") != "success":
+                    raise RuntimeError("Deploy failed: %s" % deploy_status)
+                if deploy_status.get("version") != bp_version:
+                    raise RuntimeError(
+                        "bp_version %s != deploy version %s"
+                        % (bp_version, deploy_status.get("version"))
+                    )
+
+                # Success
+                return
+
+            except Exception as exc:
+                last_exc = exc
+                if time.monotonic() >= deadline:
+                    self.module.fail_json(
+                        msg="Blueprint commit failed after %ss: %s"
+                        % (timeout, last_exc)
+                    )
+                remaining = deadline - time.monotonic()
+                wait = min(min_delay, max(0, remaining))
+                sleep(wait)
+                min_delay = min(min_delay * 2, max_delay)
 
     def compare_and_update(self, current, desired, changes):
         """
@@ -928,7 +1066,7 @@ class ApstraClientFactory:
         :return: The blueprint.
         """
         if not self._blueprint_graph:
-            blueprint_client = self.get_client("blueprints")
+            blueprint_client = self.get_client("blueprints", blueprint_id=blueprint_id)
             self._blueprint_graph = blueprint_client.blueprints[blueprint_id].get()
 
         return self._blueprint_graph

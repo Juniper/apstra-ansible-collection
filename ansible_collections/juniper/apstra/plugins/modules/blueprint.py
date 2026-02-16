@@ -241,6 +241,9 @@ def main():
 
                 blueprint_id = blueprint["id"]
                 id = {"blueprint": blueprint_id}
+                # Cache the design for subsequent operations (commit, lock, etc.)
+                design = body.get("design") or blueprint.get("design")
+                client_factory.set_blueprint_design(blueprint_id, design)
                 result["id"] = id
                 result["response"] = blueprint
                 result["msg"] = "blueprint created successfully"
