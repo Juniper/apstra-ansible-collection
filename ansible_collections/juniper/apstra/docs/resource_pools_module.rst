@@ -52,6 +52,23 @@ Parameters
 Examples
 --------
 
+Prerequisite: Discover Resource Groups
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Before assigning pools to a blueprint, discover the available resource groups:
+
+.. code-block:: yaml+jinja
+
+    - name: Get resource groups from blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups"
+        method: GET
+        headers:
+          AuthToken: "{{ auth_token }}"
+        validate_certs: false
+        status_code: 200
+      register: resource_groups
+
 ASN Pool
 ~~~~~~~~
 
@@ -66,12 +83,44 @@ ASN Pool
             - first: 65000
               last: 65100
         state: present
+      register: asn_pool
+
+    - name: Find ASN resource group in blueprint
+      ansible.builtin.set_fact:
+        asn_resource_group: >-
+          {{ resource_groups.json.items
+             | selectattr('resource_type', 'equalto', 'asn')
+             | first }}
+
+    - name: Assign ASN pool to blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids:
+            - "{{ asn_pool.id.asn_pool }}"
+        validate_certs: false
+        status_code: [200, 202, 204]
+
+    - name: Verify ASN pool is assigned to blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.group_name }}"
+        method: GET
+        headers:
+          AuthToken: "{{ auth_token }}"
+        validate_certs: false
+        status_code: 200
+      register: asn_assignment
 
     - name: Update an ASN pool
       juniper.apstra.resource_pools:
         type: asn
         id:
-          asn_pool: "pool-uuid-here"
+          asn_pool: "{{ asn_pool.id.asn_pool }}"
         body:
           display_name: "Updated-Production-ASN-Pool"
           ranges:
@@ -79,11 +128,24 @@ ASN Pool
               last: 65200
         state: present
 
+    - name: Unassign ASN pool from blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids: []
+        validate_certs: false
+        status_code: [200, 202, 204]
+
     - name: Delete an ASN pool
       juniper.apstra.resource_pools:
         type: asn
         id:
-          asn_pool: "pool-uuid-here"
+          asn_pool: "{{ asn_pool.id.asn_pool }}"
         state: absent
 
 IP Pool
@@ -99,12 +161,34 @@ IP Pool
           subnets:
             - network: "10.100.0.0/16"
         state: present
+      register: ip_pool
+
+    - name: Find IP resource group in blueprint
+      ansible.builtin.set_fact:
+        ip_resource_group: >-
+          {{ resource_groups.json.items
+             | selectattr('resource_type', 'equalto', 'ip')
+             | first }}
+
+    - name: Assign IP pool to blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids:
+            - "{{ ip_pool.id.ip_pool }}"
+        validate_certs: false
+        status_code: [200, 202, 204]
 
     - name: Update an IP pool
       juniper.apstra.resource_pools:
         type: ip
         id:
-          ip_pool: "pool-uuid-here"
+          ip_pool: "{{ ip_pool.id.ip_pool }}"
         body:
           display_name: "Updated-Production-IP-Pool"
           subnets:
@@ -112,11 +196,24 @@ IP Pool
             - network: "10.200.0.0/16"
         state: present
 
+    - name: Unassign IP pool from blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids: []
+        validate_certs: false
+        status_code: [200, 202, 204]
+
     - name: Delete an IP pool
       juniper.apstra.resource_pools:
         type: ip
         id:
-          ip_pool: "pool-uuid-here"
+          ip_pool: "{{ ip_pool.id.ip_pool }}"
         state: absent
 
 VLAN Pool
@@ -133,12 +230,34 @@ VLAN Pool
             - first: 100
               last: 200
         state: present
+      register: vlan_pool
+
+    - name: Find VLAN resource group in blueprint
+      ansible.builtin.set_fact:
+        vlan_resource_group: >-
+          {{ resource_groups.json.items
+             | selectattr('resource_type', 'equalto', 'vlan')
+             | first }}
+
+    - name: Assign VLAN pool to blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vlan/{{ vlan_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids:
+            - "{{ vlan_pool.id.vlan_pool }}"
+        validate_certs: false
+        status_code: [200, 202, 204]
 
     - name: Update a VLAN pool
       juniper.apstra.resource_pools:
         type: vlan
         id:
-          vlan_pool: "pool-uuid-here"
+          vlan_pool: "{{ vlan_pool.id.vlan_pool }}"
         body:
           display_name: "Updated-Production-VLAN-Pool"
           ranges:
@@ -146,11 +265,24 @@ VLAN Pool
               last: 300
         state: present
 
+    - name: Unassign VLAN pool from blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vlan/{{ vlan_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids: []
+        validate_certs: false
+        status_code: [200, 202, 204]
+
     - name: Delete a VLAN pool
       juniper.apstra.resource_pools:
         type: vlan
         id:
-          vlan_pool: "pool-uuid-here"
+          vlan_pool: "{{ vlan_pool.id.vlan_pool }}"
         state: absent
 
 IPv6 Pool
@@ -166,12 +298,34 @@ IPv6 Pool
           subnets:
             - network: "fc01:a05:fab::/48"
         state: present
+      register: ipv6_pool
+
+    - name: Find IPv6 resource group in blueprint
+      ansible.builtin.set_fact:
+        ipv6_resource_group: >-
+          {{ resource_groups.json.items
+             | selectattr('resource_type', 'equalto', 'ipv6')
+             | first }}
+
+    - name: Assign IPv6 pool to blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ipv6/{{ ipv6_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids:
+            - "{{ ipv6_pool.id.ipv6_pool }}"
+        validate_certs: false
+        status_code: [200, 202, 204]
 
     - name: Update an IPv6 pool
       juniper.apstra.resource_pools:
         type: ipv6
         id:
-          ipv6_pool: "pool-uuid-here"
+          ipv6_pool: "{{ ipv6_pool.id.ipv6_pool }}"
         body:
           display_name: "Updated-Production-IPv6-Pool"
           subnets:
@@ -179,11 +333,24 @@ IPv6 Pool
             - network: "fc01:a05:fac::/48"
         state: present
 
+    - name: Unassign IPv6 pool from blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ipv6/{{ ipv6_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids: []
+        validate_certs: false
+        status_code: [200, 202, 204]
+
     - name: Delete an IPv6 pool
       juniper.apstra.resource_pools:
         type: ipv6
         id:
-          ipv6_pool: "pool-uuid-here"
+          ipv6_pool: "{{ ipv6_pool.id.ipv6_pool }}"
         state: absent
 
 VNI Pool
@@ -200,12 +367,34 @@ VNI Pool
             - first: 5000
               last: 6000
         state: present
+      register: vni_pool
+
+    - name: Find VNI resource group in blueprint
+      ansible.builtin.set_fact:
+        vni_resource_group: >-
+          {{ resource_groups.json.items
+             | selectattr('resource_type', 'equalto', 'vni')
+             | first }}
+
+    - name: Assign VNI pool to blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids:
+            - "{{ vni_pool.id.vni_pool }}"
+        validate_certs: false
+        status_code: [200, 202, 204]
 
     - name: Update a VNI pool
       juniper.apstra.resource_pools:
         type: vni
         id:
-          vni_pool: "pool-uuid-here"
+          vni_pool: "{{ vni_pool.id.vni_pool }}"
         body:
           display_name: "Updated-Production-VNI-Pool"
           ranges:
@@ -213,11 +402,24 @@ VNI Pool
               last: 7000
         state: present
 
+    - name: Unassign VNI pool from blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.group_name }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ auth_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          pool_ids: []
+        validate_certs: false
+        status_code: [200, 202, 204]
+
     - name: Delete a VNI pool
       juniper.apstra.resource_pools:
         type: vni
         id:
-          vni_pool: "pool-uuid-here"
+          vni_pool: "{{ vni_pool.id.vni_pool }}"
         state: absent
 
 Return Values

@@ -1,6 +1,6 @@
 -i https://pypi.org/simple
 ansible-core>=2.16.14
-build/wheels/aos_sdk-6.1.0-py3-none-any.whl
+build/wheels/aos_sdk-0.1.0-py3-none-any.whl
 jmespath>=1.1.0
 jsonpatch>=1.33
 kubernetes>=35.0.0

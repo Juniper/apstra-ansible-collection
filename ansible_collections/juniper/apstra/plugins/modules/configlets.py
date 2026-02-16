@@ -195,6 +195,87 @@ EXAMPLES = """
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
       configlet: "AjAuUuVLylXCUgAqaQ"
     state: absent
+
+- name: Create a catalog configlet with Jinja2 template variables (NTP)
+  juniper.apstra.configlets:
+    type: catalog
+    body:
+      display_name: "NTP Template Config"
+      ref_archs:
+        - "two_stage_l3clos"
+      generators:
+        - config_style: "junos"
+          section: "system"
+          template_text: |
+            system {
+              ntp {
+                server {{ ntp_server }};
+                boot-server {{ ntp_server }};
+              }
+            }
+          negation_template_text: ""
+          filename: ""
+    state: present
+
+- name: Create a multi-vendor AAA catalog configlet (junos, nxos, eos)
+  juniper.apstra.configlets:
+    type: catalog
+    body:
+      display_name: "AAA Multi-Vendor Config"
+      ref_archs:
+        - "two_stage_l3clos"
+      generators:
+        - config_style: "junos"
+          section: "system"
+          template_text: |
+            system {
+              authentication-order [ radius password ];
+              radius-server {
+                10.0.0.100 secret radpass;
+              }
+            }
+          negation_template_text: ""
+          filename: ""
+        - config_style: "nxos"
+          section: "system"
+          template_text: |
+            radius-server host 10.0.0.100 key radpass
+            aaa authentication login default group radius local
+          negation_template_text: ""
+          filename: ""
+        - config_style: "eos"
+          section: "system"
+          template_text: |
+            radius-server host 10.0.0.100 key radpass
+            aaa authentication login default group radius local
+          negation_template_text: ""
+          filename: ""
+    state: present
+
+- name: Create a blueprint syslog configlet
+  juniper.apstra.configlets:
+    type: blueprint
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    body:
+      label: "Syslog Config"
+      condition: 'role in ["leaf", "spine"]'
+      configlet:
+        display_name: "Syslog Config"
+        generators:
+          - config_style: "junos"
+            section: "system"
+            template_text: |
+              system {
+                syslog {
+                  host 10.0.0.1 {
+                    any warning;
+                  }
+                }
+              }
+            negation_template_text: ""
+            filename: ""
+    state: present
 """
 
 RETURN = """
@@ -231,7 +312,7 @@ msg:
 CATALOG_READ_ONLY_FIELDS = ("id", "created_at", "last_modified_at")
 
 # Read-only fields that the API may add inside generators
-GENERATOR_READ_ONLY_FIELDS = ("section_condition",)
+GENERATOR_READ_ONLY_FIELDS = ("section_condition", "render_style")
 
 
 def _strip_read_only_from_generators(obj):

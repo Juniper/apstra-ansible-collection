@@ -161,6 +161,102 @@ Blueprint Configlet
           configlet: "configlet-id-here"
         state: absent
 
+Template Configlet with Jinja2 Variables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: yaml+jinja
+
+    - name: Create a catalog configlet with Jinja2 template variables (NTP)
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "NTP Template Config"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: |
+                system {
+                  ntp {
+                    server {{ ntp_server }};
+                    boot-server {{ ntp_server }};
+                  }
+                }
+              negation_template_text: ""
+              filename: ""
+        state: present
+
+Multi-Vendor Configlet
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: yaml+jinja
+
+    - name: Create a multi-vendor AAA catalog configlet (junos, nxos, eos)
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "AAA Multi-Vendor Config"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: |
+                system {
+                  authentication-order [ radius password ];
+                  radius-server {
+                    10.0.0.100 secret radpass;
+                  }
+                }
+              negation_template_text: ""
+              filename: ""
+            - config_style: "nxos"
+              section: "system"
+              template_text: |
+                radius-server host 10.0.0.100 key radpass
+                aaa authentication login default group radius local
+              negation_template_text: ""
+              filename: ""
+            - config_style: "eos"
+              section: "system"
+              template_text: |
+                radius-server host 10.0.0.100 key radpass
+                aaa authentication login default group radius local
+              negation_template_text: ""
+              filename: ""
+        state: present
+
+Blueprint Syslog Configlet
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: yaml+jinja
+
+    - name: Create a blueprint syslog configlet
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "blueprint-uuid-here"
+        body:
+          label: "Syslog Config"
+          condition: 'role in ["leaf", "spine"]'
+          configlet:
+            display_name: "Syslog Config"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: |
+                  system {
+                    syslog {
+                      host 10.0.0.1 {
+                        any warning;
+                      }
+                    }
+                  }
+                negation_template_text: ""
+                filename: ""
+        state: present
+
 Generator Fields
 ~~~~~~~~~~~~~~~~
 
