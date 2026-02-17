@@ -188,7 +188,7 @@ def _get_parent_id(parents_db, object_attrs, id):
 
 
 # Map from plural to singular object types
-_plural_to_singular = [("ies", "y"), ("s", "")]
+_plural_to_singular = [("gateways", "gateway"), ("ies", "y"), ("s", "")]
 
 
 def plural_leaf_object_type(object_type):
@@ -352,6 +352,7 @@ class ApstraClientFactory:
                 "blueprints.security_zones",
                 "blueprints.resource_groups",
                 "blueprints.routing_policies",
+                "blueprints.remote_gateways",
                 "blueprints.systems",
                 "blueprints.tags",
             ],

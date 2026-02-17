@@ -1,0 +1,224 @@
+---
+- name: Test create/update/delete external_gateway
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_egw_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ---- Create blueprint ----
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ---- Get spine node IDs for local_gw_nodes ----
+
+    - name: Get blueprint nodes
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - "blueprints.nodes"
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+      register: bp_facts
+
+    - name: Extract spine node IDs
+      ansible.builtin.set_fact:
+        spine_nodes: >-
+          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'spine')
+             | map(attribute='value.id')
+             | list }}
+
+    - name: Show spine node IDs
+      ansible.builtin.debug:
+        var: spine_nodes
+
+    # ---- Create external gateway ----
+
+    - name: Create external gateway
+      juniper.apstra.external_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_ext_gw_1"
+          gw_ip: "10.99.99.1"
+          gw_asn: 65500
+          local_gw_nodes: "{{ [spine_nodes[0]] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+          evpn_route_types: "all"
+        auth_token: "{{ auth.token }}"
+      register: ext_gw
+
+    - name: Show created external gateway
+      ansible.builtin.debug:
+        var: ext_gw
+
+    - name: Verify external gateway was created
+      ansible.builtin.assert:
+        that:
+          - ext_gw.changed
+          - ext_gw.id.remote_gateway is defined
+        fail_msg: "External gateway was not created"
+
+    # ---- Idempotency check ----
+
+    - name: Create external gateway (no change)
+      juniper.apstra.external_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_ext_gw_1"
+          gw_ip: "10.99.99.1"
+          gw_asn: 65500
+          local_gw_nodes: "{{ [spine_nodes[0]] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+          evpn_route_types: "all"
+        auth_token: "{{ auth.token }}"
+      register: ext_gw_nochange
+
+    - name: Verify idempotency
+      ansible.builtin.assert:
+        that:
+          - not ext_gw_nochange.changed
+        fail_msg: "External gateway should not have changed"
+
+    # ---- Update external gateway ----
+
+    - name: Update external gateway
+      juniper.apstra.external_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ ext_gw.id.remote_gateway }}"
+        body:
+          gw_name: "test_ext_gw_1_updated"
+          gw_ip: "10.99.99.2"
+          gw_asn: 65501
+          local_gw_nodes: "{{ [spine_nodes[0]] }}"
+          ttl: 5
+        auth_token: "{{ auth.token }}"
+      register: ext_gw_update
+
+    - name: Show updated external gateway
+      ansible.builtin.debug:
+        var: ext_gw_update
+
+    - name: Verify external gateway was updated
+      ansible.builtin.assert:
+        that:
+          - ext_gw_update.changed
+        fail_msg: "External gateway was not updated"
+
+    # ---- Create a second external gateway ----
+
+    - name: Create second external gateway
+      juniper.apstra.external_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_ext_gw_2"
+          gw_ip: "10.99.99.10"
+          gw_asn: 65510
+          local_gw_nodes: "{{ spine_nodes }}"
+        auth_token: "{{ auth.token }}"
+      register: ext_gw_2
+
+    - name: Show second external gateway
+      ansible.builtin.debug:
+        var: ext_gw_2
+
+    - name: Verify second external gateway was created
+      ansible.builtin.assert:
+        that:
+          - ext_gw_2.changed
+          - ext_gw_2.id.remote_gateway is defined
+        fail_msg: "Second external gateway was not created"
+
+    # ---- Delete external gateways ----
+
+    - name: Delete first external gateway
+      juniper.apstra.external_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ ext_gw.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ext_gw_delete
+
+    - name: Show deleted first external gateway
+      ansible.builtin.debug:
+        var: ext_gw_delete
+
+    - name: Verify first external gateway was deleted
+      ansible.builtin.assert:
+        that:
+          - ext_gw_delete.changed
+        fail_msg: "First external gateway was not deleted"
+
+    - name: Delete second external gateway
+      juniper.apstra.external_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ ext_gw_2.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ext_gw_2_delete
+
+    - name: Show deleted second external gateway
+      ansible.builtin.debug:
+        var: ext_gw_2_delete
+
+    # ---- Cleanup ----
+
+    - name: Unlock the blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
