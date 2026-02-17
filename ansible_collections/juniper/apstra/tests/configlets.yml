@@ -1,0 +1,611 @@
+---
+- name: Test configlets CRUD operations
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_configlets_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ── Catalog Configlet Tests ─────────────────────────────────────────
+
+    - name: Create catalog configlet
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_snmp"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "snmp {\n  community public;\n}"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: catalog_create
+
+    - name: Display created catalog configlet
+      ansible.builtin.debug:
+        var: catalog_create
+
+    - name: Create same catalog configlet again (should not change)
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_snmp"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "snmp {\n  community public;\n}"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: catalog_no_change
+
+    - name: Verify catalog configlet no change occurred
+      ansible.builtin.assert:
+        that:
+          - not catalog_no_change.changed
+
+    - name: Import SNMP catalog configlet to blueprint
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          configlet: "{{ catalog_create.id.configlet }}"
+          condition: 'role in ["spine", "leaf"]'
+          label: "test_catalog_snmp"
+        auth_token: "{{ auth.token }}"
+      register: snmp_bp_import
+
+    - name: Display SNMP catalog configlet blueprint import
+      ansible.builtin.debug:
+        var: snmp_bp_import
+
+    - name: Update catalog configlet
+      juniper.apstra.configlets:
+        type: catalog
+        id: "{{ catalog_create.id }}"
+        body:
+          display_name: "test_catalog_snmp_updated"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "snmp {\n  community private;\n}"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: catalog_update
+
+    - name: Display updated catalog configlet
+      ansible.builtin.debug:
+        var: catalog_update
+
+    - name: Remove SNMP catalog configlet from blueprint
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ snmp_bp_import.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Delete catalog configlet
+      juniper.apstra.configlets:
+        type: catalog
+        id: "{{ catalog_create.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: catalog_delete
+
+    - name: Display delete result
+      ansible.builtin.debug:
+        var: catalog_delete
+
+    - name: Delete same catalog configlet again (should not change)
+      juniper.apstra.configlets:
+        type: catalog
+        id: "{{ catalog_create.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: catalog_delete_again
+
+    - name: Verify catalog delete idempotency
+      ansible.builtin.assert:
+        that:
+          - not catalog_delete_again.changed
+
+    # ── Blueprint Configlet Tests ───────────────────────────────────────
+
+    - name: Create blueprint configlet
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "test_bp_snmp"
+          condition: 'role in ["leaf"]'
+          configlet:
+            display_name: "test_bp_snmp"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: "snmp {\n  community bp-public;\n}"
+                negation_template_text: ""
+                filename: ""
+        auth_token: "{{ auth.token }}"
+      register: bp_create
+
+    - name: Display created blueprint configlet
+      ansible.builtin.debug:
+        var: bp_create
+
+    - name: Create same blueprint configlet again (should not change)
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "test_bp_snmp"
+          condition: 'role in ["leaf"]'
+          configlet:
+            display_name: "test_bp_snmp"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: "snmp {\n  community bp-public;\n}"
+                negation_template_text: ""
+                filename: ""
+        auth_token: "{{ auth.token }}"
+      register: bp_no_change
+
+    - name: Verify blueprint configlet no change occurred
+      ansible.builtin.assert:
+        that:
+          - not bp_no_change.changed
+
+    - name: Update blueprint configlet
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ bp_create.id.configlet }}"
+        body:
+          label: "test_bp_snmp"
+          condition: 'role in ["leaf", "spine"]'
+          configlet:
+            display_name: "test_bp_snmp"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: "snmp {\n  community bp-private;\n}"
+                negation_template_text: ""
+                filename: ""
+        auth_token: "{{ auth.token }}"
+      register: bp_update
+
+    - name: Display updated blueprint configlet
+      ansible.builtin.debug:
+        var: bp_update
+
+    - name: Delete blueprint configlet
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ bp_create.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_delete
+
+    - name: Display blueprint delete result
+      ansible.builtin.debug:
+        var: bp_delete
+
+    - name: Delete same blueprint configlet again (should not change)
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ bp_create.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_delete_again
+
+    - name: Verify blueprint delete idempotency
+      ansible.builtin.assert:
+        that:
+          - not bp_delete_again.changed
+
+    # ── Template Configlet with Jinja2 Variables (NTP) ──────────────────
+
+    - name: Create catalog configlet with Jinja2 template variables
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_ntp_template"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: ntp_template_create
+
+    - name: Display created NTP template configlet
+      ansible.builtin.debug:
+        var: ntp_template_create
+
+    - name: Create same NTP template configlet again (idempotency)
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_ntp_template"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: ntp_template_no_change
+
+    - name: Verify NTP template configlet no change
+      ansible.builtin.assert:
+        that:
+          - not ntp_template_no_change.changed
+
+    - name: Import NTP template catalog configlet to blueprint
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          configlet: "{{ ntp_template_create.id.configlet }}"
+          condition: 'role in ["spine", "leaf"]'
+          label: "test_catalog_ntp_template"
+        auth_token: "{{ auth.token }}"
+      register: ntp_bp_import
+
+    - name: Display NTP template blueprint import
+      ansible.builtin.debug:
+        var: ntp_bp_import
+
+    - name: Remove NTP template catalog configlet from blueprint
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ ntp_bp_import.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Delete NTP template configlet
+      juniper.apstra.configlets:
+        type: catalog
+        id: "{{ ntp_template_create.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ntp_template_delete
+
+    - name: Display NTP template delete result
+      ansible.builtin.debug:
+        var: ntp_template_delete
+
+    # ── Blueprint Syslog Configlet ──────────────────────────────────────
+
+    - name: Create blueprint syslog configlet
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "test_bp_syslog"
+          condition: 'role in ["leaf", "spine"]'
+          configlet:
+            display_name: "test_bp_syslog"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any warning;\n    }\n  }\n}"
+                negation_template_text: ""
+                filename: ""
+        auth_token: "{{ auth.token }}"
+      register: bp_syslog_create
+
+    - name: Display created blueprint syslog configlet
+      ansible.builtin.debug:
+        var: bp_syslog_create
+
+    - name: Create same blueprint syslog configlet again (idempotency)
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "test_bp_syslog"
+          condition: 'role in ["leaf", "spine"]'
+          configlet:
+            display_name: "test_bp_syslog"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any warning;\n    }\n  }\n}"
+                negation_template_text: ""
+                filename: ""
+        auth_token: "{{ auth.token }}"
+      register: bp_syslog_no_change
+
+    - name: Verify blueprint syslog configlet no change
+      ansible.builtin.assert:
+        that:
+          - not bp_syslog_no_change.changed
+
+    - name: Update blueprint syslog configlet severity
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ bp_syslog_create.id.configlet }}"
+        body:
+          label: "test_bp_syslog"
+          condition: 'role in ["leaf", "spine"]'
+          configlet:
+            display_name: "test_bp_syslog"
+            generators:
+              - config_style: "junos"
+                section: "system"
+                template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any critical;\n    }\n  }\n}"
+                negation_template_text: ""
+                filename: ""
+        auth_token: "{{ auth.token }}"
+      register: bp_syslog_update
+
+    - name: Display updated blueprint syslog configlet
+      ansible.builtin.debug:
+        var: bp_syslog_update
+
+    - name: Delete blueprint syslog configlet
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ bp_syslog_create.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_syslog_delete
+
+    - name: Display blueprint syslog delete result
+      ansible.builtin.debug:
+        var: bp_syslog_delete
+
+    # ── Multi-Vendor Catalog Configlet (AAA) ────────────────────────────
+
+    - name: Create multi-vendor AAA catalog configlet
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_aaa_multivendor"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "system {\n  authentication-order [ radius password ];\n  radius-server {\n    10.0.0.100 secret radpass;\n  }\n}"
+              negation_template_text: ""
+              filename: ""
+            - config_style: "nxos"
+              section: "system"
+              template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+              negation_template_text: ""
+              filename: ""
+            - config_style: "eos"
+              section: "system"
+              template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: aaa_create
+
+    - name: Display created multi-vendor AAA configlet
+      ansible.builtin.debug:
+        var: aaa_create
+
+    - name: Create same multi-vendor AAA configlet again (idempotency)
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_aaa_multivendor"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "system {\n  authentication-order [ radius password ];\n  radius-server {\n    10.0.0.100 secret radpass;\n  }\n}"
+              negation_template_text: ""
+              filename: ""
+            - config_style: "nxos"
+              section: "system"
+              template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+              negation_template_text: ""
+              filename: ""
+            - config_style: "eos"
+              section: "system"
+              template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: aaa_no_change
+
+    - name: Verify multi-vendor AAA configlet no change
+      ansible.builtin.assert:
+        that:
+          - not aaa_no_change.changed
+
+    - name: Import multi-vendor AAA catalog configlet to blueprint
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          configlet: "{{ aaa_create.id.configlet }}"
+          condition: 'role in ["spine", "leaf"]'
+          label: "test_catalog_aaa_multivendor"
+        auth_token: "{{ auth.token }}"
+      register: aaa_bp_import
+
+    - name: Display multi-vendor AAA blueprint import
+      ansible.builtin.debug:
+        var: aaa_bp_import
+
+    - name: Update multi-vendor AAA configlet (change RADIUS key)
+      juniper.apstra.configlets:
+        type: catalog
+        id: "{{ aaa_create.id }}"
+        body:
+          display_name: "test_catalog_aaa_multivendor"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators:
+            - config_style: "junos"
+              section: "system"
+              template_text: "system {\n  authentication-order [ radius password ];\n  radius-server {\n    10.0.0.100 secret newradpass;\n  }\n}"
+              negation_template_text: ""
+              filename: ""
+            - config_style: "nxos"
+              section: "system"
+              template_text: "radius-server host 10.0.0.100 key newradpass\naaa authentication login default group radius local"
+              negation_template_text: ""
+              filename: ""
+            - config_style: "eos"
+              section: "system"
+              template_text: "radius-server host 10.0.0.100 key newradpass\naaa authentication login default group radius local"
+              negation_template_text: ""
+              filename: ""
+        auth_token: "{{ auth.token }}"
+      register: aaa_update
+
+    - name: Display updated multi-vendor AAA configlet
+      ansible.builtin.debug:
+        var: aaa_update
+
+    - name: Remove multi-vendor AAA catalog configlet from blueprint
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ aaa_bp_import.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Delete multi-vendor AAA catalog configlet
+      juniper.apstra.configlets:
+        type: catalog
+        id: "{{ aaa_create.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: aaa_delete
+
+    - name: Display multi-vendor AAA delete result
+      ansible.builtin.debug:
+        var: aaa_delete
+
+    # ── Validation Tests (Error Handling) ───────────────────────────────
+
+    - name: Attempt to create catalog configlet without generators (should fail)
+      juniper.apstra.configlets:
+        type: catalog
+        body:
+          display_name: "test_catalog_no_generators"
+          ref_archs:
+            - "two_stage_l3clos"
+          generators: []
+        auth_token: "{{ auth.token }}"
+      register: no_generators_result
+      ignore_errors: true
+
+    - name: Verify missing generators error
+      ansible.builtin.assert:
+        that:
+          - no_generators_result is failed
+
+    - name: Attempt to create blueprint configlet without body (should fail)
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: no_body_result
+      ignore_errors: true
+
+    - name: Verify missing body error
+      ansible.builtin.assert:
+        that:
+          - no_body_result is failed
+
+    # ── Cleanup ─────────────────────────────────────────────────────────
+
+    - name: Unlock the blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
