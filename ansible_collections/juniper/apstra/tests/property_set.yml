@@ -1,0 +1,287 @@
+---
+- name: Test create/update/delete property_set
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_ps_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ---- Global property set tests (Design > Property Sets) ----
+
+    - name: Create global property set
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_global_ps"
+          values:
+            test_key: "test_value"
+            mtu: 9100
+        auth_token: "{{ auth.token }}"
+      register: global_ps
+
+    - name: Show created global property set
+      ansible.builtin.debug:
+        var: global_ps
+
+    - name: Create global property set (no change)
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_global_ps"
+          values:
+            test_key: "test_value"
+            mtu: 9100
+        auth_token: "{{ auth.token }}"
+      register: global_ps_nochange
+
+    - name: Show no-change result
+      ansible.builtin.debug:
+        var: global_ps_nochange
+
+    - name: Update global property set
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_ps.id.property_set }}"
+        body:
+          values:
+            test_key: "updated_value"
+            mtu: 9200
+        auth_token: "{{ auth.token }}"
+      register: global_ps_update
+
+    - name: Show updated global property set
+      ansible.builtin.debug:
+        var: global_ps_update
+
+    # ---- Global property set with values_yaml ----
+
+    - name: Create global property set using values_yaml
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_yaml_ps"
+          values_yaml: |
+            yaml_key: yaml_value
+            yaml_mtu: 9100
+        auth_token: "{{ auth.token }}"
+      register: global_yaml_ps
+
+    - name: Show created values_yaml property set
+      ansible.builtin.debug:
+        var: global_yaml_ps
+
+    - name: Verify values_yaml PS was created
+      ansible.builtin.assert:
+        that:
+          - global_yaml_ps.changed
+          - global_yaml_ps.id.property_set is defined
+        fail_msg: "values_yaml property set was not created"
+
+    - name: Create values_yaml property set (no change)
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_yaml_ps"
+          values_yaml: |
+            yaml_key: yaml_value
+            yaml_mtu: 9100
+        auth_token: "{{ auth.token }}"
+      register: global_yaml_ps_nochange
+
+    - name: Verify values_yaml PS idempotency
+      ansible.builtin.assert:
+        that:
+          - not global_yaml_ps_nochange.changed
+        fail_msg: "values_yaml property set should not have changed"
+
+    - name: Update global property set using values_yaml
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_yaml_ps.id.property_set }}"
+        body:
+          values_yaml: |
+            yaml_key: updated_yaml_value
+            yaml_mtu: 9200
+        auth_token: "{{ auth.token }}"
+      register: global_yaml_ps_update
+
+    - name: Show updated values_yaml property set
+      ansible.builtin.debug:
+        var: global_yaml_ps_update
+
+    - name: Verify values_yaml PS was updated
+      ansible.builtin.assert:
+        that:
+          - global_yaml_ps_update.changed
+        fail_msg: "values_yaml property set was not updated"
+
+    # ---- Blueprint-scoped property set tests ----
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    - name: Import property set into blueprint
+      juniper.apstra.property_set:
+        id: "{{ bp.id }}"
+        body:
+          id: "flow_snmpv2"
+        auth_token: "{{ auth.token }}"
+      register: ps
+
+    - name: Show imported property set
+      ansible.builtin.debug:
+        var: ps
+
+    - name: Import property set (no change)
+      juniper.apstra.property_set:
+        id: "{{ bp.id }}"
+        body:
+          id: "flow_snmpv2"
+        auth_token: "{{ auth.token }}"
+      register: ps_nochange
+
+    - name: Show no-change result
+      ansible.builtin.debug:
+        var: ps_nochange
+
+    - name: Import the test global property set into blueprint
+      juniper.apstra.property_set:
+        id: "{{ bp.id }}"
+        body:
+          id: "{{ global_ps.id.property_set }}"
+        auth_token: "{{ auth.token }}"
+      register: ps_custom
+
+    - name: Show imported custom property set
+      ansible.builtin.debug:
+        var: ps_custom
+
+    - name: Import the values_yaml global PS into blueprint
+      juniper.apstra.property_set:
+        id: "{{ bp.id }}"
+        body:
+          id: "{{ global_yaml_ps.id.property_set }}"
+        auth_token: "{{ auth.token }}"
+      register: ps_yaml_import
+
+    - name: Show imported values_yaml property set
+      ansible.builtin.debug:
+        var: ps_yaml_import
+
+    - name: Verify values_yaml PS was imported
+      ansible.builtin.assert:
+        that:
+          - ps_yaml_import.changed
+        fail_msg: "values_yaml property set was not imported into blueprint"
+
+    - name: Delete values_yaml property set from blueprint
+      juniper.apstra.property_set:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          property_set: "{{ ps_yaml_import.id.property_set }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ps_yaml_delete
+
+    - name: Show deleted values_yaml property set
+      ansible.builtin.debug:
+        var: ps_yaml_delete
+
+    - name: Delete custom property set from blueprint
+      juniper.apstra.property_set:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          property_set: "{{ ps_custom.id.property_set }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ps_custom_delete
+
+    - name: Show deleted custom property set
+      ansible.builtin.debug:
+        var: ps_custom_delete
+
+    - name: Delete first property set from blueprint
+      juniper.apstra.property_set:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          property_set: "{{ ps.id.property_set }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ps_delete
+
+    - name: Show deleted property set
+      ansible.builtin.debug:
+        var: ps_delete
+
+    - name: Unlock the blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    # ---- Cleanup global property sets ----
+
+    - name: Delete global property set
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_ps.id.property_set }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: global_ps_delete
+
+    - name: Show deleted global property set
+      ansible.builtin.debug:
+        var: global_ps_delete
+
+    - name: Delete values_yaml global property set
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_yaml_ps.id.property_set }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: global_yaml_ps_delete
+
+    - name: Show deleted values_yaml global property set
+      ansible.builtin.debug:
+        var: global_yaml_ps_delete
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
