@@ -335,6 +335,7 @@ class ApstraClientFactory:
         self._client_to_types = {
             "base_client": [
                 "asn_pools",
+                "configlets",
                 "device_pools",
                 "integer_pools",
                 "ip_pools",
