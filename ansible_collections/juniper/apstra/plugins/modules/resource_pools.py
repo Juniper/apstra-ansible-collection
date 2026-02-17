@@ -29,7 +29,7 @@ author:
 
 description:
   - This module allows you to create, update, and delete resource pools in Apstra.
-  - Supported pool types are ASN, IP, IPv6, VLAN, and VNI.
+  - Supported pool types are ASN, Integer, IP, IPv6, VLAN, and VNI.
 
 options:
   api_url:
@@ -67,7 +67,7 @@ options:
       - The type of resource pool to manage.
     required: false
     type: str
-    choices: ["asn", "ip", "ipv6", "vlan", "vni"]
+    choices: ["asn", "integer", "ip", "ipv6", "vlan", "vni"]
     default: "asn"
   id:
     description:
@@ -78,6 +78,7 @@ options:
     description:
       - Dictionary containing the resource pool object details.
       - For ASN pools, use 'ranges' with 'first' and 'last' integer keys.
+      - For Integer pools, use 'ranges' with 'first' and 'last' integer keys.
       - For IP pools, use 'subnets' with 'network' (CIDR notation) keys.
       - For IPv6 pools, use 'subnets' with 'network' (CIDR notation) keys.
       - For VLAN pools, use 'ranges' with 'first' and 'last' integer keys.
@@ -472,6 +473,7 @@ msg:
 # Map pool type to the object type used by the client
 POOL_TYPE_MAP = {
     "asn": "asn_pools",
+    "integer": "integer_pools",
     "ip": "ip_pools",
     "ipv6": "ipv6_pools",
     "vlan": "vlan_pools",
@@ -479,9 +481,10 @@ POOL_TYPE_MAP = {
 }
 
 # The list field that holds the pool entries differs by pool type
-# ASN and VLAN pools use "ranges", IP pools use "subnets"
+# ASN, Integer, VLAN, and VNI pools use "ranges", IP and IPv6 pools use "subnets"
 POOL_LIST_FIELD = {
     "asn": "ranges",
+    "integer": "ranges",
     "ip": "subnets",
     "ipv6": "subnets",
     "vlan": "ranges",
@@ -518,7 +521,7 @@ def main():
         type=dict(
             type="str",
             required=False,
-            choices=["asn", "ip", "ipv6", "vlan", "vni"],
+            choices=["asn", "integer", "ip", "ipv6", "vlan", "vni"],
             default="asn",
         ),
         id=dict(type="dict", required=False, default=None),

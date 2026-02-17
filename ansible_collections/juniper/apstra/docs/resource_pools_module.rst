@@ -26,7 +26,7 @@ Synopsis
 --------
 
 - This module allows you to create, update, and delete resource pools in Apstra.
-- Supported pool types are ASN, IP, IPv6, VLAN, and VNI.
+- Supported pool types are ASN, Integer, IP, IPv6, VLAN, and VNI.
 
 Parameters
 ----------
@@ -35,7 +35,7 @@ Parameters
 
 **auth_token** (string): The authentication token to use if already authenticated. Default: APSTRA_AUTH_TOKEN environment variable
 
-**body** (dictionary): Dictionary containing the resource pool details. For ASN pools use ``ranges`` with ``first``/``last`` integer keys. For IP pools use ``subnets`` with ``network`` (CIDR notation) keys. For IPv6 pools use ``subnets`` with ``network`` (IPv6 CIDR notation) keys. For VLAN pools use ``ranges`` with ``first``/``last`` integer keys. For VNI pools use ``ranges`` with ``first``/``last`` integer keys.
+**body** (dictionary): Dictionary containing the resource pool details. For ASN pools use ``ranges`` with ``first``/``last`` integer keys. For Integer pools use ``ranges`` with ``first``/``last`` integer keys. For IP pools use ``subnets`` with ``network`` (CIDR notation) keys. For IPv6 pools use ``subnets`` with ``network`` (IPv6 CIDR notation) keys. For VLAN pools use ``ranges`` with ``first``/``last`` integer keys. For VNI pools use ``ranges`` with ``first``/``last`` integer keys.
 
 **id** (dictionary): Dictionary containing the resource pool ID.
 
@@ -43,7 +43,7 @@ Parameters
 
 **state** (string): Desired state of the resource pool. Choices: present, absent. Default: present
 
-**type** (string): The type of resource pool to manage. Choices: asn, ip, ipv6, vlan, vni. Default: asn
+**type** (string): The type of resource pool to manage. Choices: asn, integer, ip, ipv6, vlan, vni. Default: asn
 
 **username** (string): The username for authentication. Default: APSTRA_USERNAME environment variable
 
@@ -351,6 +351,43 @@ IPv6 Pool
         type: ipv6
         id:
           ipv6_pool: "{{ ipv6_pool.id.ipv6_pool }}"
+        state: absent
+
+Integer Pool
+~~~~~~~~~~~~
+
+.. code-block:: yaml+jinja
+
+    - name: Create an Integer pool
+      juniper.apstra.resource_pools:
+        type: integer
+        body:
+          display_name: "Production-Integer-Pool"
+          ranges:
+            - first: 1000
+              last: 2000
+        state: present
+      register: integer_pool
+
+    - name: Update an Integer pool
+      juniper.apstra.resource_pools:
+        type: integer
+        id:
+          integer_pool: "{{ integer_pool.id.integer_pool }}"
+        body:
+          display_name: "Updated-Production-Integer-Pool"
+          ranges:
+            - first: 1000
+              last: 2000
+            - first: 3000
+              last: 4000
+        state: present
+
+    - name: Delete an Integer pool
+      juniper.apstra.resource_pools:
+        type: integer
+        id:
+          integer_pool: "{{ integer_pool.id.integer_pool }}"
         state: absent
 
 VNI Pool
