@@ -73,6 +73,10 @@
       ansible.builtin.debug:
         var: asn_create
 
+    - name: Show ASN pool total and used_percentage after create
+      ansible.builtin.debug:
+        msg: "ASN Pool - total: {{ asn_create.asn_pool.total }}, used_percentage: {{ asn_create.asn_pool.used_percentage }}"
+
     - name: Extract ASN pool ID
       ansible.builtin.set_fact:
         asn_pool_id: "{{ asn_create.id.asn_pool }}"
@@ -167,6 +171,10 @@
       ansible.builtin.debug:
         var: asn_update
 
+    - name: Show ASN pool total and used_percentage after update
+      ansible.builtin.debug:
+        msg: "ASN Pool - total: {{ asn_update.asn_pool.total }}, used_percentage: {{ asn_update.asn_pool.used_percentage }}"
+
     - name: Verify ASN pool update is reflected in blueprint
       ansible.builtin.uri:
         url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
@@ -254,6 +262,10 @@
       ansible.builtin.debug:
         var: ip_create
 
+    - name: Show IP pool total and used_percentage after create
+      ansible.builtin.debug:
+        msg: "IP Pool - total: {{ ip_create.ip_pool.total }}, used_percentage: {{ ip_create.ip_pool.used_percentage }}"
+
     - name: Extract IP pool ID
       ansible.builtin.set_fact:
         ip_pool_id: "{{ ip_create.id.ip_pool }}"
@@ -335,6 +347,10 @@
       ansible.builtin.debug:
         var: ip_update
 
+    - name: Show IP pool total and used_percentage after update
+      ansible.builtin.debug:
+        msg: "IP Pool - total: {{ ip_update.ip_pool.total }}, used_percentage: {{ ip_update.ip_pool.used_percentage }}"
+
     - name: Verify IP pool update is reflected in blueprint
       ansible.builtin.uri:
         url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
@@ -415,6 +431,10 @@
       ansible.builtin.debug:
         var: vlan_create
 
+    - name: Show VLAN pool total and used_percentage after create
+      ansible.builtin.debug:
+        msg: "VLAN Pool - total: {{ vlan_create.vlan_pool.total }}, used_percentage: {{ vlan_create.vlan_pool.used_percentage }}"
+
     - name: Update VLAN pool
       juniper.apstra.resource_pools:
         type: vlan
@@ -432,6 +452,10 @@
     - name: Display updated VLAN pool
       ansible.builtin.debug:
         var: vlan_update
+
+    - name: Show VLAN pool total and used_percentage after update
+      ansible.builtin.debug:
+        msg: "VLAN Pool - total: {{ vlan_update.vlan_pool.total }}, used_percentage: {{ vlan_update.vlan_pool.used_percentage }}"
 
     - name: Create same VLAN pool again (should not change)
       juniper.apstra.resource_pools:
@@ -479,6 +503,10 @@
       ansible.builtin.debug:
         var: ipv6_create
 
+    - name: Show IPv6 pool total and used_percentage after create
+      ansible.builtin.debug:
+        msg: "IPv6 Pool - total: {{ ipv6_create.ipv6_pool.total }}, used_percentage: {{ ipv6_create.ipv6_pool.used_percentage }}"
+
     - name: Update IPv6 pool
       juniper.apstra.resource_pools:
         type: ipv6
@@ -494,6 +522,10 @@
     - name: Display updated IPv6 pool
       ansible.builtin.debug:
         var: ipv6_update
+
+    - name: Show IPv6 pool total and used_percentage after update
+      ansible.builtin.debug:
+        msg: "IPv6 Pool - total: {{ ipv6_update.ipv6_pool.total }}, used_percentage: {{ ipv6_update.ipv6_pool.used_percentage }}"
 
     - name: Create same IPv6 pool again (should not change)
       juniper.apstra.resource_pools:
@@ -540,6 +572,10 @@
       ansible.builtin.debug:
         var: integer_create
 
+    - name: Show Integer pool total and used_percentage after create
+      ansible.builtin.debug:
+        msg: "Integer Pool - total: {{ integer_create.integer_pool.total }}, used_percentage: {{ integer_create.integer_pool.used_percentage }}"
+
     - name: Update Integer pool
       juniper.apstra.resource_pools:
         type: integer
@@ -557,6 +593,10 @@
     - name: Display updated Integer pool
       ansible.builtin.debug:
         var: integer_update
+
+    - name: Show Integer pool total and used_percentage after update
+      ansible.builtin.debug:
+        msg: "Integer Pool - total: {{ integer_update.integer_pool.total }}, used_percentage: {{ integer_update.integer_pool.used_percentage }}"
 
     - name: Create same Integer pool again (should not change)
       juniper.apstra.resource_pools:
@@ -638,6 +678,10 @@
     - name: Display created VNI pool
       ansible.builtin.debug:
         var: vni_create
+
+    - name: Show VNI pool total and used_percentage after create
+      ansible.builtin.debug:
+        msg: "VNI Pool - total: {{ vni_create.vni_pool.total }}, used_percentage: {{ vni_create.vni_pool.used_percentage }}"
 
     - name: Extract VNI pool ID
       ansible.builtin.set_fact:
@@ -721,6 +765,10 @@
     - name: Display updated VNI pool
       ansible.builtin.debug:
         var: vni_update
+
+    - name: Show VNI pool total and used_percentage after update
+      ansible.builtin.debug:
+        msg: "VNI Pool - total: {{ vni_update.vni_pool.total }}, used_percentage: {{ vni_update.vni_pool.used_percentage }}"
 
     - name: Verify VNI pool update is reflected in blueprint
       ansible.builtin.uri:

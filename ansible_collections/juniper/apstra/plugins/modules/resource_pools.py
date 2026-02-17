@@ -108,6 +108,13 @@ EXAMPLES = """
     state: present
   register: asn_pool
 
+- name: Show ASN pool total and used_percentage
+  ansible.builtin.debug:
+    msg: "ASN Pool {{ item.key }} - total: {{ item.value.total }}, used_percentage: {{ item.value.used_percentage }}"
+  loop: "{{ ansible_facts.apstra_facts.asn_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Get resource groups from blueprint
   ansible.builtin.uri:
     url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups"
@@ -193,6 +200,13 @@ EXAMPLES = """
     state: present
   register: ip_pool
 
+- name: Show IP pool total and used_percentage
+  ansible.builtin.debug:
+    msg: "IP Pool {{ item.key }} - total: {{ item.value.total }}, used_percentage: {{ item.value.used_percentage }}"
+  loop: "{{ ansible_facts.apstra_facts.ip_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Find IP resource group
   ansible.builtin.set_fact:
     ip_resource_group: >-
@@ -259,6 +273,13 @@ EXAMPLES = """
     state: present
   register: vlan_pool
 
+- name: Show VLAN pool total and used_percentage
+  ansible.builtin.debug:
+    msg: "VLAN Pool {{ item.key }} - total: {{ item.value.total }}, used_percentage: {{ item.value.used_percentage }}"
+  loop: "{{ ansible_facts.apstra_facts.vlan_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Find VLAN resource group
   ansible.builtin.set_fact:
     vlan_resource_group: >-
@@ -324,6 +345,13 @@ EXAMPLES = """
     state: present
   register: ipv6_pool
 
+- name: Show IPv6 pool total and used_percentage
+  ansible.builtin.debug:
+    msg: "IPv6 Pool {{ item.key }} - total: {{ item.value.total }}, used_percentage: {{ item.value.used_percentage }}"
+  loop: "{{ ansible_facts.apstra_facts.ipv6_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Find IPv6 resource group
   ansible.builtin.set_fact:
     ipv6_resource_group: >-
@@ -377,6 +405,47 @@ EXAMPLES = """
       ipv6_pool: "{{ ipv6_pool.id.ipv6_pool }}"
     state: absent
 
+# ── Integer Pool CRUD ───────────────────────────────────────────────
+
+- name: Create an Integer pool
+  juniper.apstra.resource_pools:
+    type: integer
+    body:
+      display_name: "Test-Integer-Pool"
+      ranges:
+        - first: 1000
+          last: 2000
+    state: present
+  register: integer_pool
+
+- name: Show Integer pool total and used_percentage
+  ansible.builtin.debug:
+    msg: "Integer Pool {{ item.key }} - total: {{ item.value.total }}, used_percentage: {{ item.value.used_percentage }}"
+  loop: "{{ ansible_facts.apstra_facts.integer_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Update an Integer pool
+  juniper.apstra.resource_pools:
+    type: integer
+    id:
+      integer_pool: "{{ integer_pool.id.integer_pool }}"
+    body:
+      display_name: "Updated-Integer-Pool"
+      ranges:
+        - first: 1000
+          last: 2000
+        - first: 3000
+          last: 4000
+    state: present
+
+- name: Delete an Integer pool
+  juniper.apstra.resource_pools:
+    type: integer
+    id:
+      integer_pool: "{{ integer_pool.id.integer_pool }}"
+    state: absent
+
 # ── VNI Pool CRUD with Blueprint Assignment ─────────────────────────
 
 - name: Create a VNI pool
@@ -389,6 +458,13 @@ EXAMPLES = """
           last: 6000
     state: present
   register: vni_pool
+
+- name: Show VNI pool total and used_percentage
+  ansible.builtin.debug:
+    msg: "VNI Pool {{ item.key }} - total: {{ item.value.total }}, used_percentage: {{ item.value.used_percentage }}"
+  loop: "{{ ansible_facts.apstra_facts.vni_pools | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 - name: Find VNI resource group
   ansible.builtin.set_fact:
