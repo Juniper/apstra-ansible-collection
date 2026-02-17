@@ -341,6 +341,7 @@ class ApstraClientFactory:
                 "ip_pools",
                 "ipv6_pools",
                 "devices",
+                "property_sets",
                 "vlan_pools",
                 "vni_pools",
             ],
@@ -353,6 +354,9 @@ class ApstraClientFactory:
                 "blueprints.routing_policies",
                 "blueprints.systems",
                 "blueprints.tags",
+            ],
+            "freeform_client": [
+                "blueprints.property_sets",
             ],
             "endpointpolicy_client": [
                 "blueprints.policy_types",
