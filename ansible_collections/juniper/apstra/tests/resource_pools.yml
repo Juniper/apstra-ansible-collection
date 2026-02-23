@@ -835,6 +835,270 @@
       ansible.builtin.debug:
         var: vni_delete
 
+    # ── Negative Validation Tests ───────────────────────────────────────
+    # These tests verify that the module rejects mismatched pool types
+    # and provides clear error messages.
+
+    # Test: Passing subnets (IP-style body) to an ASN pool should fail
+    - name: "NEGATIVE - Create ASN pool with subnets (should fail)"
+      juniper.apstra.resource_pools:
+        type: asn
+        body:
+          display_name: "Invalid-ASN-Pool-With-Subnets"
+          subnets:
+            - network: "10.100.0.0/16"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_asn_subnets
+      ignore_errors: true
+
+    - name: Assert ASN pool with subnets failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_asn_subnets is failed
+          - "'Invalid body for' in neg_asn_subnets.msg"
+          - "'asn' in neg_asn_subnets.msg"
+          - "'subnets' in neg_asn_subnets.msg"
+        success_msg: "ASN pool correctly rejected subnets with a clear error message"
+        fail_msg: "ASN pool should have rejected subnets body"
+
+    # Test: Passing ranges (ASN-style body) to an IP pool should fail
+    - name: "NEGATIVE - Create IP pool with ranges (should fail)"
+      juniper.apstra.resource_pools:
+        type: ip
+        body:
+          display_name: "Invalid-IP-Pool-With-Ranges"
+          ranges:
+            - first: 65000
+              last: 65100
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_ip_ranges
+      ignore_errors: true
+
+    - name: Assert IP pool with ranges failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_ip_ranges is failed
+          - "'Invalid body for' in neg_ip_ranges.msg"
+          - "'ip' in neg_ip_ranges.msg"
+          - "'ranges' in neg_ip_ranges.msg"
+        success_msg: "IP pool correctly rejected ranges with a clear error message"
+        fail_msg: "IP pool should have rejected ranges body"
+
+    # Test: Passing IPv4 address to an IPv6 pool should fail
+    - name: "NEGATIVE - Create IPv6 pool with IPv4 subnet (should fail)"
+      juniper.apstra.resource_pools:
+        type: ipv6
+        body:
+          display_name: "Invalid-IPv6-Pool-With-IPv4"
+          subnets:
+            - network: "10.100.0.0/16"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_ipv6_with_ipv4
+      ignore_errors: true
+
+    - name: Assert IPv6 pool with IPv4 subnet failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_ipv6_with_ipv4 is failed
+          - "'Invalid body for' in neg_ipv6_with_ipv4.msg"
+          - "'ipv6' in neg_ipv6_with_ipv4.msg"
+          - "'IPv4' in neg_ipv6_with_ipv4.msg"
+        success_msg: "IPv6 pool correctly rejected IPv4 subnet with a clear error message"
+        fail_msg: "IPv6 pool should have rejected IPv4 subnet"
+
+    # Test: Passing IPv6 address to an IPv4 pool should fail
+    - name: "NEGATIVE - Create IP pool with IPv6 subnet (should fail)"
+      juniper.apstra.resource_pools:
+        type: ip
+        body:
+          display_name: "Invalid-IP-Pool-With-IPv6"
+          subnets:
+            - network: "fc01:a05:fab::/48"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_ip_with_ipv6
+      ignore_errors: true
+
+    - name: Assert IP pool with IPv6 subnet failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_ip_with_ipv6 is failed
+          - "'Invalid body for' in neg_ip_with_ipv6.msg"
+          - "'ip' in neg_ip_with_ipv6.msg"
+          - "'IPv6' in neg_ip_with_ipv6.msg"
+        success_msg: "IP pool correctly rejected IPv6 subnet with a clear error message"
+        fail_msg: "IP pool should have rejected IPv6 subnet"
+
+    # Test: Passing subnets to a VLAN pool should fail
+    - name: "NEGATIVE - Create VLAN pool with subnets (should fail)"
+      juniper.apstra.resource_pools:
+        type: vlan
+        body:
+          display_name: "Invalid-VLAN-Pool-With-Subnets"
+          subnets:
+            - network: "10.100.0.0/16"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_vlan_subnets
+      ignore_errors: true
+
+    - name: Assert VLAN pool with subnets failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_vlan_subnets is failed
+          - "'Invalid body for' in neg_vlan_subnets.msg"
+          - "'vlan' in neg_vlan_subnets.msg"
+          - "'subnets' in neg_vlan_subnets.msg"
+        success_msg: "VLAN pool correctly rejected subnets with a clear error message"
+        fail_msg: "VLAN pool should have rejected subnets body"
+
+    # Test: VLAN range values outside 1-4094 should fail
+    - name: "NEGATIVE - Create VLAN pool with out-of-range values (should fail)"
+      juniper.apstra.resource_pools:
+        type: vlan
+        body:
+          display_name: "Invalid-VLAN-Pool-Out-Of-Range"
+          ranges:
+            - first: 1
+              last: 5000
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_vlan_out_of_range
+      ignore_errors: true
+
+    - name: Assert VLAN pool with out-of-range values failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_vlan_out_of_range is failed
+          - "'Invalid body for' in neg_vlan_out_of_range.msg"
+          - "'vlan' in neg_vlan_out_of_range.msg"
+          - "'outside the valid' in neg_vlan_out_of_range.msg"
+        success_msg: "VLAN pool correctly rejected out-of-range values with a clear error message"
+        fail_msg: "VLAN pool should have rejected out-of-range values"
+
+    # Test: Range with first > last should fail
+    - name: "NEGATIVE - Create ASN pool with first > last (should fail)"
+      juniper.apstra.resource_pools:
+        type: asn
+        body:
+          display_name: "Invalid-ASN-Pool-Inverted-Range"
+          ranges:
+            - first: 65200
+              last: 65000
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_asn_inverted
+      ignore_errors: true
+
+    - name: Assert ASN pool with inverted range failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_asn_inverted is failed
+          - "'Invalid body for' in neg_asn_inverted.msg"
+          - "'first' in neg_asn_inverted.msg"
+          - "'greater than' in neg_asn_inverted.msg"
+        success_msg: "ASN pool correctly rejected inverted range with a clear error message"
+        fail_msg: "ASN pool should have rejected inverted range"
+
+    # Test: Passing ranges to an IPv6 pool should fail
+    - name: "NEGATIVE - Create IPv6 pool with ranges (should fail)"
+      juniper.apstra.resource_pools:
+        type: ipv6
+        body:
+          display_name: "Invalid-IPv6-Pool-With-Ranges"
+          ranges:
+            - first: 65000
+              last: 65100
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_ipv6_ranges
+      ignore_errors: true
+
+    - name: Assert IPv6 pool with ranges failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_ipv6_ranges is failed
+          - "'Invalid body for' in neg_ipv6_ranges.msg"
+          - "'ipv6' in neg_ipv6_ranges.msg"
+          - "'ranges' in neg_ipv6_ranges.msg"
+        success_msg: "IPv6 pool correctly rejected ranges with a clear error message"
+        fail_msg: "IPv6 pool should have rejected ranges body"
+
+    # Test: Invalid CIDR notation should fail
+    - name: "NEGATIVE - Create IP pool with invalid CIDR (should fail)"
+      juniper.apstra.resource_pools:
+        type: ip
+        body:
+          display_name: "Invalid-IP-Pool-Bad-CIDR"
+          subnets:
+            - network: "not-a-cidr"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_ip_bad_cidr
+      ignore_errors: true
+
+    - name: Assert IP pool with invalid CIDR failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_ip_bad_cidr is failed
+          - "'Invalid body for' in neg_ip_bad_cidr.msg"
+          - "'not a valid CIDR' in neg_ip_bad_cidr.msg"
+        success_msg: "IP pool correctly rejected invalid CIDR with a clear error message"
+        fail_msg: "IP pool should have rejected invalid CIDR notation"
+
+    # Test: Passing subnets to a VNI pool should fail
+    - name: "NEGATIVE - Create VNI pool with subnets (should fail)"
+      juniper.apstra.resource_pools:
+        type: vni
+        body:
+          display_name: "Invalid-VNI-Pool-With-Subnets"
+          subnets:
+            - network: "10.100.0.0/16"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_vni_subnets
+      ignore_errors: true
+
+    - name: Assert VNI pool with subnets failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_vni_subnets is failed
+          - "'Invalid body for' in neg_vni_subnets.msg"
+          - "'vni' in neg_vni_subnets.msg"
+          - "'subnets' in neg_vni_subnets.msg"
+        success_msg: "VNI pool correctly rejected subnets with a clear error message"
+        fail_msg: "VNI pool should have rejected subnets body"
+
+    # Test: Passing subnets to an Integer pool should fail
+    - name: "NEGATIVE - Create Integer pool with subnets (should fail)"
+      juniper.apstra.resource_pools:
+        type: integer
+        body:
+          display_name: "Invalid-Integer-Pool-With-Subnets"
+          subnets:
+            - network: "10.100.0.0/16"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_integer_subnets
+      ignore_errors: true
+
+    - name: Assert Integer pool with subnets failed with proper message
+      ansible.builtin.assert:
+        that:
+          - neg_integer_subnets is failed
+          - "'Invalid body for' in neg_integer_subnets.msg"
+          - "'integer' in neg_integer_subnets.msg"
+          - "'subnets' in neg_integer_subnets.msg"
+        success_msg: "Integer pool correctly rejected subnets with a clear error message"
+        fail_msg: "Integer pool should have rejected subnets body"
+
+    - name: "SUMMARY - All negative validation tests passed"
+      ansible.builtin.debug:
+        msg: "All input validation tests passed - the module correctly rejects mismatched pool type/body combinations"
+
     # ── Cleanup ─────────────────────────────────────────────────────────
 
     - name: Delete virtual network used for VNI testing
