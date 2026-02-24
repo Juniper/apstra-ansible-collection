@@ -195,6 +195,9 @@ EXAMPLES = """
               bfd: false
               ipv4_safi: true
               ipv6_safi: false
+              ttl: 2
+              session_addressing_ipv4: addressed
+              session_addressing_ipv6: link_local
               peer_from: interface
               peer_to: interface_or_ip_endpoint
               neighbor_asn_type: dynamic
@@ -353,6 +356,9 @@ EXAMPLES = """
           bfd: true
           ipv4_safi: true
           ipv6_safi: false
+          ttl: 2
+          session_addressing_ipv4: addressed
+          session_addressing_ipv6: link_local
           peer_from: interface
           peer_to: interface_or_ip_endpoint
           neighbor_asn_type: dynamic
@@ -373,6 +379,8 @@ EXAMPLES = """
           ipv4_enabled: true
           ipv6_enabled: false
           ttl: 1
+          session_addressing_ipv4: addressed
+          session_addressing_ipv6: link_local
           bfd: false
           password: ""
           routing_policies:
@@ -433,6 +441,8 @@ EXAMPLES = """
           ipv6_safi: false
           bfd: false
           ttl: 2
+          session_addressing_ipv4: addressed
+          session_addressing_ipv6: link_local
           password: ""
           routing_policies:
             lo_rp: {}
@@ -480,6 +490,8 @@ EXAMPLES = """
           ipv6_safi: false
           bfd: true
           ttl: 1
+          session_addressing_ipv4: addressed
+          session_addressing_ipv6: link_local
           routing_policies:
             ep_rp:
               rp_to_attach: "{{ routing_policy_id }}"
@@ -628,6 +640,108 @@ def _export_ct(ep_client, blueprint_id, ct_id):
     return parse_ct_export(export_data)
 
 
+def _get_ct_assignments(ep_client, blueprint_id, ct_id):
+    """Get the list of application point IDs that have this CT assigned.
+
+    Returns a list of application-point IDs (interface node IDs) where the
+    given *ct_id* is currently applied.  Walks the
+    ``endpoint-policies/{ct_id}/application-points`` tree.
+    """
+    try:
+        app_points = (
+            ep_client.blueprints[blueprint_id]
+            .endpoint_policies[ct_id]
+            .application_points.get()
+        )
+        states = {}
+        _walk_ct_app_points(app_points, ct_id, states)
+        return [
+            intf_id for intf_id, state in states.items() if state.startswith("used")
+        ]
+    except Exception:
+        return []
+
+
+def _walk_ct_app_points(node, ct_id, states):
+    """Recursively walk the app-points tree and extract interface states."""
+    if not isinstance(node, dict):
+        return
+
+    if node.get("type") == "interface":
+        for pol in node.get("policies", []):
+            if pol.get("policy") == ct_id:
+                states[node["id"]] = pol.get("state", "unused")
+
+    for child in node.get("children", []):
+        _walk_ct_app_points(child, ct_id, states)
+
+    ap = node.get("application_points")
+    if isinstance(ap, dict):
+        for child in ap.get("children", []):
+            _walk_ct_app_points(child, ct_id, states)
+
+
+def _unassign_ct(ep_client, blueprint_id, ct_id, app_point_ids):
+    """Remove CT assignment from given application points."""
+    if not app_point_ids:
+        return
+    from aos.sdk.reference_design.extension.endpoint_policy import (
+        generator as ct_gen,
+    )
+
+    dto = ct_gen.gen_apply_unapply(
+        ct_id,
+        app_point_ids_unapply=app_point_ids,
+    )
+    payload = ct_gen.create_batch_apply_unapply_ct(dto)
+    ep_client.blueprints[blueprint_id].obj_policy_batch_apply.patch(payload)
+
+
+def _reassign_ct(ep_client, blueprint_id, new_ct_id, app_point_ids):
+    """Re-apply CT to previously assigned application points."""
+    if not app_point_ids:
+        return
+    from aos.sdk.reference_design.extension.endpoint_policy import (
+        generator as ct_gen,
+    )
+
+    dto = ct_gen.gen_apply_unapply(
+        new_ct_id,
+        app_point_ids_apply=app_point_ids,
+    )
+    payload = ct_gen.create_batch_apply_unapply_ct(dto)
+    ep_client.blueprints[blueprint_id].obj_policy_batch_apply.patch(payload)
+
+
+def _refresh_rp_bindings(ep_client, blueprint_id, hierarchy):
+    """PATCH routing-policy primitives so the Apstra UI renders them.
+
+    The ``obj-policy-import`` batch API stores ``rp_to_attach`` correctly
+    as a text attribute but does not create the internal graph edge that
+    the UI needs to populate the "Routing Policy" dropdown.  A follow-up
+    PATCH on each AttachExistingRoutingPolicy primitive re-writes the
+    same value through the per-primitive API path which does create the
+    graph edge.
+
+    Parameters
+    ----------
+    ep_client : endpointPolicyClient
+        The endpoint policy SDK client.
+    blueprint_id : str
+        The blueprint ID.
+    hierarchy : list[dict]
+        The policy hierarchy returned by ``ct_gen.create_ct_with_hierarchy()``.
+    """
+    rp_type = "AttachExistingRoutingPolicy"
+    for pol in hierarchy:
+        if pol.get("policy_type_name") == rp_type and pol.get("attributes", {}).get(
+            "rp_to_attach"
+        ):
+            ep_client.blueprints[blueprint_id].endpoint_policies[pol["id"]].patch(
+                {"attributes": {"rp_to_attach": pol["attributes"]["rp_to_attach"]}}
+            )
+
+
 # ── Main module logic ─────────────────────────────────────────────────────────
 
 
@@ -715,6 +829,13 @@ def main():
                 prims_changed = current_norm != desired_norm
 
                 if prims_changed or desc_changed or tags_changed:
+                    # Save existing assignments before deleting
+                    saved_app_points = _get_ct_assignments(
+                        ep_client, blueprint_id, ct_id
+                    )
+                    if saved_app_points:
+                        _unassign_ct(ep_client, blueprint_id, ct_id, saved_app_points)
+
                     # Delete old CT and recreate (atomic replace)
                     ep_client.blueprints[blueprint_id].endpoint_policies[ct_id].delete()
 
@@ -722,8 +843,14 @@ def main():
                         ct_name, primitives, description, tags
                     )
                     ep_client.blueprints[blueprint_id].obj_policy_import.put(payload)
+                    _refresh_rp_bindings(ep_client, blueprint_id, hierarchy)
 
                     ct_id = get_ct_id_from_hierarchy(hierarchy)
+
+                    # Restore assignments to the new CT
+                    if saved_app_points:
+                        _reassign_ct(ep_client, blueprint_id, ct_id, saved_app_points)
+
                     result["changed"] = True
                     result["msg"] = "connectivity_template updated successfully"
                 else:
@@ -737,6 +864,7 @@ def main():
                     ct_name, primitives, description, tags
                 )
                 ep_client.blueprints[blueprint_id].obj_policy_import.put(payload)
+                _refresh_rp_bindings(ep_client, blueprint_id, hierarchy)
 
                 ct_id = get_ct_id_from_hierarchy(hierarchy)
                 result["changed"] = True
@@ -770,6 +898,11 @@ def main():
                 ct_id, _ = _find_ct_by_name(ep_client, blueprint_id, name)
 
             if ct_id:
+                # Unassign from all application points before deleting
+                saved_app_points = _get_ct_assignments(ep_client, blueprint_id, ct_id)
+                if saved_app_points:
+                    _unassign_ct(ep_client, blueprint_id, ct_id, saved_app_points)
+
                 ep_client.blueprints[blueprint_id].endpoint_policies[ct_id].delete()
                 result["changed"] = True
                 result["msg"] = "connectivity_template deleted successfully"

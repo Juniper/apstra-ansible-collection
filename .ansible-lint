@@ -2,18 +2,4 @@
 profile: min
 
 mock_modules:
-  - juniper.apstra.apstra_facts
-  - juniper.apstra.authenticate
-  - juniper.apstra.blueprint
-  - juniper.apstra.configlets
-  - juniper.apstra.connectivity_template
-  - juniper.apstra.connectivity_template_assignment
-  - juniper.apstra.endpoint_policy
-  - juniper.apstra.external_gateway
-  - juniper.apstra.property_set
-  - juniper.apstra.resource_group
-  - juniper.apstra.resource_pools
-  - juniper.apstra.routing_policy
-  - juniper.apstra.security_zone
-  - juniper.apstra.tag
-  - juniper.apstra.virtual_network
+  - juniper

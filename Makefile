@@ -181,6 +181,10 @@ test-customize_external_gateway: install
 	@if [ -z "$(BLUEPRINT_ID)" ]; then echo "ERROR: BLUEPRINT_ID is required. Usage: make test-customize_external_gateway BLUEPRINT_ID=<id>"; exit 1; fi
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_external_gateway.yml -e blueprint_id=$(BLUEPRINT_ID)
 
+test-customize_connectivity_template: install
+	@if [ -z "$(BLUEPRINT_ID)" ]; then echo "ERROR: BLUEPRINT_ID is required. Usage: make test-customize_connectivity_template BLUEPRINT_ID=<id>"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_connectivity_template.yml -e blueprint_id=$(BLUEPRINT_ID)
+
 test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-property_set test-resource_pools test-external_gateway
 test-connectivity_template: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/connectivity_template.yml
