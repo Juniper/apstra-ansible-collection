@@ -135,7 +135,8 @@ install: build
 	test-property_set \
 	test-external_gateway \
 	test-connectivity_template \
-	test-configlets
+	test-configlets \
+	test-generic_systems
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -185,14 +186,19 @@ test-customize_connectivity_template: install
 	@if [ -z "$(BLUEPRINT_ID)" ]; then echo "ERROR: BLUEPRINT_ID is required. Usage: make test-customize_connectivity_template BLUEPRINT_ID=<id>"; exit 1; fi
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_connectivity_template.yml -e blueprint_id=$(BLUEPRINT_ID)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-property_set test-resource_pools test-external_gateway
 test-connectivity_template: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/connectivity_template.yml
 
 test-configlets: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/configlets.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools
+test-generic_systems: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/generic_systems.yml
+
+test-customize_generic_systems: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_generic_systems.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems
 
 clean-pipenv:
 	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true

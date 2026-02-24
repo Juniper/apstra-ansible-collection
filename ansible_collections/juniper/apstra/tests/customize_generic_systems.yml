@@ -1,0 +1,792 @@
+---
+# =================================================================
+#  customize_generic_systems  --  existing-blueprint test playbook
+#
+#  Tests generic_systems module against a LIVE blueprint.
+#  Auto-discovers the first available leaf / spine and picks the
+#  next free interfaces.
+#
+#  Required:
+#    blueprint_id   - set in vars below (or override with -e)
+#
+#  Optional overrides (auto-discovered when omitted):
+#    leaf_switch_id    - node-ID of the leaf to use
+#    spine_id          - node-ID of the spine to use
+#    if_transform_id   - interface transform ID (default 1)
+#
+#  Usage:
+#    cd apstra-ansible-collection
+#    pipenv run ansible-playbook -v \
+#      ansible_collections/juniper/apstra/tests/customize_generic_systems.yml
+#
+#    # With overrides:
+#    pipenv run ansible-playbook -v \
+#      ansible_collections/juniper/apstra/tests/customize_generic_systems.yml \
+#      -e blueprint_id=<uuid> -e leaf_switch_id=<id>
+# =================================================================
+- name: Test generic_systems on existing blueprint (auto-discovery)
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
+    blueprint_id: "839079b7-7145-4048-bfe3-8ddb5868201f"
+    if_transform_id: 1
+  tasks:
+
+    # =================================================================
+    #  Validate & Authenticate
+    # =================================================================
+
+    - name: Validate blueprint_id is provided
+      ansible.builtin.assert:
+        that:
+          - blueprint_id is defined
+          - blueprint_id | length > 0
+        fail_msg: "blueprint_id is required. Set it in vars or pass via -e blueprint_id=<uuid>"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # =================================================================
+    #  Auto-discover leaf switch
+    # =================================================================
+
+    - name: Query leaf switches in blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body:
+          query: "node('system', role='leaf', name='leaf')"
+        validate_certs: false
+        status_code: 200
+      register: leaves_qe
+
+    - name: Fail if no leaves found
+      ansible.builtin.assert:
+        that:
+          - leaves_qe.json['items'] | length > 0
+        fail_msg: "No leaf switches found in blueprint {{ blueprint_id }}"
+
+    - name: Select target leaf
+      ansible.builtin.set_fact:
+        target_leaf_id: "{{ leaf_switch_id | default(leaves_qe.json['items'][0].leaf.id) }}"
+
+    - name: Resolve target leaf label
+      ansible.builtin.set_fact:
+        target_leaf_label: >-
+          {{ leaves_qe.json['items']
+             | map(attribute='leaf')
+             | selectattr('id', 'equalto', target_leaf_id)
+             | map(attribute='label')
+             | first | default('unknown') }}
+
+    - name: Display selected leaf
+      ansible.builtin.debug:
+        msg: "Target leaf: {{ target_leaf_label }} ({{ target_leaf_id }})"
+
+    # -- Discover free interfaces on the leaf --------------------------
+
+    - name: Query all interfaces on target leaf
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body:
+          query: >-
+            node('system', id='{{ target_leaf_id }}', name='sys')
+            .out('hosted_interfaces')
+            .node('interface', name='intf')
+        validate_certs: false
+        status_code: 200
+      register: leaf_all_intf_qe
+
+    - name: Extract physical interface names on leaf
+      ansible.builtin.set_fact:
+        leaf_phys_if_names: >-
+          {{ leaf_all_intf_qe.json['items']
+             | map(attribute='intf')
+             | map(attribute='if_name')
+             | select('match', '^(ge|xe|et)-')
+             | list }}
+
+    - name: Compute interface prefix and max used port on leaf
+      ansible.builtin.set_fact:
+        leaf_if_prefix: >-
+          {{ (leaf_phys_if_names | first | regex_replace('[^/]+$', ''))
+             if leaf_phys_if_names | length > 0 else 'ge-0/0/' }}
+        leaf_max_port: >-
+          {{ leaf_phys_if_names
+             | map('regex_replace', '^.*/', '')
+             | map('int')
+             | max | default(-1) | int }}
+
+    - name: Set 4 free interfaces on leaf
+      ansible.builtin.set_fact:
+        test_leaf_if_1: "{{ leaf_if_prefix | trim }}{{ leaf_max_port | int + 1 }}"
+        test_leaf_if_2: "{{ leaf_if_prefix | trim }}{{ leaf_max_port | int + 2 }}"
+        test_leaf_if_3: "{{ leaf_if_prefix | trim }}{{ leaf_max_port | int + 3 }}"
+        test_leaf_if_4: "{{ leaf_if_prefix | trim }}{{ leaf_max_port | int + 4 }}"
+
+    - name: Display leaf interface plan
+      ansible.builtin.debug:
+        msg: >-
+          Leaf {{ target_leaf_label }}:
+          max used port={{ leaf_max_port | int }},
+          will use {{ test_leaf_if_1 }}, {{ test_leaf_if_2 }},
+          {{ test_leaf_if_3 }}, {{ test_leaf_if_4 }}
+
+    # =================================================================
+    #  Auto-discover spine switch
+    # =================================================================
+
+    - name: Query spine switches in blueprint
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body:
+          query: "node('system', role='spine', name='spine')"
+        validate_certs: false
+        status_code: 200
+      register: spines_qe
+
+    - name: Fail if no spines found
+      ansible.builtin.assert:
+        that:
+          - spines_qe.json['items'] | length > 0
+        fail_msg: "No spine switches found in blueprint {{ blueprint_id }}"
+
+    - name: Select target spine
+      ansible.builtin.set_fact:
+        target_spine_id: "{{ spine_id | default(spines_qe.json['items'][0].spine.id) }}"
+
+    - name: Resolve target spine label
+      ansible.builtin.set_fact:
+        target_spine_label: >-
+          {{ spines_qe.json['items']
+             | map(attribute='spine')
+             | selectattr('id', 'equalto', target_spine_id)
+             | map(attribute='label')
+             | first | default('unknown') }}
+
+    - name: Display selected spine
+      ansible.builtin.debug:
+        msg: "Target spine: {{ target_spine_label }} ({{ target_spine_id }})"
+
+    # -- Discover free interfaces on the spine -------------------------
+
+    - name: Query all interfaces on target spine
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body:
+          query: >-
+            node('system', id='{{ target_spine_id }}', name='sys')
+            .out('hosted_interfaces')
+            .node('interface', name='intf')
+        validate_certs: false
+        status_code: 200
+      register: spine_all_intf_qe
+
+    - name: Extract physical interface names on spine
+      ansible.builtin.set_fact:
+        spine_phys_if_names: >-
+          {{ spine_all_intf_qe.json['items']
+             | map(attribute='intf')
+             | map(attribute='if_name')
+             | select('match', '^(ge|xe|et)-')
+             | list }}
+
+    - name: Compute interface prefix and max used port on spine
+      ansible.builtin.set_fact:
+        spine_if_prefix: >-
+          {{ (spine_phys_if_names | first | regex_replace('[^/]+$', ''))
+             if spine_phys_if_names | length > 0 else 'ge-0/0/' }}
+        spine_max_port: >-
+          {{ spine_phys_if_names
+             | map('regex_replace', '^.*/', '')
+             | map('int')
+             | max | default(-1) | int }}
+
+    - name: Set 1 free interface on spine
+      ansible.builtin.set_fact:
+        test_spine_if_1: "{{ spine_if_prefix | trim }}{{ spine_max_port | int + 1 }}"
+
+    - name: Display spine interface plan
+      ansible.builtin.debug:
+        msg: >-
+          Spine {{ target_spine_label }}:
+          max used port={{ spine_max_port | int }},
+          will use {{ test_spine_if_1 }}
+
+    # =================================================================
+    #  Show complete test plan
+    # =================================================================
+
+    - name: Display test plan
+      ansible.builtin.debug:
+        msg: |
+          ============ TEST PLAN ============
+          Blueprint  : {{ blueprint_id }}
+          Leaf       : {{ target_leaf_label }} ({{ target_leaf_id }})
+            if-1     : {{ test_leaf_if_1 }}  (single-link tests)
+            if-2     : {{ test_leaf_if_2 }}  (LAG link 1)
+            if-3     : {{ test_leaf_if_3 }}  (LAG link 2)
+            if-4     : {{ test_leaf_if_4 }}  (delete-by-name test)
+          Spine      : {{ target_spine_label }} ({{ target_spine_id }})
+            if-1     : {{ test_spine_if_1 }}  (external GS context)
+          Transform  : {{ if_transform_id }}
+          ===================================
+
+    # =================================================================
+    #  TEST 1: Create generic system with a single link on leaf
+    # =================================================================
+
+    - name: "TEST 1 - Create generic system with a single link"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-gs-leaf-01"
+        hostname: "cust-gs-leaf-01"
+        tags:
+          - "server"
+          - "test"
+        deploy_mode: "deploy"
+        links:
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_1 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            tags:
+              - "10G"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_create
+
+    - name: Display created generic system
+      ansible.builtin.debug:
+        var: gs_create
+
+    - name: Verify generic system was created
+      ansible.builtin.assert:
+        that:
+          - gs_create.changed
+          - gs_create.system_id is defined
+          - gs_create.blueprint_id == blueprint_id
+          - gs_create.links | length > 0
+          - gs_create.msg == "generic system created successfully"
+        fail_msg: "TEST 1 FAILED: Generic system creation"
+        success_msg: "TEST 1 PASSED: Generic system created"
+
+    - name: Save system ID
+      ansible.builtin.set_fact:
+        gs_system_id: "{{ gs_create.system_id }}"
+
+    # =================================================================
+    #  TEST 2: Create idempotency
+    # =================================================================
+
+    - name: "TEST 2 - Create same generic system again (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-gs-leaf-01"
+        hostname: "cust-gs-leaf-01"
+        tags:
+          - "server"
+          - "test"
+        deploy_mode: "deploy"
+        links:
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_1 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            tags:
+              - "10G"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_create_idem
+
+    - name: Verify create idempotency
+      ansible.builtin.assert:
+        that:
+          - not gs_create_idem.changed
+        fail_msg: "TEST 2 FAILED: Create idempotency"
+        success_msg: "TEST 2 PASSED: Create idempotency - no change"
+
+    # =================================================================
+    #  TEST 3: Update hostname and name
+    # =================================================================
+
+    - name: "TEST 3 - Update generic system hostname and name"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ gs_system_id }}"
+        name: "cust-gs-leaf-01-updated"
+        hostname: "cust-gs-leaf-01-updated"
+        tags:
+          - "server"
+          - "test"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_update
+
+    - name: Display update result
+      ansible.builtin.debug:
+        var: gs_update
+
+    - name: Verify generic system was updated
+      ansible.builtin.assert:
+        that:
+          - gs_update.changed
+          - gs_update.changes is defined
+          - gs_update.hostname == "cust-gs-leaf-01-updated"
+          - gs_update.name == "cust-gs-leaf-01-updated"
+        fail_msg: "TEST 3 FAILED: Generic system update"
+        success_msg: "TEST 3 PASSED: Generic system updated"
+
+    # =================================================================
+    #  TEST 4: Update idempotency
+    # =================================================================
+
+    - name: "TEST 4 - Update with same values (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ gs_system_id }}"
+        name: "cust-gs-leaf-01-updated"
+        hostname: "cust-gs-leaf-01-updated"
+        tags:
+          - "server"
+          - "test"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_update_idem
+
+    - name: Verify update idempotency
+      ansible.builtin.assert:
+        that:
+          - not gs_update_idem.changed
+        fail_msg: "TEST 4 FAILED: Update idempotency"
+        success_msg: "TEST 4 PASSED: Update idempotency - no change"
+
+    # =================================================================
+    #  TEST 5: Update deploy mode
+    # =================================================================
+
+    - name: "TEST 5 - Change deploy mode to ready"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ gs_system_id }}"
+        deploy_mode: "ready"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_deploy_mode
+
+    - name: Verify deploy mode was updated
+      ansible.builtin.assert:
+        that:
+          - gs_deploy_mode.changed
+          - gs_deploy_mode.deploy_mode == "ready"
+        fail_msg: "TEST 5 FAILED: Deploy mode update"
+        success_msg: "TEST 5 PASSED: Deploy mode updated to ready"
+
+    # =================================================================
+    #  TEST 6: Update tags
+    # =================================================================
+
+    - name: "TEST 6 - Update tags"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ gs_system_id }}"
+        tags:
+          - "server"
+          - "test"
+          - "updated"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_tags_update
+
+    - name: Verify tags were updated
+      ansible.builtin.assert:
+        that:
+          - gs_tags_update.changed
+          - "'updated' in gs_tags_update.tags"
+        fail_msg: "TEST 6 FAILED: Tags update"
+        success_msg: "TEST 6 PASSED: Tags updated"
+
+    # =================================================================
+    #  TEST 7: Delete generic system
+    # =================================================================
+
+    - name: "TEST 7 - Delete generic system"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ gs_system_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gs_delete
+
+    - name: Verify generic system was deleted
+      ansible.builtin.assert:
+        that:
+          - gs_delete.changed
+        fail_msg: "TEST 7 FAILED: Generic system deletion"
+        success_msg: "TEST 7 PASSED: Generic system deleted"
+
+    # =================================================================
+    #  TEST 8: Delete idempotency
+    # =================================================================
+
+    - name: "TEST 8 - Delete same system again (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ gs_system_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gs_delete_idem
+
+    - name: Verify delete idempotency
+      ansible.builtin.assert:
+        that:
+          - not gs_delete_idem.changed
+        fail_msg: "TEST 8 FAILED: Delete idempotency"
+        success_msg: "TEST 8 PASSED: Delete idempotency - no change"
+
+    # =================================================================
+    #  TEST 9: Create generic system with dual LAG links
+    # =================================================================
+
+    - name: "TEST 9 - Create generic system with dual LAG links"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-lag-server"
+        hostname: "cust-lag-server"
+        tags:
+          - "server"
+          - "lag"
+        links:
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_2 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            lag_mode: "lacp_active"
+            group_label: "bond0"
+            tags: ["10G", "bond0"]
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_3 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            lag_mode: "lacp_active"
+            group_label: "bond0"
+            tags: ["10G", "bond0"]
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: lag_gs_create
+
+    - name: Verify LAG generic system was created
+      ansible.builtin.assert:
+        that:
+          - lag_gs_create.changed
+          - lag_gs_create.links | length == 2
+          - lag_gs_create.system_id is defined
+        fail_msg: "TEST 9 FAILED: LAG generic system creation"
+        success_msg: "TEST 9 PASSED: LAG generic system created with 2 links"
+
+    - name: Save LAG system ID
+      ansible.builtin.set_fact:
+        lag_system_id: "{{ lag_gs_create.system_id }}"
+
+    # =================================================================
+    #  TEST 10: LAG create idempotency
+    # =================================================================
+
+    - name: "TEST 10 - Create same LAG system again (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-lag-server"
+        hostname: "cust-lag-server"
+        tags:
+          - "server"
+          - "lag"
+        links:
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_2 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            lag_mode: "lacp_active"
+            group_label: "bond0"
+            tags: ["10G", "bond0"]
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_3 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            lag_mode: "lacp_active"
+            group_label: "bond0"
+            tags: ["10G", "bond0"]
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: lag_gs_idem
+
+    - name: Verify LAG create idempotency
+      ansible.builtin.assert:
+        that:
+          - not lag_gs_idem.changed
+        fail_msg: "TEST 10 FAILED: LAG create idempotency"
+        success_msg: "TEST 10 PASSED: LAG create idempotency - no change"
+
+    # =================================================================
+    #  TEST 11: Delete LAG generic system
+    # =================================================================
+
+    - name: "TEST 11 - Delete LAG generic system"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ lag_system_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: lag_gs_delete
+
+    - name: Verify LAG generic system was deleted
+      ansible.builtin.assert:
+        that:
+          - lag_gs_delete.changed
+        fail_msg: "TEST 11 FAILED: LAG generic system deletion"
+        success_msg: "TEST 11 PASSED: LAG generic system deleted"
+
+    # =================================================================
+    #  TEST 12: Create external generic system
+    # =================================================================
+
+    - name: "TEST 12 - Create external generic system linked to spine"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-ext-gs-01"
+        hostname: "cust-ext-gs-01"
+        external: true
+        links:
+          - target_switch_id: "{{ target_spine_id }}"
+            target_switch_if_name: "{{ test_spine_if_1 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            tags:
+              - "10G"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: ext_gs_create
+
+    - name: Display external GS result
+      ansible.builtin.debug:
+        var: ext_gs_create
+
+    - name: Verify external GS was created with link
+      ansible.builtin.assert:
+        that:
+          - ext_gs_create.changed
+          - ext_gs_create.system_id is defined
+          - ext_gs_create.links | length > 0
+        fail_msg: "TEST 12 FAILED: External GS creation"
+        success_msg: "TEST 12 PASSED: External GS created with spine link"
+
+    - name: Save external system ID
+      ansible.builtin.set_fact:
+        ext_system_id: "{{ ext_gs_create.system_id }}"
+
+    # =================================================================
+    #  TEST 13: External GS create idempotency
+    # =================================================================
+
+    - name: "TEST 13 - Create same external GS again (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-ext-gs-01"
+        hostname: "cust-ext-gs-01"
+        external: true
+        links:
+          - target_switch_id: "{{ target_spine_id }}"
+            target_switch_if_name: "{{ test_spine_if_1 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+            tags:
+              - "10G"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: ext_gs_idem
+
+    - name: Verify external GS create idempotency
+      ansible.builtin.assert:
+        that:
+          - not ext_gs_idem.changed
+        fail_msg: "TEST 13 FAILED: External GS create idempotency"
+        success_msg: "TEST 13 PASSED: External GS create idempotency - no change"
+
+    # =================================================================
+    #  TEST 14: Update external GS hostname
+    # =================================================================
+
+    - name: "TEST 14 - Update external GS hostname"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ ext_system_id }}"
+        name: "cust-ext-gs-01-updated"
+        hostname: "cust-ext-gs-01-updated"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: ext_gs_update
+
+    - name: Verify external GS was updated
+      ansible.builtin.assert:
+        that:
+          - ext_gs_update.changed
+          - ext_gs_update.hostname == "cust-ext-gs-01-updated"
+        fail_msg: "TEST 14 FAILED: External GS update"
+        success_msg: "TEST 14 PASSED: External GS updated"
+
+    # =================================================================
+    #  TEST 15: External GS update idempotency
+    # =================================================================
+
+    - name: "TEST 15 - Update external GS with same values (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ ext_system_id }}"
+        name: "cust-ext-gs-01-updated"
+        hostname: "cust-ext-gs-01-updated"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: ext_gs_update_idem
+
+    - name: Verify external GS update idempotency
+      ansible.builtin.assert:
+        that:
+          - not ext_gs_update_idem.changed
+        fail_msg: "TEST 15 FAILED: External GS update idempotency"
+        success_msg: "TEST 15 PASSED: External GS update idempotency - no change"
+
+    # =================================================================
+    #  TEST 16: Delete external GS
+    # =================================================================
+
+    - name: "TEST 16 - Delete external GS"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ ext_system_id }}"
+        external: true
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ext_gs_delete
+
+    - name: Verify external GS was deleted
+      ansible.builtin.assert:
+        that:
+          - ext_gs_delete.changed
+        fail_msg: "TEST 16 FAILED: External GS deletion"
+        success_msg: "TEST 16 PASSED: External GS deleted"
+
+    # =================================================================
+    #  TEST 17: External GS delete idempotency
+    # =================================================================
+
+    - name: "TEST 17 - Delete same external GS again (idempotency)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        system_id: "{{ ext_system_id }}"
+        external: true
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: ext_gs_delete_idem
+
+    - name: Verify external GS delete idempotency
+      ansible.builtin.assert:
+        that:
+          - not ext_gs_delete_idem.changed
+        fail_msg: "TEST 17 FAILED: External GS delete idempotency"
+        success_msg: "TEST 17 PASSED: External GS delete idempotency - no change"
+
+    # =================================================================
+    #  TEST 18: Delete by name (no system_id provided)
+    # =================================================================
+
+    - name: Create generic system for name-based deletion test
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-gs-delete-by-name"
+        hostname: "cust-gs-delete-by-name"
+        links:
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_4 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_for_name_delete
+
+    - name: "TEST 18 - Delete generic system by name"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "cust-gs-delete-by-name"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gs_name_delete
+
+    - name: Verify name-based deletion
+      ansible.builtin.assert:
+        that:
+          - gs_name_delete.changed
+        fail_msg: "TEST 18 FAILED: Name-based deletion"
+        success_msg: "TEST 18 PASSED: Generic system deleted by name"
+
+    # =================================================================
+    #  TEST 19-20: Validation / Error handling
+    # =================================================================
+
+    - name: "TEST 19 - Create without links or external (should fail)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "should-fail-no-links"
+        hostname: "should-fail-no-links"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: no_links_result
+      ignore_errors: true
+
+    - name: Verify missing links error
+      ansible.builtin.assert:
+        that:
+          - no_links_result is failed
+        fail_msg: "TEST 19 FAILED: Should have failed without links"
+        success_msg: "TEST 19 PASSED: Missing links error caught"
+
+    - name: "TEST 20 - Duplicate link endpoints (should fail)"
+      juniper.apstra.generic_systems:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "should-fail-dup-links"
+        hostname: "should-fail-dup-links"
+        links:
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_1 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+          - target_switch_id: "{{ target_leaf_id }}"
+            target_switch_if_name: "{{ test_leaf_if_1 }}"
+            target_switch_if_transform_id: "{{ if_transform_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: dup_links_result
+      ignore_errors: true
+
+    - name: Verify duplicate link error
+      ansible.builtin.assert:
+        that:
+          - dup_links_result is failed
+        fail_msg: "TEST 20 FAILED: Should have failed with duplicate links"
+        success_msg: "TEST 20 PASSED: Duplicate link error caught"
+
+    # =================================================================
+    #  Logout (do NOT destroy the blueprint)
+    # =================================================================
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
