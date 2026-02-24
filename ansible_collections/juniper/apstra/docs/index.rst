@@ -58,7 +58,6 @@ Modules
 * :ansplugin:`generic_systems module <juniper.apstra.generic_systems#module>` -- Manage generic systems in Apstra blueprints
 * :ansplugin:`resource_group module <juniper.apstra.resource_group#module>` -- Manage resource groups in Apstra
 * :ansplugin:`routing_policy module <juniper.apstra.routing_policy#module>` -- Manage routing policies in Apstra
-* :ansplugin:`routing_policy module <juniper.apstra.routing_policy#module>` -- Manage routing policies in Apstra
 * :ansplugin:`resource_pools module <juniper.apstra.resource_pools#module>` -- Manage resource pools in Apstra
 * :ansplugin:`security_zone module <juniper.apstra.security_zone#module>` -- Manage security zones in Apstra
 * :ansplugin:`tag module <juniper.apstra.tag#module>` -- Manage tags in Apstra
