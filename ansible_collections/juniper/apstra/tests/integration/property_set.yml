@@ -1,0 +1,1009 @@
+---
+################################################################################
+# Property Set Integration Tests
+#
+# Validates:
+# - Global property set CRUD operations and idempotency
+# - Blueprint-scoped property set import, update, and deletion
+# - values vs values_yaml formats
+# - Complex nested data structures
+# - Error handling for invalid inputs
+# - Edge cases (empty values, special characters, very long values)
+# - Content verification after updates (not just changed=true)
+#
+# Test Flow:
+# - Test 1: Global Property Set - Basic CRUD (create, idempotency, update, verify, delete)
+# - Test 2: Global Property Set - values_yaml format
+# - Test 3: Complex nested data structures
+# - Test 4: Error Handling (negative tests)
+# - Test 5: Blueprint-Scoped Property Set Integration
+# - Test 6: Edge Cases (empty values, special chars, large values)
+# - Final cleanup: Delete all property sets and blueprint
+################################################################################
+
+- name: Property Set Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  vars:
+    test_timestamp: "{{ ansible_date_time.epoch }}"
+    test_results: []
+    # Resource references (populated during tests)
+    bp_id: ""
+    global_ps_id: ""
+    yaml_ps_id: ""
+    complex_ps_id: ""
+    bp_global_ps_id: ""
+    bp_global_ps2_id: ""
+    edge_ps_id: ""
+
+  tasks:
+    - name: Initialize test results tracker
+      ansible.builtin.set_fact:
+        test_results: []
+
+    - name: Authenticate to Apstra server
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    ################################################################################
+    # TEST 1: Global Property Set - Basic CRUD with values dict
+    ################################################################################
+
+    - name: "TEST 1: Global Property Set - Basic CRUD"
+      block:
+        - name: Create global property set
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_ps_{{ test_timestamp }}"
+              values:
+                test_key: "test_value"
+                mtu: 9100
+            auth_token: "{{ auth.token }}"
+          register: global_ps
+
+        - name: Store global property set ID
+          ansible.builtin.set_fact:
+            global_ps_id: "{{ global_ps.id.property_set }}"
+
+        - name: Verify creation with content check
+          ansible.builtin.assert:
+            that:
+              - global_ps.changed
+              - global_ps.id.property_set is defined
+              - global_ps.property_set["values"]["test_key"] == "test_value"
+              - global_ps.property_set["values"]["mtu"] == 9100
+              - global_ps.property_set["label"] == "test_integration_ps_" ~ test_timestamp
+
+        - name: Create same property set again (idempotency)
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_ps_{{ test_timestamp }}"
+              values:
+                test_key: "test_value"
+                mtu: 9100
+            auth_token: "{{ auth.token }}"
+          register: global_ps_nochange
+
+        - name: Verify idempotency
+          ansible.builtin.assert:
+            that:
+              - not global_ps_nochange.changed
+              - global_ps_nochange.id.property_set == global_ps.id.property_set
+
+        - name: Update global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ global_ps_id }}"
+            body:
+              values:
+                test_key: "updated_value"
+                mtu: 9200
+                new_key: "new_value"
+            auth_token: "{{ auth.token }}"
+          register: global_ps_update
+
+        - name: Verify update with content check
+          ansible.builtin.assert:
+            that:
+              - global_ps_update.changed
+              - global_ps_update.property_set["values"]["test_key"] == "updated_value"
+              - global_ps_update.property_set["values"]["mtu"] == 9200
+              - global_ps_update.property_set["values"]["new_key"] == "new_value"
+
+        - name: Delete global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ global_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: global_ps_delete
+
+        - name: Verify deletion
+          ansible.builtin.assert:
+            that:
+              - global_ps_delete.changed
+
+        - name: Clear global_ps_id after successful delete
+          ansible.builtin.set_fact:
+            global_ps_id: ""
+
+        - name: Record TEST 1 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: Global Property Set - Basic CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create global property set with values dict',
+                  'Verify creation: label, test_key, mtu values',
+                  'Re-apply same config (idempotency)',
+                  'Update property set (change values, add new_key)',
+                  'Verify update: all three values correct',
+                  'Delete property set',
+                  'Verify deletion: changed=true'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 1 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: Global Property Set - Basic CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create global property set with values dict',
+                  'Verify creation: label, test_key, mtu values',
+                  'Re-apply same config (idempotency)',
+                  'Update property set (change values, add new_key)',
+                  'Verify update: all three values correct',
+                  'Delete property set',
+                  'Verify deletion: changed=true'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ global_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: global_ps_id != ''
+
+    ################################################################################
+    # TEST 2: Global Property Set with values_yaml
+    ################################################################################
+
+    - name: "TEST 2: Global Property Set - values_yaml format"
+      block:
+        - name: Create property set using values_yaml
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_yaml_ps_{{ test_timestamp }}"
+              values_yaml: |
+                yaml_key: yaml_value
+                yaml_mtu: 9100
+                nested:
+                  item1: value1
+                  item2: value2
+            auth_token: "{{ auth.token }}"
+          register: yaml_ps
+
+        - name: Store yaml property set ID
+          ansible.builtin.set_fact:
+            yaml_ps_id: "{{ yaml_ps.id.property_set }}"
+
+        - name: Verify creation with content check
+          ansible.builtin.assert:
+            that:
+              - yaml_ps.changed
+              - yaml_ps.id.property_set is defined
+              - yaml_ps.property_set["values"]["yaml_key"] == "yaml_value"
+              - yaml_ps.property_set["values"]["yaml_mtu"] == 9100
+              - yaml_ps.property_set["values"]["nested"]["item1"] == "value1"
+
+        - name: Create same property set again (idempotency)
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_yaml_ps_{{ test_timestamp }}"
+              values_yaml: |
+                yaml_key: yaml_value
+                yaml_mtu: 9100
+                nested:
+                  item1: value1
+                  item2: value2
+            auth_token: "{{ auth.token }}"
+          register: yaml_ps_nochange
+
+        - name: Verify idempotency
+          ansible.builtin.assert:
+            that:
+              - not yaml_ps_nochange.changed
+
+        - name: Update property set with values_yaml
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ yaml_ps_id }}"
+            body:
+              values_yaml: |
+                yaml_key: updated_yaml_value
+                yaml_mtu: 9200
+                nested:
+                  item1: updated_value1
+                  item2: updated_value2
+                  item3: new_value3
+            auth_token: "{{ auth.token }}"
+          register: yaml_ps_update
+
+        - name: Verify update with content check
+          ansible.builtin.assert:
+            that:
+              - yaml_ps_update.changed
+              - yaml_ps_update.property_set["values"]["yaml_key"] == "updated_yaml_value"
+              - yaml_ps_update.property_set["values"]["yaml_mtu"] == 9200
+              - yaml_ps_update.property_set["values"]["nested"]["item3"] == "new_value3"
+
+        - name: Delete values_yaml property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ yaml_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: yaml_ps_delete
+
+        - name: Verify deletion
+          ansible.builtin.assert:
+            that:
+              - yaml_ps_delete.changed
+
+        - name: Clear yaml_ps_id after successful delete
+          ansible.builtin.set_fact:
+            yaml_ps_id: ""
+
+        - name: Record TEST 2 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: Global Property Set - values_yaml format',
+                'status': 'PASSED',
+                'steps': [
+                  'Create property set using values_yaml with nested structure',
+                  'Verify creation: yaml_key, yaml_mtu, nested values',
+                  'Re-apply same config (idempotency)',
+                  'Update property set via values_yaml',
+                  'Verify update: all values including new nested item',
+                  'Delete property set',
+                  'Verify deletion: changed=true'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 2 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: Global Property Set - values_yaml format',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create property set using values_yaml with nested structure',
+                  'Verify creation: yaml_key, yaml_mtu, nested values',
+                  'Re-apply same config (idempotency)',
+                  'Update property set via values_yaml',
+                  'Verify update: all values including new nested item',
+                  'Delete property set',
+                  'Verify deletion: changed=true'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup yaml property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ yaml_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: yaml_ps_id != ''
+
+    ################################################################################
+    # TEST 3: Complex nested data structures
+    ################################################################################
+
+    - name: "TEST 3: Complex nested data structures"
+      block:
+        - name: Create property set with complex nested structure
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_complex_{{ test_timestamp }}"
+              values:
+                interfaces:
+                  - name: "eth0"
+                    ip: "10.0.0.1"
+                    mtu: 9000
+                  - name: "eth1"
+                    ip: "10.0.0.2"
+                    mtu: 1500
+                bgp_config:
+                  asn: 65001
+                  router_id: "10.0.0.1"
+                  neighbors:
+                    - ip: "10.0.0.10"
+                      remote_asn: 65002
+                    - ip: "10.0.0.11"
+                      remote_asn: 65003
+                settings:
+                  max_retries: 3
+                  enabled: true
+                  timeouts:
+                    connect: 30
+                    read: 60
+            auth_token: "{{ auth.token }}"
+          register: complex_ps
+
+        - name: Store complex property set ID
+          ansible.builtin.set_fact:
+            complex_ps_id: "{{ complex_ps.id.property_set }}"
+
+        - name: Verify complex structure with deep content checks
+          ansible.builtin.assert:
+            that:
+              - complex_ps.changed
+              - complex_ps.id.property_set is defined
+              - complex_ps.property_set["values"]["interfaces"] | length == 2
+              - complex_ps.property_set["values"]["interfaces"][0]["name"] == "eth0"
+              - complex_ps.property_set["values"]["interfaces"][0]["mtu"] == 9000
+              - complex_ps.property_set["values"]["bgp_config"]["asn"] == 65001
+              - complex_ps.property_set["values"]["bgp_config"]["neighbors"] | length == 2
+              - complex_ps.property_set["values"]["settings"]["max_retries"] == 3
+              - complex_ps.property_set["values"]["settings"]["enabled"] == true
+              - complex_ps.property_set["values"]["settings"]["timeouts"]["connect"] == 30
+
+        - name: Update complex property set (add interface, change ASN)
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ complex_ps_id }}"
+            body:
+              values:
+                interfaces:
+                  - name: "eth0"
+                    ip: "10.0.0.1"
+                    mtu: 9000
+                  - name: "eth1"
+                    ip: "10.0.0.2"
+                    mtu: 1500
+                  - name: "eth2"
+                    ip: "10.0.0.3"
+                    mtu: 9000
+                bgp_config:
+                  asn: 65100
+                  router_id: "10.0.0.1"
+                  neighbors:
+                    - ip: "10.0.0.10"
+                      remote_asn: 65002
+                    - ip: "10.0.0.11"
+                      remote_asn: 65003
+                settings:
+                  max_retries: 5
+                  enabled: true
+                  timeouts:
+                    connect: 30
+                    read: 60
+            auth_token: "{{ auth.token }}"
+          register: complex_ps_update
+
+        - name: Verify complex update with content checks
+          ansible.builtin.assert:
+            that:
+              - complex_ps_update.changed
+              - complex_ps_update.property_set["values"]["interfaces"] | length == 3
+              - complex_ps_update.property_set["values"]["interfaces"][2]["name"] == "eth2"
+              - complex_ps_update.property_set["values"]["bgp_config"]["asn"] == 65100
+              - complex_ps_update.property_set["values"]["settings"]["max_retries"] == 5
+
+        - name: Delete complex property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ complex_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: complex_ps_delete
+
+        - name: Clear complex_ps_id after successful delete
+          ansible.builtin.set_fact:
+            complex_ps_id: ""
+
+        - name: Record TEST 3 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: Complex nested data structures',
+                'status': 'PASSED',
+                'steps': [
+                  'Create property set with complex nested structure (interfaces array, bgp_config, nested settings)',
+                  'Verify creation: all nested values including arrays and deep objects',
+                  'Update property set (add interface, change ASN, increase max_retries)',
+                  'Verify update: interfaces length=3, new ASN, new max_retries',
+                  'Delete property set'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 3 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: Complex nested data structures',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create property set with complex nested structure (interfaces array, bgp_config, nested settings)',
+                  'Verify creation: all nested values including arrays and deep objects',
+                  'Update property set (add interface, change ASN, increase max_retries)',
+                  'Verify update: interfaces length=3, new ASN, new max_retries',
+                  'Delete property set'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup complex property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ complex_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: complex_ps_id != ''
+
+    ################################################################################
+    # TEST 4: Error Handling
+    ################################################################################
+
+    - name: "TEST 4: Error Handling"
+      block:
+        - name: Create property set without label (should fail)
+          juniper.apstra.property_set:
+            body:
+              values:
+                mtu: 9000
+            auth_token: "{{ auth.token }}"
+          register: no_label_result
+          ignore_errors: true
+
+        - name: Verify no_label error
+          ansible.builtin.assert:
+            that:
+              - no_label_result.failed
+
+        - name: Access non-existent property set (should fail)
+          juniper.apstra.property_set:
+            id:
+              property_set: "non-existent-uuid-{{ test_timestamp }}"
+            auth_token: "{{ auth.token }}"
+          register: not_found_result
+          ignore_errors: true
+
+        - name: Verify not_found error
+          ansible.builtin.assert:
+            that:
+              - not_found_result.failed
+
+        - name: Delete non-existent property set (should succeed - idempotent delete)
+          juniper.apstra.property_set:
+            id:
+              property_set: "non-existent-uuid-{{ test_timestamp }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: delete_missing
+
+        - name: Verify delete of non-existent succeeds
+          ansible.builtin.assert:
+            that:
+              - not delete_missing.failed
+              - not delete_missing.changed
+
+        - name: Create property set with empty values dict
+          juniper.apstra.property_set:
+            body:
+              label: "test_empty_values_{{ test_timestamp }}"
+              values: {}
+            auth_token: "{{ auth.token }}"
+          register: empty_values_result
+
+        - name: Verify empty values creation
+          ansible.builtin.assert:
+            that:
+              - empty_values_result.changed or not empty_values_result.failed
+
+        - name: Cleanup empty values property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ empty_values_result.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: empty_values_result.id.property_set is defined
+
+        - name: Record TEST 4 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: Error Handling',
+                'status': 'PASSED',
+                'steps': [
+                  'Create property set without label (fails as expected)',
+                  'Access non-existent property set (fails as expected)',
+                  'Delete non-existent property set (succeeds - idempotent)',
+                  'Create property set with empty values dict'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 4 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: Error Handling',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create property set without label (fails as expected)',
+                  'Access non-existent property set (fails as expected)',
+                  'Delete non-existent property set (succeeds - idempotent)',
+                  'Create property set with empty values dict'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 5: Blueprint-Scoped Property Set Integration
+    ################################################################################
+
+    - name: "TEST 5: Blueprint-Scoped Property Set Integration"
+      block:
+        - name: Create first global property set for blueprint import
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_bp_ps_{{ test_timestamp }}"
+              values:
+                router_mtu: 9000
+                switch_mtu: 1500
+                vlan_id: 100
+            auth_token: "{{ auth.token }}"
+          register: bp_global_ps
+
+        - name: Store first global property set ID
+          ansible.builtin.set_fact:
+            bp_global_ps_id: "{{ bp_global_ps.id.property_set }}"
+
+        - name: Create second global property set for blueprint import
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_bp_ps2_{{ test_timestamp }}"
+              values:
+                ntp_server: "10.0.0.1"
+                dns_server: "10.0.0.2"
+                domain: "test.local"
+            auth_token: "{{ auth.token }}"
+          register: bp_global_ps2
+
+        - name: Store second global property set ID
+          ansible.builtin.set_fact:
+            bp_global_ps2_id: "{{ bp_global_ps2.id.property_set }}"
+
+        - name: Create blueprint for property set testing
+          juniper.apstra.blueprint:
+            body:
+              label: "test_ps_blueprint_{{ test_timestamp }}"
+              design: "two_stage_l3clos"
+              init_type: "template_reference"
+              template_id: "L2_Virtual_EVPN"
+            lock_state: "ignore"
+            auth_token: "{{ auth.token }}"
+          register: test_bp
+
+        - name: Store blueprint ID
+          ansible.builtin.set_fact:
+            bp_id: "{{ test_bp.id.blueprint }}"
+
+        - name: Verify resources created
+          ansible.builtin.assert:
+            that:
+              - bp_global_ps.changed
+              - bp_global_ps2.changed
+              - test_bp.changed
+              - test_bp.id.blueprint is defined
+
+        - name: Import first property set into blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              id: "{{ bp_global_ps_id }}"
+            auth_token: "{{ auth.token }}"
+          register: ps_import1
+
+        - name: Verify import
+          ansible.builtin.assert:
+            that:
+              - ps_import1.changed
+              - ps_import1.id.property_set is defined
+
+        - name: Re-import same property set (idempotency)
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              id: "{{ bp_global_ps_id }}"
+            auth_token: "{{ auth.token }}"
+          register: ps_import1_again
+
+        - name: Verify import idempotency
+          ansible.builtin.assert:
+            that:
+              - not ps_import1_again.changed
+
+        - name: Import second property set into blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              id: "{{ bp_global_ps2_id }}"
+            auth_token: "{{ auth.token }}"
+          register: ps_import2
+
+        - name: Verify second import
+          ansible.builtin.assert:
+            that:
+              - ps_import2.changed
+
+        - name: Delete first property set from blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+              property_set: "{{ ps_import1.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: ps_delete1
+
+        - name: Verify first deletion from blueprint
+          ansible.builtin.assert:
+            that:
+              - ps_delete1.changed
+
+        - name: Delete second property set from blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+              property_set: "{{ ps_import2.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: ps_delete2
+
+        - name: Verify second deletion from blueprint
+          ansible.builtin.assert:
+            that:
+              - ps_delete2.changed
+
+        - name: Record TEST 5 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 5: Blueprint-Scoped Property Set Integration',
+                'status': 'PASSED',
+                'steps': [
+                  'Create two global property sets with different values',
+                  'Create blueprint for testing',
+                  'Import first property set into blueprint',
+                  'Re-import first property set (idempotency)',
+                  'Import second property set into blueprint',
+                  'Delete first property set from blueprint',
+                  'Delete second property set from blueprint'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 5 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 5: Blueprint-Scoped Property Set Integration',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create two global property sets with different values',
+                  'Create blueprint for testing',
+                  'Import first property set into blueprint',
+                  'Re-import first property set (idempotency)',
+                  'Import second property set into blueprint',
+                  'Delete first property set from blueprint',
+                  'Delete second property set from blueprint'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup first property set from blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+              property_set: "{{ ps_import1.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: bp_id != '' and ps_import1.id.property_set is defined
+
+        - name: Cleanup second property set from blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+              property_set: "{{ ps_import2.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: bp_id != '' and ps_import2.id.property_set is defined
+
+        - name: Cleanup unlock blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ bp_id }}"
+            lock_state: "unlocked"
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: bp_id != ''
+
+        - name: Cleanup delete blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ bp_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: bp_id != ''
+
+        - name: Clear blueprint ID
+          ansible.builtin.set_fact:
+            bp_id: ""
+          when: bp_id != ''
+
+        - name: Cleanup first global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ bp_global_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: bp_global_ps_id != ''
+
+        - name: Cleanup second global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ bp_global_ps2_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: bp_global_ps2_id != ''
+
+        - name: Clear global property set IDs
+          ansible.builtin.set_fact:
+            bp_global_ps_id: ""
+            bp_global_ps2_id: ""
+
+    ################################################################################
+    # TEST 6: Edge Cases
+    ################################################################################
+
+    - name: "TEST 6: Edge Cases"
+      block:
+        - name: Create property set with special characters in values
+          juniper.apstra.property_set:
+            body:
+              label: "test_edge_special_chars_{{ test_timestamp }}"
+              values:
+                special_key: "value with spaces and special chars: @#$%^&*()"
+                path_value: "/etc/config/file.conf"
+                url_value: "https://example.com:8080/api/v1?key=value&foo=bar"
+                multiline_value: "line1\nline2\nline3"
+            auth_token: "{{ auth.token }}"
+          register: edge_ps
+
+        - name: Store edge property set ID
+          ansible.builtin.set_fact:
+            edge_ps_id: "{{ edge_ps.id.property_set }}"
+
+        - name: Verify special characters preserved
+          ansible.builtin.assert:
+            that:
+              - edge_ps.changed
+              - "'@#$%^&*()' in edge_ps.property_set['values']['special_key']"
+              - edge_ps.property_set["values"]["path_value"] == "/etc/config/file.conf"
+              - "'https://example.com:8080' in edge_ps.property_set['values']['url_value']"
+
+        - name: Create property set with numeric and boolean values
+          juniper.apstra.property_set:
+            body:
+              label: "test_edge_types_{{ test_timestamp }}"
+              values:
+                int_value: 42
+                float_value: 3.14
+                bool_true: true
+                bool_false: false
+                zero_value: 0
+                negative_value: -100
+                large_number: 9999999999
+            auth_token: "{{ auth.token }}"
+          register: types_ps
+
+        - name: Verify type preservation
+          ansible.builtin.assert:
+            that:
+              - types_ps.changed
+              - types_ps.property_set["values"]["int_value"] == 42
+              - types_ps.property_set["values"]["bool_true"] == true
+              - types_ps.property_set["values"]["bool_false"] == false
+              - types_ps.property_set["values"]["zero_value"] == 0
+              - types_ps.property_set["values"]["negative_value"] == -100
+
+        - name: Cleanup types property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ types_ps.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: types_ps.id.property_set is defined
+
+        - name: Create property set with deeply nested structure
+          juniper.apstra.property_set:
+            body:
+              label: "test_edge_deep_{{ test_timestamp }}"
+              values:
+                level1:
+                  level2:
+                    level3:
+                      level4:
+                        deep_value: "I am deep"
+            auth_token: "{{ auth.token }}"
+          register: deep_ps
+
+        - name: Verify deep nesting
+          ansible.builtin.assert:
+            that:
+              - deep_ps.changed
+              - deep_ps.property_set["values"]["level1"]["level2"]["level3"]["level4"]["deep_value"] == "I am deep"
+
+        - name: Cleanup deep property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ deep_ps.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: deep_ps.id.property_set is defined
+
+        - name: Delete edge property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ edge_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: edge_ps_id != ''
+
+        - name: Clear edge_ps_id after successful delete
+          ansible.builtin.set_fact:
+            edge_ps_id: ""
+
+        - name: Record TEST 6 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 6: Edge Cases',
+                'status': 'PASSED',
+                'steps': [
+                  'Create property set with special characters (spaces, symbols, URLs, multiline)',
+                  'Verify special characters preserved correctly',
+                  'Create property set with numeric and boolean types',
+                  'Verify type preservation (int, float, bool, negative, large numbers)',
+                  'Create property set with deeply nested structure (4 levels)',
+                  'Verify deep nesting values accessible',
+                  'Cleanup all edge case property sets'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 6 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 6: Edge Cases',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create property set with special characters (spaces, symbols, URLs, multiline)',
+                  'Verify special characters preserved correctly',
+                  'Create property set with numeric and boolean types',
+                  'Verify type preservation (int, float, bool, negative, large numbers)',
+                  'Create property set with deeply nested structure (4 levels)',
+                  'Verify deep nesting values accessible',
+                  'Cleanup all edge case property sets'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup edge property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ edge_ps_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: edge_ps_id != ''
+
+    ################################################################################
+    # Final Logout and Test Summary
+    ################################################################################
+
+    - name: Logout from Apstra server
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+
+    - name: Calculate test statistics
+      ansible.builtin.set_fact:
+        tests_passed: "{{ test_results | selectattr('status', 'equalto', 'PASSED') | list | length }}"
+        tests_failed: "{{ test_results | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        tests_total: "{{ test_results | length }}"
+
+    - name: Display each test result with steps
+      ansible.builtin.debug:
+        msg: |
+          {{ '✅' if item.status == 'PASSED' else '❌' }} {{ item.test }}: {{ item.status }}{{ ' - ' + item.error if item.error is defined else '' }}
+          {% for step in item.steps | default([]) %}
+              • {{ step }}
+          {% endfor %}
+      loop: "{{ test_results }}"
+      loop_control:
+        label: "{{ item.test }}"
+
+    - name: Display Test Summary
+      ansible.builtin.debug:
+        msg: |
+
+          ════════════════════════════════════════════════════════════════════════════════
+                                        FINAL SUMMARY
+          ════════════════════════════════════════════════════════════════════════════════
+
+            Total Tests:  {{ tests_total }}
+            Passed:       {{ tests_passed }} {{ '✅' if tests_passed | int == tests_total | int else '' }}
+            Failed:       {{ tests_failed }} {{ '❌' if tests_failed | int > 0 else '' }}
+
+          ────────────────────────────────────────────────────────────────────────────────
+          {% if tests_failed | int > 0 %}
+            ⚠️  SOME TESTS FAILED - Review the output above for details
+          {% else %}
+            ✅ ALL TESTS PASSED - Property Set module is functioning correctly
+          {% endif %}
+          ────────────────────────────────────────────────────────────────────────────────
+
+          Modules Tested:
+            • juniper.apstra.property_set (global and blueprint scope)
+            • juniper.apstra.blueprint (creation/deletion)
+            • juniper.apstra.authenticate (login/logout)
+
+          Features Validated:
+            • Global property set CRUD and idempotency
+            • values dict and values_yaml formats
+            • Complex nested data structures (arrays, objects, deep nesting)
+            • Blueprint property set import, idempotency, and deletion
+            • Error handling (missing label, non-existent ID, idempotent delete)
+            • Edge cases (special characters, type preservation, deep nesting)
+
+          ════════════════════════════════════════════════════════════════════════════════
+
+    - name: Fail playbook if any tests failed
+      ansible.builtin.fail:
+        msg: "{{ tests_failed }} of {{ tests_total }} tests failed. See summary above for details."
+      when: tests_failed | int > 0

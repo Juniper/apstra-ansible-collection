@@ -1,0 +1,1380 @@
+---
+################################################################################
+# Configlets Integration Tests
+#
+# Validates:
+# - Catalog configlet CRUD operations and idempotency
+# - Blueprint configlet CRUD operations and idempotency
+# - Catalog configlet import to blueprint
+# - Multi-vendor configlets (junos, nxos, eos)
+# - Jinja2 template variables in configlets
+# - Error handling for invalid inputs
+# - Edge cases (interface section, negation templates, invalid config_style)
+# - Property set integration with configlet templates
+# - Jinja2 template interpolation verification via configlet-preview API
+#
+# Test Flow:
+# - Test 1: Catalog Configlet CRUD (create, idempotency, update, verify)
+# - Test 2: Blueprint Configlet CRUD (create, idempotency, update, verify, delete)
+# - Test 3: Catalog Configlet Import to Blueprint
+# - Test 4: Multi-Vendor Configlet (junos, nxos, eos generators)
+# - Test 5: Jinja2 Template Configlet
+# - Test 6: Error Handling (negative tests)
+# - Test 7: Edge Cases (interface section, negation template, condition variations)
+# - Test 8: Property Set Integration with Jinja2 Interpolation Verification
+# - Final cleanup: Delete all configlets, property sets, and blueprint
+################################################################################
+
+- name: Configlets Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  vars:
+    test_timestamp: "{{ ansible_date_time.epoch }}"
+    test_results: []
+    apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
+    # Resource references (populated during tests)
+    bp_id: ""
+    catalog_configlet_id: ""
+    bp_configlet_id: ""
+    imported_configlet_id: ""
+    multivendor_configlet_id: ""
+    jinja2_configlet_id: ""
+    negation_template_configlet_id: ""
+    # Property set integration
+    property_set_id: ""
+    ps_configlet_id: ""
+    ps_bp_configlet_id: ""
+
+  tasks:
+    - name: Initialize test results tracker
+      ansible.builtin.set_fact:
+        test_results: []
+
+    - name: Authenticate to Apstra server
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint for configlet testing
+      juniper.apstra.blueprint:
+        body:
+          label: "test_configlets_bp_{{ test_timestamp }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Store blueprint ID
+      ansible.builtin.set_fact:
+        bp_id: "{{ bp.id.blueprint }}"
+
+    - name: Verify blueprint creation
+      ansible.builtin.assert:
+        that:
+          - bp.id.blueprint is defined
+
+    ################################################################################
+    # TEST 1: Catalog Configlet CRUD
+    ################################################################################
+
+    - name: "TEST 1: Catalog Configlet CRUD"
+      block:
+        - name: Create catalog configlet (SNMP config)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_catalog_snmp_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "snmp {\n  community public;\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: catalog_create
+
+        - name: Store catalog configlet ID
+          ansible.builtin.set_fact:
+            catalog_configlet_id: "{{ catalog_create.id.configlet }}"
+
+        - name: Verify catalog configlet creation
+          ansible.builtin.assert:
+            that:
+              - catalog_create.changed
+              - catalog_create.id.configlet is defined
+              - catalog_create.configlet.display_name == "test_catalog_snmp_" ~ test_timestamp
+              - catalog_create.configlet.generators | length == 1
+              - catalog_create.configlet.generators[0].config_style == "junos"
+
+        - name: Create same catalog configlet again (idempotency check)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_catalog_snmp_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "snmp {\n  community public;\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: catalog_nochange
+
+        - name: Verify catalog configlet idempotency
+          ansible.builtin.assert:
+            that:
+              - not catalog_nochange.changed
+
+        - name: Update catalog configlet (change community string)
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ catalog_configlet_id }}"
+            body:
+              display_name: "test_catalog_snmp_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "snmp {\n  community private;\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: catalog_update
+
+        - name: Verify catalog configlet update
+          ansible.builtin.assert:
+            that:
+              - catalog_update.changed
+              - "'private' in catalog_update.changes.generators[0].template_text"
+
+        - name: Record TEST 1 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: Catalog Configlet CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create catalog configlet (SNMP config)',
+                  'Verify configlet creation with junos generator',
+                  'Re-apply same config (idempotency)',
+                  'Update configlet (change community string)',
+                  'Verify update: changed=true and template contains "private"'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 1 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: Catalog Configlet CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create catalog configlet (SNMP config)',
+                  'Verify configlet creation with junos generator',
+                  'Re-apply same config (idempotency)',
+                  'Update configlet (change community string)',
+                  'Verify update: changed=true and template contains "private"'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 2: Blueprint Configlet CRUD
+    ################################################################################
+
+    - name: "TEST 2: Blueprint Configlet CRUD"
+      block:
+        - name: Create blueprint configlet (Syslog config)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              label: "test_bp_syslog_{{ test_timestamp }}"
+              condition: 'role in ["leaf"]'
+              configlet:
+                display_name: "test_bp_syslog_{{ test_timestamp }}"
+                generators:
+                  - config_style: "junos"
+                    section: "system"
+                    template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any warning;\n    }\n  }\n}"
+                    negation_template_text: ""
+                    filename: ""
+            auth_token: "{{ auth.token }}"
+          register: bp_configlet_create
+
+        - name: Store blueprint configlet ID
+          ansible.builtin.set_fact:
+            bp_configlet_id: "{{ bp_configlet_create.id.configlet }}"
+
+        - name: Verify blueprint configlet creation
+          ansible.builtin.assert:
+            that:
+              - bp_configlet_create.changed
+              - bp_configlet_create.id.configlet is defined
+              - bp_configlet_create.configlet.label == "test_bp_syslog_" ~ test_timestamp
+
+        - name: Create same blueprint configlet again (idempotency check)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              label: "test_bp_syslog_{{ test_timestamp }}"
+              condition: 'role in ["leaf"]'
+              configlet:
+                display_name: "test_bp_syslog_{{ test_timestamp }}"
+                generators:
+                  - config_style: "junos"
+                    section: "system"
+                    template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any warning;\n    }\n  }\n}"
+                    negation_template_text: ""
+                    filename: ""
+            auth_token: "{{ auth.token }}"
+          register: bp_configlet_nochange
+
+        - name: Verify blueprint configlet idempotency
+          ansible.builtin.assert:
+            that:
+              - not bp_configlet_nochange.changed
+
+        - name: Update blueprint configlet (change condition and severity)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ bp_configlet_id }}"
+            body:
+              label: "test_bp_syslog_{{ test_timestamp }}"
+              condition: 'role in ["leaf", "spine"]'
+              configlet:
+                display_name: "test_bp_syslog_{{ test_timestamp }}"
+                generators:
+                  - config_style: "junos"
+                    section: "system"
+                    template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any critical;\n    }\n  }\n}"
+                    negation_template_text: ""
+                    filename: ""
+            auth_token: "{{ auth.token }}"
+          register: bp_configlet_update
+
+        - name: Verify blueprint configlet update
+          ansible.builtin.assert:
+            that:
+              - bp_configlet_update.changed
+              - "'spine' in bp_configlet_update.changes.condition"
+              - "'critical' in bp_configlet_update.changes.configlet.generators[0].template_text"
+
+        - name: Delete blueprint configlet
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ bp_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: bp_configlet_delete
+
+        - name: Verify blueprint configlet deletion
+          ansible.builtin.assert:
+            that:
+              - bp_configlet_delete.changed
+
+        - name: Delete same blueprint configlet again (idempotent delete)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ bp_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: bp_configlet_delete_again
+
+        - name: Verify blueprint configlet delete idempotency
+          ansible.builtin.assert:
+            that:
+              - not bp_configlet_delete_again.changed
+
+        - name: Clear blueprint configlet ID after deletion
+          ansible.builtin.set_fact:
+            bp_configlet_id: ""
+
+        - name: Record TEST 2 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: Blueprint Configlet CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create blueprint configlet (Syslog config)',
+                  'Verify configlet creation with role condition',
+                  'Re-apply same config (idempotency)',
+                  'Update configlet (change condition and severity)',
+                  'Verify update: condition contains "spine" and template contains "critical"',
+                  'Delete blueprint configlet',
+                  'Delete again (idempotent delete)'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 2 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: Blueprint Configlet CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create blueprint configlet (Syslog config)',
+                  'Verify configlet creation with role condition',
+                  'Re-apply same config (idempotency)',
+                  'Update configlet (change condition and severity)',
+                  'Verify update: condition contains "spine" and template contains "critical"',
+                  'Delete blueprint configlet',
+                  'Delete again (idempotent delete)'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 3: Catalog Configlet Import to Blueprint
+    ################################################################################
+
+    - name: "TEST 3: Catalog Configlet Import to Blueprint"
+      block:
+        - name: Verify catalog configlet exists for import
+          ansible.builtin.assert:
+            that:
+              - catalog_configlet_id != ''
+            fail_msg: "Catalog configlet not available for import test"
+
+        - name: Import catalog configlet to blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              configlet: "{{ catalog_configlet_id }}"
+              condition: 'role in ["spine", "leaf"]'
+              label: "imported_snmp_{{ test_timestamp }}"
+            auth_token: "{{ auth.token }}"
+          register: import_result
+
+        - name: Store imported configlet ID
+          ansible.builtin.set_fact:
+            imported_configlet_id: "{{ import_result.id.configlet }}"
+
+        - name: Verify catalog configlet import
+          ansible.builtin.assert:
+            that:
+              - import_result.changed
+              - import_result.id.configlet is defined
+
+        - name: Import same catalog configlet again (idempotency check)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              configlet: "{{ catalog_configlet_id }}"
+              condition: 'role in ["spine", "leaf"]'
+              label: "imported_snmp_{{ test_timestamp }}"
+            auth_token: "{{ auth.token }}"
+          register: import_nochange
+
+        - name: Verify import idempotency
+          ansible.builtin.assert:
+            that:
+              - not import_nochange.changed
+
+        - name: Remove imported configlet from blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ imported_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: import_remove
+
+        - name: Verify imported configlet removal
+          ansible.builtin.assert:
+            that:
+              - import_remove.changed
+
+        - name: Clear imported configlet ID
+          ansible.builtin.set_fact:
+            imported_configlet_id: ""
+
+        - name: Record TEST 3 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: Catalog Configlet Import to Blueprint',
+                'status': 'PASSED',
+                'steps': [
+                  'Import catalog configlet to blueprint (by UUID)',
+                  'Verify import creates blueprint configlet',
+                  'Re-import same configlet (idempotency)',
+                  'Remove imported configlet from blueprint'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 3 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: Catalog Configlet Import to Blueprint',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Import catalog configlet to blueprint (by UUID)',
+                  'Verify import creates blueprint configlet',
+                  'Re-import same configlet (idempotency)',
+                  'Remove imported configlet from blueprint'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 4: Multi-Vendor Configlet (junos, nxos, eos)
+    ################################################################################
+
+    - name: "TEST 4: Multi-Vendor Configlet"
+      block:
+        - name: Create multi-vendor AAA catalog configlet
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_multivendor_aaa_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "system {\n  authentication-order [ radius password ];\n  radius-server {\n    10.0.0.100 secret radpass;\n  }\n}"
+                  negation_template_text: ""
+                  filename: ""
+                - config_style: "nxos"
+                  section: "system"
+                  template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+                  negation_template_text: ""
+                  filename: ""
+                - config_style: "eos"
+                  section: "system"
+                  template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: multivendor_create
+
+        - name: Store multi-vendor configlet ID
+          ansible.builtin.set_fact:
+            multivendor_configlet_id: "{{ multivendor_create.id.configlet }}"
+
+        - name: Verify multi-vendor configlet creation
+          ansible.builtin.assert:
+            that:
+              - multivendor_create.changed
+              - multivendor_create.id.configlet is defined
+              - multivendor_create.configlet.generators | length == 3
+
+        - name: Verify all config styles present
+          ansible.builtin.assert:
+            that:
+              - multivendor_create.configlet.generators | map(attribute='config_style') | list | sort == ['eos', 'junos', 'nxos']
+
+        - name: Create same multi-vendor configlet again (idempotency check)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_multivendor_aaa_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "system {\n  authentication-order [ radius password ];\n  radius-server {\n    10.0.0.100 secret radpass;\n  }\n}"
+                  negation_template_text: ""
+                  filename: ""
+                - config_style: "nxos"
+                  section: "system"
+                  template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+                  negation_template_text: ""
+                  filename: ""
+                - config_style: "eos"
+                  section: "system"
+                  template_text: "radius-server host 10.0.0.100 key radpass\naaa authentication login default group radius local"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: multivendor_nochange
+
+        - name: Verify multi-vendor configlet idempotency
+          ansible.builtin.assert:
+            that:
+              - not multivendor_nochange.changed
+
+        - name: Update multi-vendor configlet (change RADIUS secret)
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ multivendor_configlet_id }}"
+            body:
+              display_name: "test_multivendor_aaa_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "system {\n  authentication-order [ radius password ];\n  radius-server {\n    10.0.0.100 secret newradpass;\n  }\n}"
+                  negation_template_text: ""
+                  filename: ""
+                - config_style: "nxos"
+                  section: "system"
+                  template_text: "radius-server host 10.0.0.100 key newradpass\naaa authentication login default group radius local"
+                  negation_template_text: ""
+                  filename: ""
+                - config_style: "eos"
+                  section: "system"
+                  template_text: "radius-server host 10.0.0.100 key newradpass\naaa authentication login default group radius local"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: multivendor_update
+
+        - name: Verify multi-vendor configlet update
+          ansible.builtin.assert:
+            that:
+              - multivendor_update.changed
+              - "'newradpass' in multivendor_update.changes.generators[0].template_text"
+              - "'newradpass' in multivendor_update.changes.generators[1].template_text"
+              - "'newradpass' in multivendor_update.changes.generators[2].template_text"
+
+        - name: Record TEST 4 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: Multi-Vendor Configlet',
+                'status': 'PASSED',
+                'steps': [
+                  'Create multi-vendor AAA configlet (junos, nxos, eos)',
+                  'Verify 3 generators created',
+                  'Verify all config_styles present',
+                  'Re-apply same config (idempotency)',
+                  'Update configlet (change RADIUS secret)',
+                  'Verify update: all generators contain "newradpass"'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 4 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: Multi-Vendor Configlet',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create multi-vendor AAA configlet (junos, nxos, eos)',
+                  'Verify 3 generators created',
+                  'Verify all config_styles present',
+                  'Re-apply same config (idempotency)',
+                  'Update configlet (change RADIUS secret)',
+                  'Verify update: all generators contain "newradpass"'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 5: Jinja2 Template Configlet
+    ################################################################################
+
+    - name: "TEST 5: Jinja2 Template Configlet"
+      block:
+        - name: Create catalog configlet with Jinja2 template variables
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_jinja2_ntp_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: jinja2_create
+
+        - name: Store Jinja2 configlet ID
+          ansible.builtin.set_fact:
+            jinja2_configlet_id: "{{ jinja2_create.id.configlet }}"
+
+        - name: Verify Jinja2 configlet creation
+          ansible.builtin.assert:
+            that:
+              - jinja2_create.changed
+              - jinja2_create.id.configlet is defined
+
+        - name: Create same Jinja2 configlet again (idempotency check)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_jinja2_ntp_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: jinja2_nochange
+
+        - name: Verify Jinja2 configlet idempotency
+          ansible.builtin.assert:
+            that:
+              - not jinja2_nochange.changed
+
+        - name: Import Jinja2 template configlet to blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              configlet: "{{ jinja2_configlet_id }}"
+              condition: 'role in ["spine", "leaf"]'
+              label: "imported_ntp_template_{{ test_timestamp }}"
+            auth_token: "{{ auth.token }}"
+          register: jinja2_import
+
+        - name: Verify Jinja2 configlet import
+          ansible.builtin.assert:
+            that:
+              - jinja2_import.changed
+
+        - name: Remove imported Jinja2 configlet from blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ jinja2_import.id.configlet }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+
+        - name: Record TEST 5 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 5: Jinja2 Template Configlet',
+                'status': 'PASSED',
+                'steps': [
+                  'Create catalog configlet with Jinja2 variables',
+                  'Verify configlet creation',
+                  'Re-apply same config (idempotency)',
+                  'Import Jinja2 template to blueprint',
+                  'Remove imported configlet'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 5 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 5: Jinja2 Template Configlet',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create catalog configlet with Jinja2 variables',
+                  'Verify configlet creation',
+                  'Re-apply same config (idempotency)',
+                  'Import Jinja2 template to blueprint',
+                  'Remove imported configlet'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 6: Error Handling
+    ################################################################################
+
+    - name: "TEST 6: Error Handling"
+      block:
+        - name: Create catalog configlet without generators (should fail)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_no_generators_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators: []
+            auth_token: "{{ auth.token }}"
+          register: no_generators_result
+          ignore_errors: true
+
+        - name: Verify empty generators fails
+          ansible.builtin.assert:
+            that:
+              - no_generators_result.failed
+
+        - name: Create blueprint configlet without body (should fail)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: no_body_result
+          ignore_errors: true
+
+        - name: Verify missing body fails
+          ansible.builtin.assert:
+            that:
+              - no_body_result.failed
+
+        - name: Delete non-existent catalog configlet (idempotent delete)
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "non-existent-configlet-{{ test_timestamp }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: delete_nonexistent
+
+        - name: Verify idempotent delete of non-existent configlet
+          ansible.builtin.assert:
+            that:
+              - not delete_nonexistent.changed
+
+        - name: Import non-existent catalog configlet to blueprint (should fail)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              configlet: "non-existent-catalog-{{ test_timestamp }}"
+              condition: 'role in ["leaf"]'
+              label: "test_import_nonexistent"
+            auth_token: "{{ auth.token }}"
+          register: import_nonexistent_result
+          ignore_errors: true
+
+        - name: Verify import of non-existent catalog configlet fails
+          ansible.builtin.assert:
+            that:
+              - import_nonexistent_result.failed
+
+        - name: Record TEST 6 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 6: Error Handling',
+                'status': 'PASSED',
+                'steps': [
+                  'Create configlet without generators (expect failure)',
+                  'Create blueprint configlet without body (expect failure)',
+                  'Delete non-existent configlet (expect idempotent success)',
+                  'Import non-existent catalog configlet (expect failure)'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 6 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 6: Error Handling',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create configlet without generators (expect failure)',
+                  'Create blueprint configlet without body (expect failure)',
+                  'Delete non-existent configlet (expect idempotent success)',
+                  'Import non-existent catalog configlet (expect failure)'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 7: Edge Cases
+    ################################################################################
+
+    - name: "TEST 7: Edge Cases"
+      block:
+        - name: Create catalog configlet with invalid config_style (should fail)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_invalid_style_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "invalid_style"
+                  section: "system"
+                  template_text: "system {\n  logging {\n    console error;\n  }\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: invalid_style_result
+          ignore_errors: true
+
+        - name: Verify invalid config_style fails
+          ansible.builtin.assert:
+            that:
+              - invalid_style_result.failed
+
+        - name: Create catalog configlet with negation_template_text (should succeed)
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_negation_template_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "interfaces"
+                  template_text: "interfaces {\n  ge-0/0/0 {\n    description \"Uplink to ISP\";\n  }\n}"
+                  negation_template_text: "interfaces {\n  ge-0/0/0 {\n    description \"Do not use\";\n  }\n}"
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: negation_template_result
+
+        - name: Verify configlet with negation_template_text creation
+          ansible.builtin.assert:
+            that:
+              - negation_template_result.changed
+              - negation_template_result.id.configlet is defined
+
+        - name: Store negation template configlet ID for cleanup
+          ansible.builtin.set_fact:
+            negation_template_configlet_id: "{{ negation_template_result.id.configlet }}"
+
+        - name: Create blueprint configlet with invalid ID (should fail)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "invalid-blueprint-id"
+            body:
+              label: "test_bp_invalid_id_{{ test_timestamp }}"
+              condition: 'role in ["leaf"]'
+              configlet:
+                display_name: "test_bp_invalid_id_{{ test_timestamp }}"
+                generators:
+                  - config_style: "junos"
+                    section: "system"
+                    template_text: "system {\n  syslog {\n    host 10.0.0.1 {\n      any warning;\n    }\n  }\n}"
+                    negation_template_text: ""
+                    filename: ""
+            auth_token: "{{ auth.token }}"
+          register: bp_invalid_id_result
+          ignore_errors: true
+
+        - name: Verify creation of blueprint configlet with invalid ID fails
+          ansible.builtin.assert:
+            that:
+              - bp_invalid_id_result.failed
+
+        - name: Record TEST 7 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 7: Edge Cases',
+                'status': 'PASSED',
+                'steps': [
+                  'Create configlet with invalid config_style (expect failure)',
+                  'Create configlet with negation_template_text (expect success)',
+                  'Create blueprint configlet with invalid ID (expect failure)'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 7 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 7: Edge Cases',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create configlet with invalid config_style (expect failure)',
+                  'Create configlet with negation_template_text (expect success)',
+                  'Create blueprint configlet with invalid ID (expect failure)'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 8: Property Set Integration with Jinja2 Interpolation Verification
+    # Demonstrates how property sets provide values for Jinja2 template variables
+    # in configlets. This test verifies the actual interpolated output via API.
+    ################################################################################
+
+    - name: "TEST 8: Property Set Integration with Interpolation Verification"
+      block:
+        - name: Create global property set with NTP/DNS values
+          juniper.apstra.property_set:
+            body:
+              label: "test_ps_configlet_{{ test_timestamp }}"
+              values:
+                ntp_server: "10.1.1.100"
+                dns_server: "10.1.1.200"
+                syslog_server: "10.1.1.50"
+                domain_name: "example.com"
+            auth_token: "{{ auth.token }}"
+          register: ps_create
+
+        - name: Store property set ID
+          ansible.builtin.set_fact:
+            property_set_id: "{{ ps_create.id.property_set }}"
+
+        - name: Verify property set creation
+          ansible.builtin.assert:
+            that:
+              - ps_create.changed
+              - ps_create.id.property_set is defined
+              - ps_create.property_set['values']['ntp_server'] == "10.1.1.100"
+
+        - name: Create catalog configlet with Jinja2 variables matching property set keys
+          juniper.apstra.configlets:
+            type: catalog
+            body:
+              display_name: "test_ps_ntp_dns_{{ test_timestamp }}"
+              ref_archs:
+                - "two_stage_l3clos"
+              generators:
+                - config_style: "junos"
+                  section: "system"
+                  template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n  name-server {\n    {% raw %}{{ dns_server }}{% endraw %};\n  }\n  syslog {\n    host {% raw %}{{ syslog_server }}{% endraw %} {\n      any warning;\n    }\n  }\n  domain-name {% raw %}{{ domain_name }}{% endraw %};\n}"
+                  negation_template_text: ""
+                  filename: ""
+            auth_token: "{{ auth.token }}"
+          register: ps_configlet_create
+
+        - name: Store property set configlet ID
+          ansible.builtin.set_fact:
+            ps_configlet_id: "{{ ps_configlet_create.id.configlet }}"
+
+        - name: Verify configlet with Jinja2 variables creation
+          ansible.builtin.assert:
+            that:
+              - ps_configlet_create.changed
+              - ps_configlet_create.id.configlet is defined
+
+        - name: Import property set into blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              id: "{{ property_set_id }}"
+            auth_token: "{{ auth.token }}"
+          register: ps_bp_import
+
+        - name: Verify property set import to blueprint
+          ansible.builtin.assert:
+            that:
+              - ps_bp_import.changed
+
+        - name: Import configlet with Jinja2 variables into blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+            body:
+              configlet: "{{ ps_configlet_id }}"
+              condition: 'role in ["spine", "leaf"]'
+              label: "ps_ntp_dns_configlet_{{ test_timestamp }}"
+            auth_token: "{{ auth.token }}"
+          register: ps_bp_configlet_import
+
+        - name: Store blueprint configlet ID
+          ansible.builtin.set_fact:
+            ps_bp_configlet_id: "{{ ps_bp_configlet_import.id.configlet }}"
+
+        - name: Verify configlet import to blueprint
+          ansible.builtin.assert:
+            that:
+              - ps_bp_configlet_import.changed
+              - ps_bp_configlet_import.id.configlet is defined
+
+        - name: Get configlet preview via API to verify Jinja2 interpolation
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp_id }}/configlet-previews/{{ ps_bp_configlet_id }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: configlet_preview
+
+        - name: Display configlet preview response
+          ansible.builtin.debug:
+            msg: "Configlet preview: {{ configlet_preview.json | to_nice_json }}"
+
+        - name: Verify Jinja2 interpolation - NTP server value in rendered config
+          ansible.builtin.assert:
+            that:
+              - configlet_preview.json.rendered_configlet is defined
+              - configlet_preview.json.rendered_configlet.junos is defined
+              - configlet_preview.json.rendered_configlet.junos | length > 0
+              - "'10.1.1.100' in configlet_preview.json.rendered_configlet.junos[0].config"
+            fail_msg: "NTP server value '10.1.1.100' not found in rendered configlet"
+            success_msg: "NTP server value correctly interpolated in configlet"
+
+        - name: Verify Jinja2 interpolation - DNS server value in rendered config
+          ansible.builtin.assert:
+            that:
+              - "'10.1.1.200' in configlet_preview.json.rendered_configlet.junos[0].config"
+            fail_msg: "DNS server value '10.1.1.200' not found in rendered configlet"
+            success_msg: "DNS server value correctly interpolated in configlet"
+
+        - name: Verify Jinja2 interpolation - Syslog server value in rendered config
+          ansible.builtin.assert:
+            that:
+              - "'10.1.1.50' in configlet_preview.json.rendered_configlet.junos[0].config"
+            fail_msg: "Syslog server value '10.1.1.50' not found in rendered configlet"
+            success_msg: "Syslog server value correctly interpolated in configlet"
+
+        - name: Verify Jinja2 interpolation - Domain name value in rendered config
+          ansible.builtin.assert:
+            that:
+              - "'example.com' in configlet_preview.json.rendered_configlet.junos[0].config"
+            fail_msg: "Domain name value 'example.com' not found in rendered configlet"
+            success_msg: "Domain name value correctly interpolated in configlet"
+
+        - name: Update property set values (change all values)
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ property_set_id }}"
+            body:
+              values:
+                ntp_server: "10.2.2.100"
+                dns_server: "10.2.2.200"
+                syslog_server: "10.2.2.50"
+                domain_name: "updated.example.com"
+            auth_token: "{{ auth.token }}"
+          register: ps_update
+
+        - name: Verify property set update
+          ansible.builtin.assert:
+            that:
+              - ps_update.changed
+              - ps_update.property_set['values']['ntp_server'] == "10.2.2.100"
+              - ps_update.property_set['values']['dns_server'] == "10.2.2.200"
+              - ps_update.property_set['values']['syslog_server'] == "10.2.2.50"
+              - ps_update.property_set['values']['domain_name'] == "updated.example.com"
+
+        - name: Get configlet preview after property set update
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp_id }}/configlet-previews/{{ ps_bp_configlet_id }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: configlet_preview_updated
+
+        - name: Display updated configlet preview response
+          ansible.builtin.debug:
+            msg: "Updated configlet preview: {{ configlet_preview_updated.json | to_nice_json }}"
+
+        - name: Verify updated Jinja2 interpolation - New NTP server value
+          ansible.builtin.assert:
+            that:
+              - "'10.2.2.100' in configlet_preview_updated.json.rendered_configlet.junos[0].config"
+            fail_msg: "Updated NTP server value '10.2.2.100' not found in rendered configlet"
+            success_msg: "Updated NTP server value correctly interpolated in configlet"
+
+        - name: Verify updated Jinja2 interpolation - New domain name value
+          ansible.builtin.assert:
+            that:
+              - "'updated.example.com' in configlet_preview_updated.json.rendered_configlet.junos[0].config"
+            fail_msg: "Updated domain name 'updated.example.com' not found in rendered configlet"
+            success_msg: "Updated domain name correctly interpolated in configlet"
+
+        - name: Remove configlet from blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ ps_bp_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: ps_bp_configlet_remove
+
+        - name: Clear blueprint configlet ID
+          ansible.builtin.set_fact:
+            ps_bp_configlet_id: ""
+
+        - name: Remove property set from blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+              property_set: "{{ ps_bp_import.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: ps_bp_remove
+
+        - name: Verify property set removal from blueprint
+          ansible.builtin.assert:
+            that:
+              - ps_bp_remove.changed
+
+        - name: Record TEST 8 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 8: Property Set Integration with Interpolation Verification',
+                'status': 'PASSED',
+                'steps': [
+                  'Create global property set with NTP/DNS/Syslog/Domain values',
+                  'Create configlet with Jinja2 variables matching property set keys',
+                  'Import property set into blueprint',
+                  'Import configlet with Jinja2 variables into blueprint',
+                  'Get configlet preview via API',
+                  'Verify interpolation: NTP=10.1.1.100, DNS=10.1.1.200, Syslog=10.1.1.50, Domain=example.com',
+                  'Update property set values',
+                  'Get configlet preview after update',
+                  'Verify updated interpolation: NTP=10.2.2.100, Domain=updated.example.com',
+                  'Remove configlet from blueprint',
+                  'Remove property set from blueprint'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 8 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 8: Property Set Integration with Interpolation Verification',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create global property set with NTP/DNS/Syslog/Domain values',
+                  'Create configlet with Jinja2 variables matching property set keys',
+                  'Import property set into blueprint',
+                  'Import configlet with Jinja2 variables into blueprint',
+                  'Get configlet preview via API',
+                  'Verify interpolation: NTP=10.1.1.100, DNS=10.1.1.200, Syslog=10.1.1.50, Domain=example.com',
+                  'Update property set values',
+                  'Get configlet preview after update',
+                  'Verify updated interpolation: NTP=10.2.2.100, Domain=updated.example.com',
+                  'Remove configlet from blueprint',
+                  'Remove property set from blueprint'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup - Remove configlet from blueprint
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ ps_bp_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: ps_bp_configlet_id != ''
+          ignore_errors: true
+
+        - name: Cleanup - Remove property set from blueprint
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ bp_id }}"
+              property_set: "{{ ps_bp_import.id.property_set | default('') }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: ps_bp_import.id.property_set is defined
+          ignore_errors: true
+
+    ################################################################################
+    # Final Cleanup
+    ################################################################################
+
+    - name: "Cleanup: Delete all configlets and blueprint"
+      block:
+        - name: Delete imported configlet from blueprint (if exists)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ imported_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: imported_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete blueprint configlet (if exists)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ bp_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: bp_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete catalog SNMP configlet
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ catalog_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: catalog_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete multi-vendor AAA configlet
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ multivendor_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: multivendor_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete Jinja2 NTP configlet
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ jinja2_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: jinja2_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete negation template configlet
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ negation_template_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: negation_template_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete property set blueprint configlet (if exists)
+          juniper.apstra.configlets:
+            type: blueprint
+            id:
+              blueprint: "{{ bp_id }}"
+              configlet: "{{ ps_bp_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: ps_bp_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete property set catalog configlet
+          juniper.apstra.configlets:
+            type: catalog
+            id:
+              configlet: "{{ ps_configlet_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: ps_configlet_id != ''
+          ignore_errors: true
+
+        - name: Delete global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ property_set_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: property_set_id != ''
+          ignore_errors: true
+
+        - name: Unlock blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ bp_id }}"
+            lock_state: "unlocked"
+            auth_token: "{{ auth.token }}"
+          when: bp_id != ''
+          ignore_errors: true
+
+        - name: Delete blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ bp_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: bp_id != ''
+          ignore_errors: true
+
+    ################################################################################
+    # Final Logout and Test Summary
+    ################################################################################
+
+    - name: Logout from Apstra server
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+
+    - name: Calculate test statistics
+      ansible.builtin.set_fact:
+        tests_passed: "{{ test_results | selectattr('status', 'equalto', 'PASSED') | list | length }}"
+        tests_failed: "{{ test_results | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        tests_total: "{{ test_results | length }}"
+
+    - name: Display each test result with steps
+      ansible.builtin.debug:
+        msg: |
+          {{ '✅' if item.status == 'PASSED' else '❌' }} {{ item.test }}: {{ item.status }}{{ ' - ' + item.error if item.error is defined else '' }}
+          {% for step in item.steps | default([]) %}
+              • {{ step }}
+          {% endfor %}
+      loop: "{{ test_results }}"
+      loop_control:
+        label: "{{ item.test }}"
+
+    - name: Display Test Summary
+      ansible.builtin.debug:
+        msg: |
+
+          ════════════════════════════════════════════════════════════════════════════════
+                                        FINAL SUMMARY
+          ════════════════════════════════════════════════════════════════════════════════
+
+            Total Tests:  {{ tests_total }}
+            Passed:       {{ tests_passed }} {{ '✅' if tests_passed | int == tests_total | int else '' }}
+            Failed:       {{ tests_failed }} {{ '❌' if tests_failed | int > 0 else '' }}
+
+          ────────────────────────────────────────────────────────────────────────────────
+          {% if tests_failed | int > 0 %}
+            ⚠️  SOME TESTS FAILED - Review the output above for details
+          {% else %}
+            ✅ ALL TESTS PASSED - Configlets module is functioning correctly
+          {% endif %}
+          ────────────────────────────────────────────────────────────────────────────────
+
+          Modules Tested:
+            • juniper.apstra.configlets (catalog and blueprint types)
+            • juniper.apstra.property_set (global and blueprint scope)
+            • juniper.apstra.blueprint (creation/deletion)
+            • juniper.apstra.authenticate (login/logout)
+
+          Features Validated:
+            • Catalog configlet CRUD and idempotency
+            • Blueprint configlet CRUD and idempotency
+            • Catalog configlet import to blueprint (by UUID)
+            • Multi-vendor configlets (junos, nxos, eos)
+            • Jinja2 template variables in configlets
+            • Error handling for invalid inputs
+            • Edge cases (negation templates, interface section, invalid inputs)
+            • Property set integration for Jinja2 variable interpolation
+
+          ════════════════════════════════════════════════════════════════════════════════
+
+    - name: Fail playbook if any tests failed
+      ansible.builtin.fail:
+        msg: "{{ tests_failed }} of {{ tests_total }} tests failed. See summary above for details."
+      when: tests_failed | int > 0
