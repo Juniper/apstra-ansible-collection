@@ -134,7 +134,7 @@ install: build
 	test-resource_pools \
 	test-property_set \
 	test-external_gateway \
-	test-customize_external_gateway \
+	test-connectivity_template \
 	test-configlets
 
 # Ignore warnings about localhost from ansible-playbook
@@ -182,6 +182,9 @@ test-customize_external_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_external_gateway.yml -e blueprint_id=$(BLUEPRINT_ID)
 
 test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-property_set test-resource_pools test-external_gateway
+test-connectivity_template: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/connectivity_template.yml
+
 test-configlets: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/configlets.yml
 
