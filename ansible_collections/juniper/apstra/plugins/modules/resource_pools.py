@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
+import ipaddress
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
@@ -592,6 +593,153 @@ def _strip_read_only_from_list_field(current_object, list_field):
         ]
 
 
+# Pool type value boundaries
+POOL_VALUE_LIMITS = {
+    "asn": {"min": 1, "max": 4294967295, "label": "ASN"},
+    "integer": {"min": 1, "max": 2147483647, "label": "Integer"},
+    "vlan": {"min": 1, "max": 4094, "label": "VLAN"},
+    "vni": {"min": 1, "max": 16777215, "label": "VNI"},
+}
+
+# Pool types that use ranges vs subnets
+RANGE_POOL_TYPES = {"asn", "integer", "vlan", "vni"}
+SUBNET_POOL_TYPES = {"ip", "ipv6"}
+
+
+def validate_pool_body(pool_type, body):
+    """Validate that the body contents are appropriate for the declared pool type.
+
+    Raises ValueError with a descriptive message when:
+    - A range-based pool (ASN, Integer, VLAN, VNI) contains 'subnets' instead of 'ranges'
+    - A subnet-based pool (IP, IPv6) contains 'ranges' instead of 'subnets'
+    - Range values are not integers or fall outside the valid boundaries
+    - IP pool subnets contain IPv6 addresses instead of IPv4
+    - IPv6 pool subnets contain IPv4 addresses instead of IPv6
+    - Subnet network values are not valid CIDR notation
+    - Range 'first' value is greater than 'last' value
+    """
+    if not body:
+        return
+
+    list_field = POOL_LIST_FIELD.get(pool_type)
+    if not list_field:
+        return
+
+    # ── Cross-type field mismatch detection ──────────────────────────────
+    if pool_type in RANGE_POOL_TYPES:
+        if "subnets" in body and "ranges" not in body:
+            raise ValueError(
+                f"Invalid body for '{pool_type}' pool: found 'subnets' but '{pool_type}' "
+                f"pools require 'ranges' with 'first' and 'last' integer keys. "
+                f"Subnet-based fields are only valid for 'ip' and 'ipv6' pool types."
+            )
+    elif pool_type in SUBNET_POOL_TYPES:
+        if "ranges" in body and "subnets" not in body:
+            raise ValueError(
+                f"Invalid body for '{pool_type}' pool: found 'ranges' but '{pool_type}' "
+                f"pools require 'subnets' with 'network' (CIDR notation) keys. "
+                f"Range-based fields are only valid for 'asn', 'integer', 'vlan', and 'vni' pool types."
+            )
+
+    # ── Validate ranges for range-based pools ────────────────────────────
+    if pool_type in RANGE_POOL_TYPES and "ranges" in body:
+        ranges = body["ranges"]
+        if not isinstance(ranges, list):
+            raise ValueError(
+                f"Invalid body for '{pool_type}' pool: 'ranges' must be a list of "
+                f"objects with 'first' and 'last' integer keys."
+            )
+
+        limits = POOL_VALUE_LIMITS[pool_type]
+        for idx, r in enumerate(ranges):
+            if not isinstance(r, dict):
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: each range entry must be a "
+                    f"dictionary with 'first' and 'last' keys, got {type(r).__name__} at index {idx}."
+                )
+            if "first" not in r or "last" not in r:
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: range at index {idx} is missing "
+                    f"required key(s). Each range must have 'first' and 'last' integer keys."
+                )
+
+            first_val = r["first"]
+            last_val = r["last"]
+
+            # Type check
+            if not isinstance(first_val, int) or not isinstance(last_val, int):
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: range values at index {idx} must be "
+                    f"integers, got first={type(first_val).__name__}, last={type(last_val).__name__}."
+                )
+
+            # Order check
+            if first_val > last_val:
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: range at index {idx} has 'first' ({first_val}) "
+                    f"greater than 'last' ({last_val}). 'first' must be less than or equal to 'last'."
+                )
+
+            # Boundary check
+            if first_val < limits["min"] or last_val > limits["max"]:
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: range values at index {idx} "
+                    f"({first_val}-{last_val}) are outside the valid {limits['label']} range "
+                    f"of {limits['min']}-{limits['max']}."
+                )
+
+    # ── Validate subnets for subnet-based pools ──────────────────────────
+    if pool_type in SUBNET_POOL_TYPES and "subnets" in body:
+        subnets = body["subnets"]
+        if not isinstance(subnets, list):
+            raise ValueError(
+                f"Invalid body for '{pool_type}' pool: 'subnets' must be a list of "
+                f"objects with a 'network' key in CIDR notation."
+            )
+
+        for idx, s in enumerate(subnets):
+            if not isinstance(s, dict):
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: each subnet entry must be a "
+                    f"dictionary with a 'network' key, got {type(s).__name__} at index {idx}."
+                )
+            if "network" not in s:
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: subnet at index {idx} is missing "
+                    f"the required 'network' key."
+                )
+
+            network_str = s["network"]
+            if not isinstance(network_str, str):
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: 'network' value at index {idx} must be "
+                    f"a string in CIDR notation, got {type(network_str).__name__}."
+                )
+
+            # Parse and validate CIDR
+            try:
+                network = ipaddress.ip_network(network_str, strict=False)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid body for '{pool_type}' pool: 'network' value '{network_str}' "
+                    f"at index {idx} is not a valid CIDR notation."
+                )
+
+            # Check IP version matches pool type
+            if pool_type == "ip" and network.version != 4:
+                raise ValueError(
+                    f"Invalid body for 'ip' pool: subnet at index {idx} contains an IPv6 "
+                    f"address '{network_str}'. IPv4 pools require IPv4 CIDR notation "
+                    f"(e.g. '10.0.0.0/16'). Use pool type 'ipv6' for IPv6 subnets."
+                )
+            elif pool_type == "ipv6" and network.version != 6:
+                raise ValueError(
+                    f"Invalid body for 'ipv6' pool: subnet at index {idx} contains an IPv4 "
+                    f"address '{network_str}'. IPv6 pools require IPv6 CIDR notation "
+                    f"(e.g. 'fc01:a05:fab::/48'). Use pool type 'ip' for IPv4 subnets."
+                )
+
+
 def main():
     object_module_args = dict(
         type=dict(
@@ -628,6 +776,10 @@ def main():
             id = {}
         body = module.params.get("body", None)
         state = module.params["state"]
+
+        # Validate body contents match the declared pool type
+        if body and state == "present":
+            validate_pool_body(pool_type, body)
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
