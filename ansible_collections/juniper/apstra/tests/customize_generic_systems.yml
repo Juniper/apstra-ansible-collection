@@ -30,7 +30,7 @@
   connection: local
   vars:
     apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
-    blueprint_id: "0de00f3b-d90e-4cf4-a03c-328911303372"
+    blueprint_id: "839079b7-7145-4048-bfe3-8ddb5868201f"
     if_transform_id: 1
   tasks:
 
