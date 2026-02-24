@@ -178,9 +178,17 @@ test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy 
 
 # Integration Tests
 .PHONY: test-integration-property_set
+.PHONY: test-integration-resource_pools
+.PHONY: test-integration-configlets
 
 test-integration-property_set: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/property_set.yml
+
+test-integration-resource_pools: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/resource_pools.yml
+
+test-integration-configlets: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/configlets.yml
 
 clean-pipenv:
 	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true
