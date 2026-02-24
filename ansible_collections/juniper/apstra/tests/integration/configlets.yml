@@ -1338,41 +1338,7 @@
 
     - name: Display Test Summary
       ansible.builtin.debug:
-        msg: |
-
-          ════════════════════════════════════════════════════════════════════════════════
-                                        FINAL SUMMARY
-          ════════════════════════════════════════════════════════════════════════════════
-
-            Total Tests:  {{ tests_total }}
-            Passed:       {{ tests_passed }} {{ '✅' if tests_passed | int == tests_total | int else '' }}
-            Failed:       {{ tests_failed }} {{ '❌' if tests_failed | int > 0 else '' }}
-
-          ────────────────────────────────────────────────────────────────────────────────
-          {% if tests_failed | int > 0 %}
-            ⚠️  SOME TESTS FAILED - Review the output above for details
-          {% else %}
-            ✅ ALL TESTS PASSED - Configlets module is functioning correctly
-          {% endif %}
-          ────────────────────────────────────────────────────────────────────────────────
-
-          Modules Tested:
-            • juniper.apstra.configlets (catalog and blueprint types)
-            • juniper.apstra.property_set (global and blueprint scope)
-            • juniper.apstra.blueprint (creation/deletion)
-            • juniper.apstra.authenticate (login/logout)
-
-          Features Validated:
-            • Catalog configlet CRUD and idempotency
-            • Blueprint configlet CRUD and idempotency
-            • Catalog configlet import to blueprint (by UUID)
-            • Multi-vendor configlets (junos, nxos, eos)
-            • Jinja2 template variables in configlets
-            • Error handling for invalid inputs
-            • Edge cases (negation templates, interface section, invalid inputs)
-            • Property set integration for Jinja2 variable interpolation
-
-          ════════════════════════════════════════════════════════════════════════════════
+        msg: "Tests: {{ tests_total }} | Passed: {{ tests_passed }} | Failed: {{ tests_failed }}"
 
     - name: Fail playbook if any tests failed
       ansible.builtin.fail:
