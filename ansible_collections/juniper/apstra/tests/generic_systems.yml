@@ -3,41 +3,11 @@
 #  generic_systems test playbook
 #
 #  Run modes:
-#    1) Standalone (creates & destroys its own blueprint):
+#     Standalone (creates & destroys its own blueprint):
 #         make test-generic_systems
 #         # or directly:
 #         pipenv run ansible-playbook -v .../tests/generic_systems.yml
 #
-#    2) Existing blueprint (user provides ALL infrastructure details):
-#         make test-generic_systems-bp \
-#           BLUEPRINT_ID=<id> \
-#           LEAF_SWITCH_ID=<leaf-node-id> \
-#           IF_NAME_1=<interface1> \
-#           IF_NAME_2=<interface2> \
-#           IF_NAME_3=<interface3> \
-#           IF_NAME_4=<interface4> \
-#           IF_TRANSFORM_ID=<transform-id>
-#
-#         # or directly:
-#         pipenv run ansible-playbook -v .../tests/generic_systems.yml \
-#           -e use_existing_blueprint=true \
-#           -e blueprint_id=<id> \
-#           -e leaf_switch_id=<leaf-node-id> \
-#           -e if_name_1=ge-0/0/3 \
-#           -e if_name_2=ge-0/0/4 \
-#           -e if_name_3=ge-0/0/5 \
-#           -e if_name_4=ge-0/0/6 \
-#           -e
-
-#
-#  Required extra vars for existing blueprint mode:
-#    blueprint_id        - Blueprint UUID
-#    leaf_switch_id      - Node ID of the leaf switch in the blueprint
-#    if_name_1           - Free interface for single-link tests (Tests 1-8)
-#    if_name_2           - Free interface for LAG link 1 (Test 9-11)
-#    if_name_3           - Free interface for LAG link 2 (Test 9-11)
-#    if_name_4           - Free interface for delete-by-name test (Test 18)
-#    if_transform_id     - Interface transform ID (usually 1)
 # ═══════════════════════════════════════════════════════════════════
 - name: Test generic_systems CRUD operations
   hosts: localhost
