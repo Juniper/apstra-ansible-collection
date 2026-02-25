@@ -2,8 +2,6 @@
   hosts: localhost
   gather_facts: false
   connection: local
-  vars:
-    apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
   tasks:
     - name: Get local hostname
       ansible.builtin.command: hostname
@@ -43,18 +41,15 @@
     # ── Discover resource groups in the blueprint ───────────────────────
 
     - name: Get all resource groups from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        auth_token: "{{ auth_result.token }}"
       register: resource_groups_response
 
     - name: Display resource groups
       ansible.builtin.debug:
-        var: resource_groups_response.json
+        var: resource_groups_response.resource_groups
 
     # ── ASN Pool Tests ──────────────────────────────────────────────────
 
@@ -83,20 +78,17 @@
 
     # Assign ASN pool to blueprint
     - name: Get ASN resource groups from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        auth_token: "{{ auth_result.token }}"
       register: rg_asn_list
 
     - name: Find ASN resource group name
       ansible.builtin.set_fact:
         asn_resource_group: >-
           {{
-            rg_asn_list.json['items']
+            rg_asn_list.resource_groups
             | selectattr('type', 'equalto', 'asn')
             | first
           }}
@@ -107,18 +99,15 @@
         var: asn_resource_group
 
     - name: Assign ASN pool to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
         body:
           pool_ids:
             - "{{ asn_pool_id }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       register: asn_assign_result
       when: asn_resource_group is defined and asn_resource_group
 
@@ -129,28 +118,27 @@
 
     # Verify ASN pool assignment
     - name: Verify ASN pool is assigned to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
+        auth_token: "{{ auth_result.token }}"
       register: asn_assignment_check
       when: asn_resource_group is defined and asn_resource_group
 
     - name: Display ASN assignment verification
       ansible.builtin.debug:
-        var: asn_assignment_check.json
-      when: asn_assignment_check is defined and asn_assignment_check.json is defined
+        var: asn_assignment_check.resource_group
+      when: asn_assignment_check is defined and asn_assignment_check.resource_group is defined
 
     - name: Assert ASN pool is assigned
       ansible.builtin.assert:
         that:
-          - asn_pool_id in asn_assignment_check.json.pool_ids
+          - asn_pool_id in asn_assignment_check.resource_group.pool_ids
         fail_msg: "ASN pool was not properly assigned to the blueprint"
         success_msg: "ASN pool successfully assigned to the blueprint"
-      when: asn_assignment_check is defined and asn_assignment_check.json is defined
+      when: asn_assignment_check is defined and asn_assignment_check.resource_group is defined
 
     # Update ASN pool and verify in blueprint
     - name: Update ASN pool
@@ -176,28 +164,27 @@
         msg: "ASN Pool - total: {{ asn_update.asn_pool.total }}, used_percentage: {{ asn_update.asn_pool.used_percentage }}"
 
     - name: Verify ASN pool update is reflected in blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
+        auth_token: "{{ auth_result.token }}"
       register: asn_update_check
       when: asn_resource_group is defined and asn_resource_group
 
     - name: Display ASN blueprint assignment after pool update
       ansible.builtin.debug:
-        var: asn_update_check.json
-      when: asn_update_check is defined and asn_update_check.json is defined
+        var: asn_update_check.resource_group
+      when: asn_update_check is defined and asn_update_check.resource_group is defined
 
     - name: Assert ASN pool is still assigned after update
       ansible.builtin.assert:
         that:
-          - asn_pool_id in asn_update_check.json.pool_ids
+          - asn_pool_id in asn_update_check.resource_group.pool_ids
         fail_msg: "ASN pool assignment lost after pool update"
         success_msg: "ASN pool still assigned after update"
-      when: asn_update_check is defined and asn_update_check.json is defined
+      when: asn_update_check is defined and asn_update_check.resource_group is defined
 
     # Idempotency test
     - name: Create same ASN pool again (should not change)
@@ -220,17 +207,14 @@
 
     # Unassign before delete
     - name: Unassign ASN pool from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
         body:
           pool_ids: []
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       when: asn_resource_group is defined and asn_resource_group
 
     # Delete ASN pool
@@ -275,7 +259,7 @@
       ansible.builtin.set_fact:
         ip_resource_groups: >-
           {{
-            rg_asn_list.json['items']
+            rg_asn_list.resource_groups
             | selectattr('type', 'equalto', 'ip')
             | list
           }}
@@ -290,18 +274,15 @@
       when: ip_resource_groups | length > 0
 
     - name: Assign IP pool to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
         body:
           pool_ids:
             - "{{ ip_pool_id }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       register: ip_assign_result
       when: ip_resource_group is defined and ip_resource_group
 
@@ -312,23 +293,22 @@
 
     # Verify IP pool assignment
     - name: Verify IP pool is assigned to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
+        auth_token: "{{ auth_result.token }}"
       register: ip_assignment_check
       when: ip_resource_group is defined and ip_resource_group
 
     - name: Assert IP pool is assigned
       ansible.builtin.assert:
         that:
-          - ip_pool_id in ip_assignment_check.json.pool_ids
+          - ip_pool_id in ip_assignment_check.resource_group.pool_ids
         fail_msg: "IP pool was not properly assigned to the blueprint"
         success_msg: "IP pool successfully assigned to the blueprint"
-      when: ip_assignment_check is defined and ip_assignment_check.json is defined
+      when: ip_assignment_check is defined and ip_assignment_check.resource_group is defined
 
     # Update IP pool and verify
     - name: Update IP pool
@@ -352,23 +332,22 @@
         msg: "IP Pool - total: {{ ip_update.ip_pool.total }}, used_percentage: {{ ip_update.ip_pool.used_percentage }}"
 
     - name: Verify IP pool update is reflected in blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
+        auth_token: "{{ auth_result.token }}"
       register: ip_update_check
       when: ip_resource_group is defined and ip_resource_group
 
     - name: Assert IP pool still assigned after update
       ansible.builtin.assert:
         that:
-          - ip_pool_id in ip_update_check.json.pool_ids
+          - ip_pool_id in ip_update_check.resource_group.pool_ids
         fail_msg: "IP pool assignment lost after pool update"
         success_msg: "IP pool still assigned after update"
-      when: ip_update_check is defined and ip_update_check.json is defined
+      when: ip_update_check is defined and ip_update_check.resource_group is defined
 
     # Idempotency
     - name: Create same IP pool again (should not change)
@@ -389,17 +368,14 @@
 
     # Unassign and delete
     - name: Unassign IP pool from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
         body:
           pool_ids: []
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       when: ip_resource_group is defined and ip_resource_group
 
     - name: Delete IP pool
@@ -651,18 +627,15 @@
         var: vn_for_vni
 
     - name: Refresh resource groups after VN creation
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        auth_token: "{{ auth_result.token }}"
       register: rg_after_vn
 
     - name: Display resource groups after VN creation
       ansible.builtin.debug:
-        var: rg_after_vn.json
+        var: rg_after_vn.resource_groups
 
     - name: Create VNI pool
       juniper.apstra.resource_pools:
@@ -692,7 +665,7 @@
       ansible.builtin.set_fact:
         vni_resource_groups: >-
           {{
-            rg_after_vn.json['items']
+            rg_after_vn.resource_groups
             | selectattr('type', 'equalto', 'vni')
             | list
           }}
@@ -707,18 +680,15 @@
       when: vni_resource_groups | length > 0
 
     - name: Assign VNI pool to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "vni"
+          group_name: "{{ vni_resource_group.name }}"
         body:
           pool_ids:
             - "{{ vni_pool_id }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       register: vni_assign_result
       when: vni_resource_group is defined and vni_resource_group
 
@@ -729,23 +699,22 @@
 
     # Verify VNI pool assignment
     - name: Verify VNI pool is assigned to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.name }}"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "vni"
+          group_name: "{{ vni_resource_group.name }}"
+        auth_token: "{{ auth_result.token }}"
       register: vni_assignment_check
       when: vni_resource_group is defined and vni_resource_group
 
     - name: Assert VNI pool is assigned
       ansible.builtin.assert:
         that:
-          - vni_pool_id in vni_assignment_check.json.pool_ids
+          - vni_pool_id in vni_assignment_check.resource_group.pool_ids
         fail_msg: "VNI pool was not properly assigned to the blueprint"
         success_msg: "VNI pool successfully assigned to the blueprint"
-      when: vni_assignment_check is defined and vni_assignment_check.json is defined
+      when: vni_assignment_check is defined and vni_assignment_check.resource_group is defined
 
     # Update VNI pool and verify
     - name: Update VNI pool
@@ -771,23 +740,22 @@
         msg: "VNI Pool - total: {{ vni_update.vni_pool.total }}, used_percentage: {{ vni_update.vni_pool.used_percentage }}"
 
     - name: Verify VNI pool update is reflected in blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.name }}"
-        method: GET
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "vni"
+          group_name: "{{ vni_resource_group.name }}"
+        auth_token: "{{ auth_result.token }}"
       register: vni_update_check
       when: vni_resource_group is defined and vni_resource_group
 
     - name: Assert VNI pool still assigned after update
       ansible.builtin.assert:
         that:
-          - vni_pool_id in vni_update_check.json.pool_ids
+          - vni_pool_id in vni_update_check.resource_group.pool_ids
         fail_msg: "VNI pool assignment lost after pool update"
         success_msg: "VNI pool still assigned after update"
-      when: vni_update_check is defined and vni_update_check.json is defined
+      when: vni_update_check is defined and vni_update_check.resource_group is defined
 
     # Idempotency
     - name: Create same VNI pool again (should not change)
@@ -810,17 +778,14 @@
 
     # Unassign and delete
     - name: Unassign VNI pool from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "vni"
+          group_name: "{{ vni_resource_group.name }}"
         body:
           pool_ids: []
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       when: vni_resource_group is defined and vni_resource_group
 
     - name: Delete VNI pool

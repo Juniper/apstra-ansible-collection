@@ -15,6 +15,14 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.blueprint import (
+    list_blueprint_configlets,
+    get_blueprint_configlet,
+    create_blueprint_configlet,
+    update_blueprint_configlet,
+    delete_blueprint_configlet,
+    find_blueprint_configlet_by_label,
+)
 
 DOCUMENTATION = """
 ---
@@ -377,74 +385,6 @@ def _catalog_find_by_display_name(client_factory, display_name):
     return None
 
 
-def _blueprint_list_configlets(client_factory, blueprint_id):
-    """List all configlets for a blueprint using raw_request (SDK endpoint is not present)."""
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(f"/blueprints/{blueprint_id}/configlets")
-    if resp.status_code == 200:
-        data = resp.json()
-        return data.get("items", [])
-    return []
-
-
-def _blueprint_get_configlet(client_factory, blueprint_id, configlet_id):
-    """Get a single blueprint configlet by ID."""
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets/{configlet_id}"
-    )
-    if resp.status_code == 200:
-        return resp.json()
-    return None
-
-
-def _blueprint_create_configlet(client_factory, blueprint_id, body):
-    """Create a blueprint configlet."""
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets", "POST", data=body
-    )
-    if resp.status_code in (200, 201):
-        return resp.json()
-    raise Exception(
-        f"Failed to create blueprint configlet: {resp.status_code} {resp.text}"
-    )
-
-
-def _blueprint_update_configlet(client_factory, blueprint_id, configlet_id, body):
-    """Update a blueprint configlet (PUT)."""
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets/{configlet_id}", "PUT", data=body
-    )
-    if resp.status_code not in (200, 202, 204):
-        raise Exception(
-            f"Failed to update blueprint configlet: {resp.status_code} {resp.text}"
-        )
-    return None
-
-
-def _blueprint_delete_configlet(client_factory, blueprint_id, configlet_id):
-    """Delete a blueprint configlet."""
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets/{configlet_id}", "DELETE"
-    )
-    if resp.status_code not in (200, 202, 204):
-        raise Exception(
-            f"Failed to delete blueprint configlet: {resp.status_code} {resp.text}"
-        )
-
-
-def _blueprint_find_by_label(client_factory, blueprint_id, label):
-    """Find a blueprint configlet by label."""
-    items = _blueprint_list_configlets(client_factory, blueprint_id)
-    for item in items:
-        if isinstance(item, dict) and item.get("label") == label:
-            return item
-    return None
-
-
 def _catalog_get_by_id(client_factory, configlet_id):
     """Fetch a catalog configlet by its ID."""
     try:
@@ -592,7 +532,7 @@ def _manage_catalog_configlet(module, client_factory):
 
 
 def _manage_blueprint_configlet(module, client_factory):
-    """Manage a blueprint configlet using raw HTTP requests (SDK endpoint is not present)."""
+    """Manage a blueprint configlet using shared blueprint utilities."""
     result = dict(changed=False)
 
     id = module.params.get("id")
@@ -617,13 +557,15 @@ def _manage_blueprint_configlet(module, client_factory):
         # Try to find by label
         label = body.get("label") if body else None
         if label:
-            found = _blueprint_find_by_label(client_factory, blueprint_id, label)
+            found = find_blueprint_configlet_by_label(
+                client_factory, blueprint_id, label
+            )
             if found:
                 configlet_id = found["id"]
                 id["configlet"] = configlet_id
                 current_object = found
     else:
-        current_object = _blueprint_get_configlet(
+        current_object = get_blueprint_configlet(
             client_factory, blueprint_id, configlet_id
         )
 
@@ -641,7 +583,7 @@ def _manage_blueprint_configlet(module, client_factory):
                 if client_factory.compare_and_update(compare_current, body, changes):
                     # Build full update body (without id)
                     update_body = {k: v for k, v in current_object.items() if k != "id"}
-                    _blueprint_update_configlet(
+                    update_blueprint_configlet(
                         client_factory, blueprint_id, configlet_id, update_body
                     )
                     result["changed"] = True
@@ -656,7 +598,7 @@ def _manage_blueprint_configlet(module, client_factory):
         else:
             if body is None:
                 raise ValueError("Must specify 'body' to create a configlet")
-            created = _blueprint_create_configlet(client_factory, blueprint_id, body)
+            created = create_blueprint_configlet(client_factory, blueprint_id, body)
             if created and isinstance(created, dict):
                 configlet_id = created.get("id")
                 if configlet_id:
@@ -673,7 +615,7 @@ def _manage_blueprint_configlet(module, client_factory):
         # Return the final object state (with retry for eventual consistency)
         final_object = None
         for attempt in range(10):
-            final_object = _blueprint_get_configlet(
+            final_object = get_blueprint_configlet(
                 client_factory, blueprint_id, configlet_id
             )
             if final_object is not None:
@@ -690,7 +632,7 @@ def _manage_blueprint_configlet(module, client_factory):
         else:
             if configlet_id is None:
                 raise ValueError("Cannot delete a configlet without a configlet id")
-            _blueprint_delete_configlet(client_factory, blueprint_id, configlet_id)
+            delete_blueprint_configlet(client_factory, blueprint_id, configlet_id)
             result["changed"] = True
             result["msg"] = "configlet deleted successfully"
 
