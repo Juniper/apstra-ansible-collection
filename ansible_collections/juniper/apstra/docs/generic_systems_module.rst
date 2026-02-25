@@ -248,29 +248,57 @@ Delete by Name
 Running Tests
 ~~~~~~~~~~~~~
 
-The module ships with a 20-test playbook covering create, update, delete,
-idempotency, LAG, external systems, and validation errors.
+The module ships with two separate 20-test playbooks covering create, update,
+delete, idempotency, LAG, external systems, and validation errors.
 
-**Standalone mode** — creates and destroys its own blueprint:
+Standalone Mode (``generic_systems.yml``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Creates and destroys its own blueprint automatically — no extra variables needed.
+
+**Via Make:**
 
 .. code-block:: bash
 
     make test-generic_systems
 
-**Existing blueprint mode** — user provides all infrastructure details:
+**Via ansible-playbook:**
 
 .. code-block:: bash
 
-    make test-generic_systems-bp \
-      BLUEPRINT_ID=839079b7-7145-4048-bfe3-8ddb5868201f \
-      LEAF_SWITCH_ID=rnz8KEIUsTG_uI7uSA \
-      IF_NAME_1=ge-0/0/6 \
-      IF_NAME_2=ge-0/0/7 \
-      IF_NAME_3=ge-0/0/8 \
-      IF_NAME_4=ge-0/0/9 \
-      IF_TRANSFORM_ID=1
+    pipenv run ansible-playbook -v \
+      ansible_collections/juniper/apstra/tests/generic_systems.yml
 
-Required extra vars for existing blueprint mode:
+Existing Blueprint Mode (``customize_generic_systems.yml``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Runs against a live blueprint. Auto-discovers the first available leaf switch,
+spine switch, and free interfaces — no manual interface selection required.
+
+**Via Make:**
+
+.. code-block:: bash
+
+    make test-customize_generic_systems
+
+**Via ansible-playbook:**
+
+.. code-block:: bash
+
+    pipenv run ansible-playbook -v \
+      ansible_collections/juniper/apstra/tests/customize_generic_systems.yml
+
+**With overrides** (optional — values are auto-discovered when omitted):
+
+.. code-block:: bash
+
+    pipenv run ansible-playbook -v \
+      ansible_collections/juniper/apstra/tests/customize_generic_systems.yml \
+      -e blueprint_id=<uuid> \
+      -e leaf_switch_id=<leaf-node-id> \
+      -e spine_id=<spine-node-id>
+
+Optional override variables:
 
 .. list-table::
    :header-rows: 1
@@ -278,35 +306,14 @@ Required extra vars for existing blueprint mode:
 
    * - Variable
      - Description
-   * - ``BLUEPRINT_ID``
-     - Blueprint UUID
-   * - ``LEAF_SWITCH_ID``
-     - Node ID of the target leaf switch in the blueprint
-   * - ``IF_NAME_1``
-     - Free interface for single-link tests (Tests 1–8)
-   * - ``IF_NAME_2``
-     - Free interface for LAG link 1 (Tests 9–11)
-   * - ``IF_NAME_3``
-     - Free interface for LAG link 2 (Tests 9–11)
-   * - ``IF_NAME_4``
-     - Free interface for delete-by-name test (Test 18)
-   * - ``IF_TRANSFORM_ID``
-     - Interface transform ID (usually ``1``)
-
-Or directly via ``ansible-playbook``:
-
-.. code-block:: bash
-
-    pipenv run ansible-playbook -v \
-      ansible_collections/juniper/apstra/tests/generic_systems.yml \
-      -e use_existing_blueprint=true \
-      -e blueprint_id=<uuid> \
-      -e leaf_switch_id=<leaf-node-id> \
-      -e if_name_1=ge-0/0/6 \
-      -e if_name_2=ge-0/0/7 \
-      -e if_name_3=ge-0/0/8 \
-      -e if_name_4=ge-0/0/9 \
-      -e if_transform_id=1
+   * - ``blueprint_id``
+     - Blueprint UUID (defaults to value in playbook vars)
+   * - ``leaf_switch_id``
+     - Node ID of the leaf switch (auto-discovered if omitted)
+   * - ``spine_id``
+     - Node ID of the spine switch (auto-discovered if omitted)
+   * - ``if_transform_id``
+     - Interface transform ID (default: ``1``)
 
 Link Fields
 ~~~~~~~~~~~
