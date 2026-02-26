@@ -236,6 +236,7 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
         virtual_network_label = module.params.get("virtual_network_label", None)
+        pipeline_ep_id = None  # Will be set when found via VN lookup
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -266,7 +267,11 @@ def main():
                     .in_(type="vn_to_attach")
                     .node(type="ep_endpoint_policy")
                     .in_(type="ep_first_subpolicy")
-                    .node(type="ep_endpoint_policy", policy_type_name="pipeline")
+                    .node(
+                        type="ep_endpoint_policy",
+                        policy_type_name="pipeline",
+                        name="pipeline_ep",
+                    )
                     .in_(type="ep_subpolicy")
                     .node(
                         type="ep_endpoint_policy",
@@ -293,8 +298,14 @@ def main():
                         msg=f"Object missing key {leaf_object_type}: {result[0]}"
                     )
 
-                # Finally, save the endpoint policy id
+                # Save the batch endpoint policy id (for object operations)
                 id[leaf_object_type] = ep_found[0][leaf_object_type].id
+
+                # Save the pipeline endpoint policy id (needed for
+                # obj-policy-batch-apply, which requires the pipeline
+                # EP, not the batch EP)
+                if "pipeline_ep" in ep_found[0]:
+                    pipeline_ep_id = ep_found[0]["pipeline_ep"].id
 
                 current_object = client_factory.object_request(object_type, "get", id)
         else:
@@ -358,31 +369,22 @@ def main():
                             direct_intf_id = body_ap.get("id")
                             if direct_intf_id:
                                 desired_used = body_ap.get("used", True)
-                                # Check current VN association
-                                if_to_vn_direct = (
-                                    query.node(id=direct_intf_id)
-                                    .out(type="ep_member_of")
-                                    .node(type="ep_group")
-                                    .in_(type="ep_affected_by")
-                                    .node(type="ep_application_instance")
-                                    .out(type="ep_nested")
-                                    .node(type="ep_endpoint_policy")
-                                    .out(type="vn_to_attach")
-                                    .node(
-                                        type="virtual_network",
-                                        label=virtual_network_label,
-                                        name="virtual_network",
-                                    )
-                                )
-                                already = client_factory.query_blueprint(
-                                    id["blueprint"], if_to_vn_direct
-                                )
-                                if bool(already) == desired_used:
-                                    continue
+                                # NOTE: We skip the QE idempotency check here
+                                # because the graph path
+                                # (interface→ep_member_of→...→virtual_network)
+                                # always exists for valid application points
+                                # regardless of the "used" state.  The
+                                # obj-policy-batch-apply API is idempotent, so
+                                # re-applying is safe.
+                                #
+                                # Use the pipeline EP id (not the batch EP)
+                                # because obj-policy-batch-apply requires the
+                                # pipeline policy id for VN assignment.
+                                policy_id = pipeline_ep_id or id[leaf_object_type]
                                 ap["id"] = direct_intf_id
                                 ap["policies"] = [
                                     {
-                                        "policy": id[leaf_object_type],
+                                        "policy": policy_id,
                                         "used": desired_used,
                                     }
                                 ]
