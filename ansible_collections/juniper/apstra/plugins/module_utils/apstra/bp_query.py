@@ -245,3 +245,41 @@ def find_host_bond_interfaces(client_factory, blueprint_id, host_labels=None):
         if label and intf.get("id"):
             result[label] = intf["id"]
     return result
+
+
+def find_host_evpn_interfaces(client_factory, blueprint_id, host_labels=None):
+    """Find ESI-LAG group interfaces (EVPN port-channels) for host systems.
+
+    In dual-homed ESI-LAG topologies Apstra creates a virtual port-channel
+    that spans the leaf pair.  These interfaces have
+    ``po_control_protocol == "evpn"`` and their ``description`` follows the
+    pattern ``to.<host_label>``.  They are the correct *application points*
+    for VN endpoint-policy assignment.
+
+    Args:
+        client_factory: ``ApstraClientFactory``.
+        blueprint_id: Blueprint UUID.
+        host_labels: Optional list of host labels to filter.
+
+    Returns:
+        dict: ``{host_label: evpn_interface_id}``
+    """
+    qe = (
+        "node('interface', if_type='port_channel',"
+        " po_control_protocol='evpn', name='intf')"
+    )
+    items = run_qe_query(client_factory, blueprint_id, qe)
+
+    host_set = set(host_labels) if host_labels else None
+    result = {}
+    for item in items:
+        intf = item.get("intf", {})
+        desc = intf.get("description", "") or ""
+        intf_id = intf.get("id")
+        if not desc.startswith("to.") or not intf_id:
+            continue
+        label = desc[3:]  # strip leading "to."
+        if host_set and label not in host_set:
+            continue
+        result[label] = intf_id
+    return result

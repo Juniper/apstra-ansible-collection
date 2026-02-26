@@ -25,6 +25,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query imp
     find_nodes_by_type,
     find_interfaces_by_neighbor,
     find_host_bond_interfaces,
+    find_host_evpn_interfaces,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
     get_node,
@@ -144,6 +145,10 @@ options:
         to systems whose labels are in C(neighbor_labels).
       - C(host_bond_interfaces) returns port-channel interfaces on
         host generic systems, optionally filtered by C(host_labels).
+      - C(host_evpn_interfaces) returns ESI-LAG group interfaces
+        (EVPN port-channels) for host systems, optionally filtered
+        by C(host_labels). These are the correct application points
+        for VN endpoint-policy assignment in dual-homed topologies.
       - Mutually exclusive with C(query).
     type: str
     required: false
@@ -152,6 +157,7 @@ options:
       - nodes_by_type
       - interfaces_by_neighbor
       - host_bond_interfaces
+      - host_evpn_interfaces
   roles:
     description:
       - List of system roles to filter (C(query_type=nodes_by_role)).
@@ -480,6 +486,20 @@ def _handle_host_bond_interfaces(client_factory, blueprint_id, host_labels):
     )
 
 
+def _handle_host_evpn_interfaces(client_factory, blueprint_id, host_labels):
+    """Find ESI-LAG group interfaces (EVPN application points) for hosts."""
+    host_intfs = find_host_evpn_interfaces(
+        client_factory,
+        blueprint_id,
+        host_labels,
+    )
+    return dict(
+        changed=False,
+        host_interfaces=host_intfs,
+        msg=f"Found EVPN interfaces for {len(host_intfs)} host(s)",
+    )
+
+
 def _handle_queried(module, client_factory, blueprint_id):
     """Handle state=queried -- dispatch to the right query handler."""
     params = module.params
@@ -511,6 +531,11 @@ def _handle_queried(module, client_factory, blueprint_id):
             params,
         ),
         "host_bond_interfaces": lambda: _handle_host_bond_interfaces(
+            client_factory,
+            blueprint_id,
+            params.get("host_labels"),
+        ),
+        "host_evpn_interfaces": lambda: _handle_host_evpn_interfaces(
             client_factory,
             blueprint_id,
             params.get("host_labels"),
@@ -624,6 +649,7 @@ def main():
                 "nodes_by_type",
                 "interfaces_by_neighbor",
                 "host_bond_interfaces",
+                "host_evpn_interfaces",
             ],
         ),
         roles=dict(type="list", elements="str", required=False),

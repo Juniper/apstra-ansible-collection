@@ -352,6 +352,43 @@ def main():
                         app_points = []
                         for body_ap in body[application_points_leaf_object_type]:
                             ap = {}
+
+                            # Support direct interface ID (skip
+                            # if_name/remote_host lookup)
+                            direct_intf_id = body_ap.get("id")
+                            if direct_intf_id:
+                                desired_used = body_ap.get("used", True)
+                                # Check current VN association
+                                if_to_vn_direct = (
+                                    query.node(id=direct_intf_id)
+                                    .out(type="ep_member_of")
+                                    .node(type="ep_group")
+                                    .in_(type="ep_affected_by")
+                                    .node(type="ep_application_instance")
+                                    .out(type="ep_nested")
+                                    .node(type="ep_endpoint_policy")
+                                    .out(type="vn_to_attach")
+                                    .node(
+                                        type="virtual_network",
+                                        label=virtual_network_label,
+                                        name="virtual_network",
+                                    )
+                                )
+                                already = client_factory.query_blueprint(
+                                    id["blueprint"], if_to_vn_direct
+                                )
+                                if bool(already) == desired_used:
+                                    continue
+                                ap["id"] = direct_intf_id
+                                ap["policies"] = [
+                                    {
+                                        "policy": id[leaf_object_type],
+                                        "used": desired_used,
+                                    }
+                                ]
+                                app_points.append(ap)
+                                continue
+
                             if_name = body_ap.get("if_name")
                             if not if_name:
                                 module.fail_json(

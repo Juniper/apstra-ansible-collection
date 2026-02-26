@@ -37,13 +37,19 @@ leaf_device_order:
   - leaf3border
   - leaf4border
 
-# ── SRX Generic System Indices (within rack type) ────────────────────────────
+# ── Generic System Indices (within rack type) ────────────────────────────────
 # The rack type has 6 generics: host1-4 (regular), host5-6 (SRX, tagged 'srx').
-# These indices map SRX testbed suffixes to their sequential position in the
+# These indices map testbed suffixes to their sequential position in the
 # rack type, used to find existing blueprint generic systems (e.g. _sys005).
 srx_generic_indices:
   srx1: 5
   srx2: 6
+
+host_generic_indices:
+  h1: 1
+  h2: 2
+  h3: 3
+  h4: 4
 
 # ── SRX Application Config (not in testbed) ──────────────────────────────────
 # ASN and loopback per SRX — connections are derived from testbed topology.

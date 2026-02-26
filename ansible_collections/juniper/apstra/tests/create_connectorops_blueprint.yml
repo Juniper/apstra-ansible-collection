@@ -668,9 +668,26 @@
       vars:
         _full_name: "{{ topology_name ~ '-' ~ item.key }}"
 
-    - name: Display SRX generic mapping
+    - name: "Phase 8 prereq — Build host system ID mapping"
+      ansible.builtin.set_fact:
+        _host_system_id_map: >-
+          {{
+            _host_system_id_map | default({}) | combine({
+              _full_name:
+                generic_nodes_qe.nodes[_full_name].id
+                if _full_name in generic_nodes_qe.nodes
+                else generic_nodes_qe.nodes[_rack_prefix ~ '_sys' ~ '%03d' | format(item.value)].id
+            })
+          }}
+      loop: "{{ host_generic_indices | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      vars:
+        _full_name: "{{ topology_name ~ '-' ~ item.key }}"
+
+    - name: Display generic system mappings
       ansible.builtin.debug:
-        msg: "SRX system ID mapping: {{ _srx_system_id_map }}"
+        msg: "SRX: {{ _srx_system_id_map }} | Hosts: {{ _host_system_id_map }}"
 
     # Discover border leaf node IDs dynamically from SRX connections
     - name: "Phase 8a — Resolve border leaf names from SRX connections"
@@ -764,7 +781,24 @@
       loop_control:
         label: "{{ item.srx.label }} {{ item.intf.id }} -> {{ 'ge-0/0/0' if 'leaf1_link' in item.lnk.label else 'ge-0/0/1' }}"
 
-    - name: "Phase 8c — Deploy after SRX creation"
+    # -- Phase 8d: Rename host generic systems to testbed names ---------------
+    - name: "Phase 8d — Rename host generic systems"
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        node_id: "{{ _host_system_id_map[item.key] }}"
+        node_properties:
+          label: "{{ item.key }}"
+          hostname: "{{ item.key }}"
+        state: node_updated
+      loop: "{{ bp_hosts | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: "Phase 8c — Deploy after SRX + host setup"
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1105,8 +1139,8 @@
     # Phase 17: VN-to-Host Endpoint Policy Assignment
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Discover host generic system interfaces for VN assignment
-    - name: "Phase 17a — Query host-facing interfaces"
+    # Discover ESI-LAG group interfaces for VN endpoint-policy assignment
+    - name: "Phase 17a — Query host-facing EVPN interfaces"
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1114,7 +1148,7 @@
         id:
           blueprint: "{{ blueprint_id }}"
         state: queried
-        query_type: host_bond_interfaces
+        query_type: host_evpn_interfaces
         host_labels: "{{ bp_hosts.keys() | list }}"
       register: host_intf_qe
 
@@ -1133,7 +1167,7 @@
         body:
           application_points:
             - id: "{{ host_intf_map[item.key] }}"
-              policies: []
+              used: true
         state: present
       loop: "{{ bp_hosts | dict2items }}"
       loop_control:
