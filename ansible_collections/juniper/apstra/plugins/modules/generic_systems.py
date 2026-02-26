@@ -572,6 +572,92 @@ def _set_system_asn(client_factory, bp_id, sys_id, asn):
     _patch_node_unsafe(client_factory, bp_id, domain_node_id, {"domain_id": asn_str})
 
 
+def _get_system_loopback(client_factory, bp_id, sys_id):
+    """Query the loopback interface node for a generic system.
+
+    Returns dict with 'node_id', 'ipv4_addr', 'ipv6_addr' or None.
+    """
+    qe = {
+        "query": (
+            f"node('system', id='{sys_id}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_type='loopback', name='lo')"
+        )
+    }
+    resp = _api_post(client_factory, f"/blueprints/{bp_id}/qe", qe)
+    items = resp.get("items", []) if resp else []
+    if items:
+        lo = items[0].get("lo", {})
+        return {
+            "node_id": lo.get("id"),
+            "ipv4_addr": lo.get("ipv4_addr"),
+            "ipv6_addr": lo.get("ipv6_addr"),
+        }
+    return None
+
+
+def _create_or_update_loopback(client_factory, bp_id, sys_id, ipv4=None, ipv6=None):
+    """Create or update a loopback interface on a generic system.
+
+    Uses the blueprint graph-mutation PATCH API to create an interface node
+    (type=interface, if_type=loopback) and a hosted_interfaces relationship.
+    If a loopback already exists, updates the IP addresses on the existing node.
+
+    Returns the loopback node ID.
+    """
+    existing = _get_system_loopback(client_factory, bp_id, sys_id)
+
+    if existing and existing.get("node_id"):
+        # Update existing loopback interface node
+        patch = {}
+        if ipv4 is not None and existing.get("ipv4_addr") != ipv4:
+            patch["ipv4_addr"] = ipv4
+            patch["ipv4_enabled"] = True
+        if ipv6 is not None and existing.get("ipv6_addr") != ipv6:
+            patch["ipv6_addr"] = ipv6
+            patch["ipv6_enabled"] = True
+        if patch:
+            _patch_node_unsafe(client_factory, bp_id, existing["node_id"], patch)
+        return existing["node_id"]
+    else:
+        # Create new loopback interface node + hosted_interfaces relationship
+        # via the blueprint graph-mutation PATCH API.
+        sys_node = _get_system_node(client_factory, bp_id, sys_id)
+        label = sys_node.get("label", sys_id) if sys_node else sys_id
+        lo_node_id = f"{label}_loopback"
+        rel_id = f"{label}_loopback_hosted"
+
+        node_props = {
+            "type": "interface",
+            "if_type": "loopback",
+            "loopback_id": 0,
+            "ipv4_enabled": False,
+            "ipv6_enabled": False,
+            "operation_state": "up",
+        }
+        if ipv4:
+            node_props["ipv4_addr"] = ipv4
+            node_props["ipv4_enabled"] = True
+        if ipv6:
+            node_props["ipv6_addr"] = ipv6
+            node_props["ipv6_enabled"] = True
+
+        body = {
+            "nodes": {
+                lo_node_id: node_props,
+            },
+            "relationships": {
+                rel_id: {
+                    "type": "hosted_interfaces",
+                    "source_id": sys_id,
+                    "target_id": lo_node_id,
+                }
+            },
+        }
+        _api_patch(client_factory, f"/blueprints/{bp_id}", body)
+        return lo_node_id
+
+
 def _find_system_by_label(client_factory, bp_id, label):
     """Find a generic system by label using QE. Returns dict or None."""
     qe = {"query": f"node('system', system_type='server', label='{label}', name='gs')"}
@@ -991,11 +1077,16 @@ def _build_result(
             result["asn"] = overrides.get(
                 "asn", _get_system_asn(client_factory, bp_id, sys_id)
             )
+            # Loopbacks are stored on separate interface nodes, not the
+            # system node.  Read from the interface via QE.
+            lo_data = _get_system_loopback(client_factory, bp_id, sys_id)
             result["loopback_ipv4"] = overrides.get(
-                "loopback_ipv4", node.get("loopback_ipv4")
+                "loopback_ipv4",
+                lo_data.get("ipv4_addr") if lo_data else None,
             )
             result["loopback_ipv6"] = overrides.get(
-                "loopback_ipv6", node.get("loopback_ipv6")
+                "loopback_ipv6",
+                lo_data.get("ipv6_addr") if lo_data else None,
             )
             result["port_channel_id_min"] = overrides.get(
                 "port_channel_id_min", node.get("port_channel_id_min", 0)
@@ -1370,22 +1461,28 @@ def _handle_update(
         changes["asn"] = {"old": current_asn, "new": desired_asn_str}
         changed = True
 
-    # ── Update loopback IPv4 ──────────────────────────────────────
-    current_lo4 = current.get("loopback_ipv4")
+    # ── Update loopback interfaces ─────────────────────────────────
+    # Loopbacks are separate interface nodes, not system node properties.
+    existing_lo = _get_system_loopback(client_factory, bp_id, sys_id)
+    current_lo4 = existing_lo.get("ipv4_addr") if existing_lo else None
+    current_lo6 = existing_lo.get("ipv6_addr") if existing_lo else None
+    lo_needs_update = False
     if loopback_ipv4 is not None and current_lo4 != loopback_ipv4:
-        _set_system_property(
-            client_factory, bp_id, sys_id, "loopback_ipv4", loopback_ipv4
-        )
-        changes["loopback_ipv4"] = {"old": current_lo4, "new": loopback_ipv4}
-        changed = True
-
-    # ── Update loopback IPv6 ──────────────────────────────────────
-    current_lo6 = current.get("loopback_ipv6")
+        lo_needs_update = True
     if loopback_ipv6 is not None and current_lo6 != loopback_ipv6:
-        _set_system_property(
-            client_factory, bp_id, sys_id, "loopback_ipv6", loopback_ipv6
+        lo_needs_update = True
+    if lo_needs_update:
+        _create_or_update_loopback(
+            client_factory,
+            bp_id,
+            sys_id,
+            ipv4=loopback_ipv4,
+            ipv6=loopback_ipv6,
         )
-        changes["loopback_ipv6"] = {"old": current_lo6, "new": loopback_ipv6}
+        if loopback_ipv4 is not None and current_lo4 != loopback_ipv4:
+            changes["loopback_ipv4"] = {"old": current_lo4, "new": loopback_ipv4}
+        if loopback_ipv6 is not None and current_lo6 != loopback_ipv6:
+            changes["loopback_ipv6"] = {"old": current_lo6, "new": loopback_ipv6}
         changed = True
 
     # ── Update port-channel ID range ──────────────────────────────
@@ -1525,16 +1622,23 @@ def _apply_properties(
     unsafe_patch = {}
     if tags:
         unsafe_patch["tags"] = tags
-    if loopback_ipv4:
-        unsafe_patch["loopback_ipv4"] = loopback_ipv4
-    if loopback_ipv6:
-        unsafe_patch["loopback_ipv6"] = loopback_ipv6
     if port_channel_id_min:
         unsafe_patch["port_channel_id_min"] = port_channel_id_min
     if port_channel_id_max:
         unsafe_patch["port_channel_id_max"] = port_channel_id_max
     if unsafe_patch:
         _patch_node_unsafe(client_factory, bp_id, sys_id, unsafe_patch)
+
+    # Loopback interfaces must be created as separate interface nodes
+    # linked via hosted_interfaces relationships (graph-mutation PATCH).
+    if loopback_ipv4 or loopback_ipv6:
+        _create_or_update_loopback(
+            client_factory,
+            bp_id,
+            sys_id,
+            ipv4=loopback_ipv4,
+            ipv6=loopback_ipv6,
+        )
 
     # ASN must be set on the domain node, not the system node
     if asn is not None:
