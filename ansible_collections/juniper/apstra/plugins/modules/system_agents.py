@@ -335,7 +335,13 @@ def _list_agents(client_factory):
     """GET /api/system-agents — list all system agents."""
     client = _get_base_client(client_factory)
     result = client.system_agents.list()
-    if result and "items" in result:
+    # The SDK's RestResources.list() already extracts the 'items' list
+    # from the API response, so result is a list (or None).
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict) and "items" in result:
         return result["items"]
     return []
 
@@ -549,6 +555,14 @@ def _handle_present(module, client_factory):
             if wait:
                 agent = _wait_for_connection(client_factory, agent_id, wait_timeout)
             return _build_result(agent, False, "system agent already up to date")
+
+        # Carry over existing config fields that are required by the PUT endpoint
+        # but not specified by the user (e.g. platform, operation_mode).
+        existing_config = existing.get("config", {})
+        if not p.get("platform") and existing_config.get("platform"):
+            p["platform"] = existing_config["platform"]
+        if not p.get("operation_mode") and existing_config.get("operation_mode"):
+            p["operation_mode"] = existing_config["operation_mode"]
 
         update_body = _build_update_body(p)
         _update_agent(client_factory, agent_id, update_body)

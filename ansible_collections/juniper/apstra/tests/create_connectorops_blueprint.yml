@@ -397,25 +397,38 @@
         state: gathered
       register: all_agents
 
-    # Build a mapping of device label → system_id from device_facts
+    # Build a reverse mapping: management_ip → device_name from the devices dict.
+    # Agents may have empty labels, so we match by management_ip instead.
+    - name: Build IP-to-device name mapping
+      ansible.builtin.set_fact:
+        _ip_to_device: >-
+          {{
+            _ip_to_device | default({}) | combine({
+              item.value.mgmt_ip: item.key
+            })
+          }}
+      loop: "{{ devices | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
     - name: Initialize device serial map
       ansible.builtin.set_fact:
         device_serial_map: {}
 
-    - name: Build device serial map from agents
+    - name: Build device serial map from agents (match by management_ip)
       ansible.builtin.set_fact:
         device_serial_map: >-
           {{
             device_serial_map | combine({
-              item.label: item.system_id
+              _ip_to_device[item.management_ip]: item.system_id
             })
           }}
       loop: "{{ all_agents.agents }}"
       loop_control:
-        label: "{{ item.label | default(item.agent_id) }}"
+        label: "{{ item.management_ip | default(item.agent_id) }}"
       when:
-        - item.label is defined
-        - item.label in devices
+        - item.management_ip is defined
+        - item.management_ip in _ip_to_device
         - item.system_id is defined
         - item.system_id | length > 0
 
@@ -1111,61 +1124,62 @@
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 20: ConnectorOps Property Set
+    # COMMENTED OUT — The FT creates the property set itself.
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Build property set values dynamically — SRX_details from testbed
-    - name: "Phase 20 — Build ConnectorOps property set values"
-      ansible.builtin.set_fact:
-        connectorops_property_set_values:
-          SRXSetGroups:
-            connector_ops_config_deployment_1:
-              SRX_details: "{{ _srx_details }}"
-              commitConfig: "{{ commit_config }}"
-              sharedLoopbackIP: "{{ shared_loopback_ip }}"
-              vrf: "{{ vrf_groups }}"
-      vars:
-        _srx_details: >-
-          [
-          {% for name in srx_nodes.keys() %}
-            {
-              "name": "{{ name }}",
-              "managementIP": "{{ tb.devices.devices_list[name].ip }}",
-              "username": "{{ device_username }}"
-            }{% if not loop.last %},{% endif %}
-          {% endfor %}
-          ]
+    # # Build property set values dynamically — SRX_details from testbed
+    # - name: "Phase 20 — Build ConnectorOps property set values"
+    #   ansible.builtin.set_fact:
+    #     connectorops_property_set_values:
+    #       SRXSetGroups:
+    #         connector_ops_config_deployment_1:
+    #           SRX_details: "{{ _srx_details }}"
+    #           commitConfig: "{{ commit_config }}"
+    #           sharedLoopbackIP: "{{ shared_loopback_ip }}"
+    #           vrf: "{{ vrf_groups }}"
+    #   vars:
+    #     _srx_details: >-
+    #       [
+    #       {% for name in srx_nodes.keys() %}
+    #         {
+    #           "name": "{{ name }}",
+    #           "managementIP": "{{ tb.devices.devices_list[name].ip }}",
+    #           "username": "{{ device_username }}"
+    #         }{% if not loop.last %},{% endif %}
+    #       {% endfor %}
+    #       ]
 
-    - name: "Phase 20a — Create ConnectorOps property set (global)"
-      juniper.apstra.property_set:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        body:
-          label: "{{ connectorops_ps_label }}"
-          values: "{{ connectorops_property_set_values }}"
-        state: present
-      register: cops_ps
+    # - name: "Phase 20a — Create ConnectorOps property set (global)"
+    #   juniper.apstra.property_set:
+    #     api_url: "{{ api_url }}"
+    #     verify_certificates: "{{ verify_certs }}"
+    #     auth_token: "{{ token }}"
+    #     body:
+    #       label: "{{ connectorops_ps_label }}"
+    #       values: "{{ connectorops_property_set_values }}"
+    #     state: present
+    #   register: cops_ps
 
-    - name: "Phase 20b — Import property set into blueprint"
-      juniper.apstra.property_set:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        body:
-          id: "{{ cops_ps.id.property_set }}"
-        state: reimported
+    # - name: "Phase 20b — Import property set into blueprint"
+    #   juniper.apstra.property_set:
+    #     api_url: "{{ api_url }}"
+    #     verify_certificates: "{{ verify_certs }}"
+    #     auth_token: "{{ token }}"
+    #     id:
+    #       blueprint: "{{ blueprint_id }}"
+    #     body:
+    #       id: "{{ cops_ps.id.property_set }}"
+    #     state: reimported
 
-    - name: "Phase 20c — Deploy after property set import"
-      juniper.apstra.blueprint:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        lock_state: "ignore"
-        state: committed
+    # - name: "Phase 20c — Deploy after property set import"
+    #   juniper.apstra.blueprint:
+    #     api_url: "{{ api_url }}"
+    #     verify_certificates: "{{ verify_certs }}"
+    #     auth_token: "{{ token }}"
+    #     id:
+    #       blueprint: "{{ blueprint_id }}"
+    #     lock_state: "ignore"
+    #     state: committed
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 21: Security Configlet

@@ -1000,6 +1000,13 @@ def _handle_present(module, client_factory):
     links = body.get("links") or []
     deploy_mode = body.get("deploy_mode")  # None means "not specified by user"
     asn = body.get("asn")
+    # Coerce ASN to int — Ansible Jinja2 may pass "110000" as a string
+    # but the Apstra API requires an integer for domain_id.
+    if asn is not None:
+        try:
+            asn = int(asn)
+        except (ValueError, TypeError):
+            pass
     loopback_ipv4 = body.get("loopback_ipv4")
     loopback_ipv6 = body.get("loopback_ipv6")
     port_channel_id_min = body.get("port_channel_id_min") or 0
