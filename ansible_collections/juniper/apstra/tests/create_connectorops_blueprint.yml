@@ -576,6 +576,19 @@
             - "{{ private_172_pool_id }}"
         state: present
 
+    - name: "Phase 6i — Create Loopback IPs - Generics resource group"
+      juniper.apstra.resource_group:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "generic_loopback_ips"
+        body:
+          pool_ids: []
+        state: present
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 7: First Deploy
     # ═══════════════════════════════════════════════════════════════════════════
