@@ -384,6 +384,28 @@
       ansible.builtin.debug:
         msg: "node_by_label keys: {{ node_by_label.keys() | list }}"
 
+    # ─── Rename leaf & spine nodes in the blueprint graph ─────────────────────
+    # The FT's GetBorderleafLoopbacks() searches for "border" in the
+    # hosting_system label. Blueprint-internal labels (e.g.
+    # "connectorops_vjun_001_leaf3") lack this suffix, so we patch them
+    # to match the testbed names (e.g. "vg-am-cops-tb-0-leaf3border").
+
+    - name: "Phase 4.5e — Rename leaf/spine nodes in blueprint"
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        node_id: "{{ item.value.id }}"
+        node_properties:
+          label: "{{ item.key }}"
+          hostname: "{{ item.key }}"
+        state: node_updated
+      loop: "{{ node_by_label | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 5: System ID Assignment
     # ═══════════════════════════════════════════════════════════════════════════
