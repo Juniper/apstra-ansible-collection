@@ -589,6 +589,19 @@
           pool_ids: []
         state: present
 
+    - name: "Phase 6j — Create Generic ASNs resource group"
+      juniper.apstra.resource_group:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "generic_asns"
+        body:
+          pool_ids: []
+        state: present
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 7: First Deploy
     # ═══════════════════════════════════════════════════════════════════════════
@@ -602,6 +615,20 @@
         lock_state: "ignore"
         state: committed
       register: deploy_1
+
+    # -- Token refresh (Apstra tokens expire; re-auth before heavy phases) --
+    - name: "Refresh auth token (before Phase 8)"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: Update token fact
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 8: SRX External Router Setup (generic_systems)
@@ -836,6 +863,20 @@
           blueprint: "{{ blueprint_id }}"
         lock_state: "ignore"
         state: committed
+
+    # -- Token refresh before Phase 12 -----------------------------------------
+    - name: "Refresh auth token (before Phase 12)"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: Update token fact
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 12: Connectivity Template (BGP-2-SRX)
@@ -1098,6 +1139,20 @@
       loop_control:
         label: "{{ item.key }}"
       when: host_intf_map[item.key] is defined
+
+    # -- Token refresh before Phase 18 -----------------------------------------
+    - name: "Refresh auth token (before Phase 18)"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: Update token fact
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 18: Deploy

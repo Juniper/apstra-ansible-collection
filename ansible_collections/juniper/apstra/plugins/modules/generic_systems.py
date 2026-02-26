@@ -544,9 +544,15 @@ def _get_system_asn(client_factory, bp_id, sys_id):
 def _set_system_asn(client_factory, bp_id, sys_id, asn):
     """Set the ASN (domain_id) on the system's domain node.
 
-    The domain node ID follows the convention ``{system_label}_as``.
+    If the domain node already exists, patches its ``domain_id``.
+    Otherwise creates a new ``domain`` node (type ``autonomous_system``)
+    and a ``composed_of_systems`` relationship via the blueprint
+    graph-mutation PATCH API — the same mechanism Apstra uses internally.
+
     The value must be a **string** (the API rejects integers).
     """
+    asn_str = str(asn)
+
     # First, find the domain node via QE
     qe = {
         "query": (
@@ -556,20 +562,38 @@ def _set_system_asn(client_factory, bp_id, sys_id, asn):
     }
     resp = _api_post(client_factory, f"/blueprints/{bp_id}/qe", qe)
     items = resp.get("items", []) if resp else []
-    if not items:
-        # Domain node doesn't exist yet — this may happen before first deploy.
-        # Fall back to patching the system node (legacy behaviour).
-        _patch_node_unsafe(client_factory, bp_id, sys_id, {"domain_id": asn})
-        return
 
-    domain_node_id = items[0].get("d", {}).get("id")
-    if not domain_node_id:
-        _patch_node_unsafe(client_factory, bp_id, sys_id, {"domain_id": asn})
-        return
+    if items:
+        domain_node_id = items[0].get("d", {}).get("id")
+        if domain_node_id:
+            _patch_node_unsafe(
+                client_factory, bp_id, domain_node_id, {"domain_id": asn_str}
+            )
+            return
 
-    # domain_id must be a string on the domain node
-    asn_str = str(asn)
-    _patch_node_unsafe(client_factory, bp_id, domain_node_id, {"domain_id": asn_str})
+    # Domain node doesn't exist — create it via graph-mutation PATCH.
+    sys_node = _get_system_node(client_factory, bp_id, sys_id)
+    label = sys_node.get("label", sys_id) if sys_node else sys_id
+    domain_node_id = f"{label}_as"
+    rel_id = f"{label}_as_composed"
+
+    body = {
+        "nodes": {
+            domain_node_id: {
+                "type": "domain",
+                "domain_type": "autonomous_system",
+                "domain_id": asn_str,
+            },
+        },
+        "relationships": {
+            rel_id: {
+                "type": "composed_of_systems",
+                "source_id": domain_node_id,
+                "target_id": sys_id,
+            }
+        },
+    }
+    _api_patch(client_factory, f"/blueprints/{bp_id}", body)
 
 
 def _get_system_loopback(client_factory, bp_id, sys_id):
