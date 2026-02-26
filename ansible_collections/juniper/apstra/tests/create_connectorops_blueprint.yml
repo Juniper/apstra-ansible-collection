@@ -775,6 +775,8 @@
           description: "Routing policy for SRX external routers"
           policy_type: "user_defined"
           import_policy: "all"
+          expect_default_ipv4_route: false
+          expect_default_ipv6_route: false
           export_policy:
             loopbacks: true
             spine_leaf_links: true
@@ -782,6 +784,13 @@
             spine_superspine_links: false
             static_routes: false
           extra_import_routes:
+            - prefix: "{{ srx_loopback_prefix }}"
+              action: "permit"
+              le_mask: 32
+            - prefix: "172.16.0.0/12"
+              action: "deny"
+              le_mask: 32
+          extra_export_routes:
             - prefix: "{{ srx_loopback_prefix }}"
               action: "permit"
               le_mask: 32
