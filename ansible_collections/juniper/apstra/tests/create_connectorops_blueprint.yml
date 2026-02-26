@@ -1039,167 +1039,12 @@
         state: committed
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 14: Security Zones
+    # Phases 14–18 REMOVED
     # ═══════════════════════════════════════════════════════════════════════════
-    - name: "Phase 14 — Create security zones"
-      juniper.apstra.security_zone:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        body:
-          label: "{{ item.key }}"
-          vrf_name: "{{ item.key }}"
-          sz_type: "evpn"
-          vni_id: "{{ item.value.vni_id | int }}"
-          vlan_id: "{{ item.value.vlan_id | int }}"
-        state: present
-      loop: "{{ security_zones | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-      register: sz_results
-
-    # Build security zone ID map for later use
-    - name: Build SZ ID map
-      ansible.builtin.set_fact:
-        sz_id_map: >-
-          {{
-            sz_id_map | default({}) | combine({
-              item.item.key: item.id.security_zone
-            })
-          }}
-      loop: "{{ sz_results.results }}"
-      loop_control:
-        label: "{{ item.item.key }}"
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 15: Virtual Networks
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    # Get all leaf system IDs for bound_to
-    - name: "Phase 15a — Build leaf system ID list"
-      ansible.builtin.set_fact:
-        leaf_system_ids: >-
-          {{
-            node_by_label | dict2items
-            | selectattr('value.role', 'equalto', 'leaf')
-            | map(attribute='value.id') | list
-          }}
-
-    - name: "Phase 15b — Create virtual networks"
-      juniper.apstra.virtual_network:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        body:
-          label: "{{ item.key }}"
-          vn_type: "vxlan"
-          vn_id: "{{ item.value.vn_id }}"
-          security_zone_id: "{{ sz_id_map[item.value.security_zone] }}"
-          ipv4_enabled: true
-          ipv4_subnet: "{{ item.value.subnet }}"
-          virtual_gateway_ipv4_enabled: true
-          virtual_gateway_ipv4: "{{ item.value.gateway }}"
-          vlan_id: "{{ item.value.vlan_id }}"
-          bound_to: "{{ leaf_system_ids }}"
-          dhcp_service: "dhcpServiceDisabled"
-          create_policy_untagged: true
-          l3_mtu: "{{ item.value.l3_mtu | default(9000) }}"
-        state: present
-      loop: "{{ virtual_networks | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 16: Assign IP Pools to SZ Loopbacks
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    # resource_group module handles idempotency — no pre-check needed
-    - name: "Phase 16 — Assign IP pool to SZ loopbacks"
-      juniper.apstra.resource_group:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-          group_type: "ip"
-          group_name: "sz:{{ sz_id_map[item.key] }},leaf_loopback_ips"
-        body:
-          pool_ids:
-            - "{{ private_172_pool_id }}"
-        state: present
-      loop: "{{ security_zones | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 17: VN-to-Host Endpoint Policy Assignment
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    # Discover ESI-LAG group interfaces for VN endpoint-policy assignment
-    - name: "Phase 17a — Query host-facing EVPN interfaces"
-      juniper.apstra.blueprint:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        state: queried
-        query_type: host_evpn_interfaces
-        host_labels: "{{ bp_hosts.keys() | list }}"
-      register: host_intf_qe
-
-    - name: Build host interface map (host label → interface ID)
-      ansible.builtin.set_fact:
-        host_intf_map: "{{ host_intf_qe.host_interfaces }}"
-
-    - name: "Phase 17b — Assign VN to hosts"
-      juniper.apstra.endpoint_policy:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        virtual_network_label: "{{ item.value.vn_label }}"
-        body:
-          application_points:
-            - id: "{{ host_intf_map[item.key] }}"
-              used: true
-        state: present
-      loop: "{{ bp_hosts | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-      when: host_intf_map[item.key] is defined
-
-    # -- Token refresh before Phase 18 -----------------------------------------
-    - name: "Refresh auth token (before Phase 18)"
-      juniper.apstra.authenticate:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        username: "{{ aos_username }}"
-        password: "{{ aos_password }}"
-        logout: false
-      register: auth
-
-    - name: Update token fact
-      ansible.builtin.set_fact:
-        token: "{{ auth.token }}"
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 18: Deploy
-    # ═══════════════════════════════════════════════════════════════════════════
-    - name: "Phase 18 — Deploy after VN + SZ + endpoint policy"
-      juniper.apstra.blueprint:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_id }}"
-        lock_state: "ignore"
-        state: committed
+    # Security Zones, Virtual Networks, SZ Loopback IPs, VN-to-Host EP
+    # assignment, and the associated deploy are intentionally omitted.
+    # The FT's TestConnectoropsPrerequisites creates these resources itself.
+    # If the playbook creates them first the FT fails with HTTP 422 (conflict).
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 19: Host Generic Systems (with LAG bonds)
@@ -1294,6 +1139,20 @@
     #       blueprint: "{{ blueprint_id }}"
     #     lock_state: "ignore"
     #     state: committed
+
+    # -- Token refresh before Phase 21 -----------------------------------------
+    - name: "Refresh auth token (before Phase 21)"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: Update token fact
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 21: Security Configlet
