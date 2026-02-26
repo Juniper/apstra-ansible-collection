@@ -438,7 +438,7 @@
 
     # Build system_id assignments: map blueprint node_id → serial
     # Match by comparing the device label in the vars to the blueprint node label
-    - name: "Phase 5 — Assign system_id to blueprint nodes"
+    - name: "Phase 5 — Assign system_id + deploy_mode to blueprint nodes"
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -447,6 +447,7 @@
           blueprint: "{{ blueprint_id }}"
         node_id: "{{ node_by_label[item.key].id }}"
         system_id: "{{ device_serial_map[item.key] }}"
+        deploy_mode: deploy
         state: node_updated
       loop: "{{ devices | dict2items }}"
       loop_control:
