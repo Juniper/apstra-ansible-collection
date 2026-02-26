@@ -236,7 +236,6 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
         virtual_network_label = module.params.get("virtual_network_label", None)
-        pipeline_ep_id = None  # Will be set when found via VN lookup
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -267,11 +266,7 @@ def main():
                     .in_(type="vn_to_attach")
                     .node(type="ep_endpoint_policy")
                     .in_(type="ep_first_subpolicy")
-                    .node(
-                        type="ep_endpoint_policy",
-                        policy_type_name="pipeline",
-                        name="pipeline_ep",
-                    )
+                    .node(type="ep_endpoint_policy", policy_type_name="pipeline")
                     .in_(type="ep_subpolicy")
                     .node(
                         type="ep_endpoint_policy",
@@ -298,14 +293,8 @@ def main():
                         msg=f"Object missing key {leaf_object_type}: {result[0]}"
                     )
 
-                # Save the batch endpoint policy id (for object operations)
+                # Finally, save the endpoint policy id
                 id[leaf_object_type] = ep_found[0][leaf_object_type].id
-
-                # Save the pipeline endpoint policy id (needed for
-                # obj-policy-batch-apply, which requires the pipeline
-                # EP, not the batch EP)
-                if "pipeline_ep" in ep_found[0]:
-                    pipeline_ep_id = ep_found[0]["pipeline_ep"].id
 
                 current_object = client_factory.object_request(object_type, "get", id)
         else:
@@ -363,34 +352,6 @@ def main():
                         app_points = []
                         for body_ap in body[application_points_leaf_object_type]:
                             ap = {}
-
-                            # Support direct interface ID (skip
-                            # if_name/remote_host lookup)
-                            direct_intf_id = body_ap.get("id")
-                            if direct_intf_id:
-                                desired_used = body_ap.get("used", True)
-                                # NOTE: We skip the QE idempotency check here
-                                # because the graph path
-                                # (interface→ep_member_of→...→virtual_network)
-                                # always exists for valid application points
-                                # regardless of the "used" state.  The
-                                # obj-policy-batch-apply API is idempotent, so
-                                # re-applying is safe.
-                                #
-                                # Use the pipeline EP id (not the batch EP)
-                                # because obj-policy-batch-apply requires the
-                                # pipeline policy id for VN assignment.
-                                policy_id = pipeline_ep_id or id[leaf_object_type]
-                                ap["id"] = direct_intf_id
-                                ap["policies"] = [
-                                    {
-                                        "policy": policy_id,
-                                        "used": desired_used,
-                                    }
-                                ]
-                                app_points.append(ap)
-                                continue
-
                             if_name = body_ap.get("if_name")
                             if not if_name:
                                 module.fail_json(
