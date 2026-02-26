@@ -1014,6 +1014,7 @@ def _handle_present(module, client_factory):
             loopback_ipv6,
             port_channel_id_min,
             port_channel_id_max,
+            is_external,
         )
     else:
         # ── CREATE path ───────────────────────────────────────────
@@ -1227,6 +1228,7 @@ def _handle_update(
     loopback_ipv6,
     port_channel_id_min,
     port_channel_id_max,
+    is_external=None,
 ):
     """Update an existing generic system."""
     changed = False
@@ -1247,6 +1249,14 @@ def _handle_update(
     if patch_body:
         _update_system_node(client_factory, bp_id, sys_id, patch_body)
         changed = True
+
+    # ── Update external flag (requires allow_unsafe) ──────────────
+    if is_external is not None:
+        current_external = current.get("external", False)
+        if current_external != is_external:
+            _set_system_property(client_factory, bp_id, sys_id, "external", is_external)
+            changes["external"] = {"old": current_external, "new": is_external}
+            changed = True
 
     # ── Update tags ───────────────────────────────────────────────
     current_tags = sorted(current.get("tags", []) or [])

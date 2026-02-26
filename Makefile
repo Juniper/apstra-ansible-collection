@@ -136,7 +136,10 @@ install: build
 	test-external_gateway \
 	test-connectivity_template \
 	test-configlets \
-	test-generic_systems
+	test-generic_systems \
+	test-system_agents \
+	test-interface_map \
+	test-fabric_settings
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -198,7 +201,16 @@ test-generic_systems: install
 test-customize_generic_systems: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_generic_systems.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems
+test-system_agents: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/system_agents.yml
+
+test-interface_map: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interface_map.yml
+
+test-fabric_settings: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/fabric_settings.yml
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-interface_map test-fabric_settings
 
 clean-pipenv:
 	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true

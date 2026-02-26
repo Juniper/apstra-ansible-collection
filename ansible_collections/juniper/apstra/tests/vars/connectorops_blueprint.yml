@@ -1,0 +1,220 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# ConnectorOps Blueprint Variables
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# This vars file is consumed by create_connectorops_blueprint.yml.
+# Device topology, wiring, and AOS credentials are read from testbed.yaml
+# at runtime — only application-specific config lives here.
+#
+# Usage:
+#   ansible-playbook tests/create_connectorops_blueprint.yml \
+#       -e @tests/vars/connectorops_blueprint.yml
+#
+# Override testbed path:
+#   ansible-playbook ... -e testbed_file=/path/to/testbed.yaml
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Testbed Input ─────────────────────────────────────────────────────────────
+# Path to testbed.yaml — checks TESTBED_FILE env var first, then relative path.
+testbed_file: "{{ lookup('env', 'TESTBED_FILE') | default('testbed.yaml', true) }}"
+
+# Topology key inside testbed.topologies (also used as blueprint_label)
+topology_name: "vg-am-cops-tb-0"
+
+# ── Interface Maps ────────────────────────────────────────────────────────────
+spine_interface_map: "simple_dc_vjunos_ifmap"
+leaf_interface_map: "simple_dc_vjunos_ifmap"
+
+# ── Blueprint Node ↔ Testbed Device Mapping ──────────────────────────────────
+# The rack type creates leaf nodes numbered sequentially (_leaf1, _leaf2, ...).
+# This list maps each sequential index to the testbed device suffix.
+# Order: leaf-1 ESI (count=2) → leaf1, leaf2; border-leaf-1 → leaf3border; border-leaf-2 → leaf4border
+leaf_device_order:
+  - leaf1
+  - leaf2
+  - leaf3border
+  - leaf4border
+
+# ── SRX Generic System Indices (within rack type) ────────────────────────────
+# The rack type has 6 generics: host1-4 (regular), host5-6 (SRX, tagged 'srx').
+# These indices map SRX testbed suffixes to their sequential position in the
+# rack type, used to find existing blueprint generic systems (e.g. _sys005).
+srx_generic_indices:
+  srx1: 5
+  srx2: 6
+
+# ── SRX Application Config (not in testbed) ──────────────────────────────────
+# ASN and loopback per SRX — connections are derived from testbed topology.
+# Keys use suffix only (e.g. srx1); full name is topology_name + "-" + suffix.
+srx_config:
+  srx1:
+    asn: 110000
+    loopback_ip: "172.32.1.6/32"
+  srx2:
+    asn: 110001
+    loopback_ip: "172.32.1.7/32"
+
+srx_loopback_prefix: "172.32.1.6/31"
+
+# ── Host VN Assignments (not in testbed) ──────────────────────────────────────
+# Leaf interface wiring is derived from testbed; VN mapping lives here.
+# Keys use suffix only (e.g. h1); full name is topology_name + "-" + suffix.
+host_vn_config:
+  h1:
+    vn_label: "green1"
+    bond_ip: "210.210.210.10/24"
+    bond_gw: "210.210.210.1"
+    vlan_id: 101
+  h2:
+    vn_label: "red1"
+    bond_ip: "200.200.200.10/24"
+    bond_gw: "200.200.200.1"
+    vlan_id: 102
+  h3:
+    vn_label: "dogs1"
+    bond_ip: "221.221.221.10/24"
+    bond_gw: "221.221.221.1"
+    vlan_id: 202
+  h4:
+    vn_label: "cats1"
+    bond_ip: "220.220.220.10/24"
+    bond_gw: "220.220.220.1"
+    vlan_id: 201
+
+# ── Resource Pools ────────────────────────────────────────────────────────────
+asn_pool_name: "{{ blueprint_label }}_asn_pool"
+asn_range_first: 100000
+asn_range_last: 200000
+
+ip_pool_name: "{{ blueprint_label }}_ip_pool"
+ip_pool_subnet: "10.10.0.0/24"
+
+# Built-in Apstra pool used for loopbacks (srx-gateway topology)
+loopback_pool_name: "Private-172.16.0.0/12"
+
+# ── Fabric Settings ──────────────────────────────────────────────────────────
+external_router_mtu: 9000
+
+# ── Security Zones (Routing Zones) ───────────────────────────────────────────
+security_zones:
+  green:
+    vni_id: 10001
+    vlan_id: 2
+  red:
+    vni_id: 10002
+    vlan_id: 3
+  cats:
+    vni_id: 20001
+    vlan_id: 4
+  dogs:
+    vni_id: 20002
+    vlan_id: 5
+
+# ── Virtual Networks ─────────────────────────────────────────────────────────
+virtual_networks:
+  green1:
+    vn_id: "10101"
+    subnet: "210.210.210.0/24"
+    gateway: "210.210.210.1"
+    security_zone: "green"
+    vlan_id: 101
+    l3_mtu: 9000
+  red1:
+    vn_id: "10102"
+    subnet: "200.200.200.0/24"
+    gateway: "200.200.200.1"
+    security_zone: "red"
+    vlan_id: 102
+    l3_mtu: 9000
+  cats1:
+    vn_id: "20201"
+    subnet: "220.220.220.0/24"
+    gateway: "220.220.220.1"
+    security_zone: "cats"
+    vlan_id: 201
+    l3_mtu: 9000
+  dogs1:
+    vn_id: "20202"
+    subnet: "221.221.221.0/24"
+    gateway: "221.221.221.1"
+    security_zone: "dogs"
+    vlan_id: 202
+    l3_mtu: 9000
+
+# ── Routing Policy ───────────────────────────────────────────────────────────
+routing_policy_label: "ext_rtr_policy"
+
+# ── ConnectorOps Property Set ─────────────────────────────────────────────────
+connectorops_ps_label: "connector_ops_config-{{ blueprint_label }}"
+connectorops_deployment_key: "connector_ops_config-{{ blueprint_label }}-deployment-1"
+
+# SRX_details is built dynamically from testbed (device IPs + names).
+# Only the VRF groups and shared config are defined here.
+shared_loopback_ip: "172.27.1.0"
+commit_config: false
+vrf_groups:
+  animals:
+    - name: "cats"
+    - name: "dogs"
+  color:
+    - name: "green"
+      advertise_routes:
+        - "210.210.210.0/24"
+    - name: "red"
+      advertise_routes:
+        - "200.200.200.0/24"
+
+# ── Configlet ─────────────────────────────────────────────────────────────────
+configlet_label: "custom-{{ blueprint_label }}"
+
+# Junos set-based security configlet applied to SRX nodes
+# This establishes security policies for inter-VRF traffic through the SRX
+configlet_template_text: |
+  set applications application bfd-mhop term 1 protocol udp
+  set applications application bfd-mhop term 1 destination-port 4784
+  set security screen ids-option untrust-screen icmp ping-death
+  set security screen ids-option untrust-screen ip source-route-option
+  set security screen ids-option untrust-screen ip tear-drop
+  set security screen ids-option untrust-screen tcp syn-flood alarm-threshold 1024
+  set security screen ids-option untrust-screen tcp syn-flood attack-threshold 200
+  set security screen ids-option untrust-screen tcp syn-flood source-threshold 1024
+  set security screen ids-option untrust-screen tcp syn-flood destination-threshold 2048
+  set security screen ids-option untrust-screen tcp syn-flood timeout 20
+  set security screen ids-option untrust-screen tcp land
+  set security l3vpn vrf-group GREEN vrf GREEN
+  set security l3vpn vrf-group RED vrf RED
+  set security l3vpn vrf-group CATS vrf CATS
+  set security l3vpn vrf-group DOGS vrf DOGS
+  set security policies from-zone evpn to-zone evpn policy G2R match source-address any
+  set security policies from-zone evpn to-zone evpn policy G2R match destination-address any
+  set security policies from-zone evpn to-zone evpn policy G2R match application any
+  set security policies from-zone evpn to-zone evpn policy G2R match source-l3vpn-vrf-group GREEN
+  set security policies from-zone evpn to-zone evpn policy G2R match destination-l3vpn-vrf-group RED
+  set security policies from-zone evpn to-zone evpn policy G2R then permit
+  set security policies from-zone evpn to-zone evpn policy R2G match source-address any
+  set security policies from-zone evpn to-zone evpn policy R2G match destination-address any
+  set security policies from-zone evpn to-zone evpn policy R2G match application any
+  set security policies from-zone evpn to-zone evpn policy R2G match source-l3vpn-vrf-group RED
+  set security policies from-zone evpn to-zone evpn policy R2G match destination-l3vpn-vrf-group GREEN
+  set security policies from-zone evpn to-zone evpn policy R2G then permit
+  set security policies from-zone evpn to-zone evpn policy D2C match source-address any
+  set security policies from-zone evpn to-zone evpn policy D2C match destination-address any
+  set security policies from-zone evpn to-zone evpn policy D2C match application any
+  set security policies from-zone evpn to-zone evpn policy D2C match source-l3vpn-vrf-group DOGS
+  set security policies from-zone evpn to-zone evpn policy D2C match destination-l3vpn-vrf-group CATS
+  set security policies from-zone evpn to-zone evpn policy D2C then permit
+  set security policies from-zone evpn to-zone evpn policy C2D match source-address any
+  set security policies from-zone evpn to-zone evpn policy C2D match destination-address any
+  set security policies from-zone evpn to-zone evpn policy C2D match application any
+  set security policies from-zone evpn to-zone evpn policy C2D match source-l3vpn-vrf-group CATS
+  set security policies from-zone evpn to-zone evpn policy C2D match destination-l3vpn-vrf-group DOGS
+  set security policies from-zone evpn to-zone evpn policy C2D then reject
+  set security zones security-zone evpn host-inbound-traffic system-services all
+  set security zones security-zone evpn host-inbound-traffic protocols all
+  set security zones security-zone evpn interfaces ge-0/0/0.0
+  set security zones security-zone evpn interfaces ge-0/0/1.0
+  set security zones security-zone evpn interfaces lo0.0
+  set security zones security-zone trust tcp-rst
+  set security zones security-zone untrust screen untrust-screen

@@ -1,0 +1,170 @@
+---
+# ── Test playbook for juniper.apstra.system_agents ────────────────
+#
+# Prerequisites:
+#   - Apstra server reachable (APSTRA_API_URL or config.yml)
+#   - Valid credentials (APSTRA_USERNAME/PASSWORD or config.yml)
+#   - A reachable device at the configured management_ip
+#
+# Usage:
+#   ansible-playbook tests/system_agents.yml \
+#     -e management_ip=10.0.0.1 \
+#     -e device_username=admin \
+#     -e device_password=admin@123
+
+- name: Test create/update/delete system_agents
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    test_management_ip: "{{ management_ip | default('10.0.0.99') }}"
+    test_device_user: "{{ device_username | default('admin') }}"
+    test_device_pass: "{{ device_password | default('admin@123') }}"
+    test_label: "test-agent-ansible"
+    updated_label: "test-agent-ansible-updated"
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Display auth token
+      ansible.builtin.debug:
+        msg: "Auth token acquired"
+
+    # ── Test 1: Create agent ──────────────────────────────────────
+    - name: "Test 1: Create system agent"
+      juniper.apstra.system_agents:
+        management_ip: "{{ test_management_ip }}"
+        agent_type: "offbox"
+        label: "{{ test_label }}"
+        operation_mode: "full_control"
+        device_username: "{{ test_device_user }}"
+        device_password: "{{ test_device_pass }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: create_result
+
+    - name: Display create result
+      ansible.builtin.debug:
+        var: create_result
+
+    - name: Verify creation
+      ansible.builtin.assert:
+        that:
+          - create_result.changed
+          - create_result.agent_id | length > 0
+          - create_result.management_ip == test_management_ip
+        fail_msg: "Agent creation failed"
+        success_msg: "Test 1 PASSED: Agent created"
+
+    # ── Test 2: Idempotent create ─────────────────────────────────
+    - name: "Test 2: Create same agent again (idempotent)"
+      juniper.apstra.system_agents:
+        management_ip: "{{ test_management_ip }}"
+        agent_type: "offbox"
+        label: "{{ test_label }}"
+        operation_mode: "full_control"
+        device_username: "{{ test_device_user }}"
+        device_password: "{{ test_device_pass }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: idem_result
+
+    - name: Display idempotent result
+      ansible.builtin.debug:
+        var: idem_result
+
+    - name: Verify idempotency
+      ansible.builtin.assert:
+        that:
+          - not idem_result.changed
+        fail_msg: "Agent creation was not idempotent"
+        success_msg: "Test 2 PASSED: Idempotent (no change)"
+
+    # ── Test 3: Update agent label ────────────────────────────────
+    - name: "Test 3: Update agent label"
+      juniper.apstra.system_agents:
+        agent_id: "{{ create_result.agent_id }}"
+        label: "{{ updated_label }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: update_result
+
+    - name: Display update result
+      ansible.builtin.debug:
+        var: update_result
+
+    - name: Verify update
+      ansible.builtin.assert:
+        that:
+          - update_result.changed
+        fail_msg: "Agent update failed"
+        success_msg: "Test 3 PASSED: Agent label updated"
+
+    # ── Test 4: Delete agent ──────────────────────────────────────
+    - name: "Test 4: Delete system agent"
+      juniper.apstra.system_agents:
+        agent_id: "{{ create_result.agent_id }}"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: delete_result
+
+    - name: Display delete result
+      ansible.builtin.debug:
+        var: delete_result
+
+    - name: Verify deletion
+      ansible.builtin.assert:
+        that:
+          - delete_result.changed
+        fail_msg: "Agent deletion failed"
+        success_msg: "Test 4 PASSED: Agent deleted"
+
+    # ── Test 5: Delete again (idempotent) ─────────────────────────
+    - name: "Test 5: Delete non-existent agent (idempotent)"
+      juniper.apstra.system_agents:
+        agent_id: "{{ create_result.agent_id }}"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: delete_idem_result
+
+    - name: Verify delete idempotency
+      ansible.builtin.assert:
+        that:
+          - not delete_idem_result.changed
+        fail_msg: "Delete was not idempotent"
+        success_msg: "Test 5 PASSED: Delete idempotent (already absent)"
+
+    # ── Test 6: Create and delete by management_ip ────────────────
+    - name: "Test 6a: Create agent for IP-based delete test"
+      juniper.apstra.system_agents:
+        management_ip: "{{ test_management_ip }}"
+        agent_type: "offbox"
+        label: "{{ test_label }}-ip-delete"
+        device_username: "{{ test_device_user }}"
+        device_password: "{{ test_device_pass }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: ip_create_result
+
+    - name: "Test 6b: Delete agent by management IP"
+      juniper.apstra.system_agents:
+        management_ip: "{{ test_management_ip }}"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: ip_delete_result
+
+    - name: Verify IP-based deletion
+      ansible.builtin.assert:
+        that:
+          - ip_delete_result.changed
+        fail_msg: "IP-based deletion failed"
+        success_msg: "Test 6 PASSED: Agent deleted by management IP"
+
+    # ── Summary ───────────────────────────────────────────────────
+    - name: All system_agents tests passed
+      ansible.builtin.debug:
+        msg: "All 6 system_agents tests PASSED"

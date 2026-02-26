@@ -204,6 +204,12 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Coerce integer fields that the API requires as int, not str
+        if body:
+            for int_field in ("vni_id", "vlan_id"):
+                if int_field in body and body[int_field] is not None:
+                    body[int_field] = int(body[int_field])
+
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
         if len(missing_id) > 1 or (
