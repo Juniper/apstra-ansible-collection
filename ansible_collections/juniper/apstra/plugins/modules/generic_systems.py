@@ -515,6 +515,63 @@ def _get_system_node(client_factory, bp_id, sys_id):
     return _api_get(client_factory, f"/blueprints/{bp_id}/nodes/{sys_id}")
 
 
+def _get_system_asn(client_factory, bp_id, sys_id):
+    """Read the ASN (domain_id) for a generic system from its domain node.
+
+    Apstra stores the ASN on a separate ``domain`` node (type
+    ``autonomous_system``) connected via ``in_()`` to the system node,
+    **not** as a property of the system node itself.
+
+    Returns
+    -------
+    str or None
+        The domain_id string, or None if not set.
+    """
+    qe = {
+        "query": (
+            f"node('domain', domain_type='autonomous_system', name='d')"
+            f".out().node('system', id='{sys_id}')"
+        )
+    }
+    resp = _api_post(client_factory, f"/blueprints/{bp_id}/qe", qe)
+    items = resp.get("items", []) if resp else []
+    if items:
+        domain = items[0].get("d", {})
+        return domain.get("domain_id")
+    return None
+
+
+def _set_system_asn(client_factory, bp_id, sys_id, asn):
+    """Set the ASN (domain_id) on the system's domain node.
+
+    The domain node ID follows the convention ``{system_label}_as``.
+    The value must be a **string** (the API rejects integers).
+    """
+    # First, find the domain node via QE
+    qe = {
+        "query": (
+            f"node('domain', domain_type='autonomous_system', name='d')"
+            f".out().node('system', id='{sys_id}')"
+        )
+    }
+    resp = _api_post(client_factory, f"/blueprints/{bp_id}/qe", qe)
+    items = resp.get("items", []) if resp else []
+    if not items:
+        # Domain node doesn't exist yet — this may happen before first deploy.
+        # Fall back to patching the system node (legacy behaviour).
+        _patch_node_unsafe(client_factory, bp_id, sys_id, {"domain_id": asn})
+        return
+
+    domain_node_id = items[0].get("d", {}).get("id")
+    if not domain_node_id:
+        _patch_node_unsafe(client_factory, bp_id, sys_id, {"domain_id": asn})
+        return
+
+    # domain_id must be a string on the domain node
+    asn_str = str(asn)
+    _patch_node_unsafe(client_factory, bp_id, domain_node_id, {"domain_id": asn_str})
+
+
 def _find_system_by_label(client_factory, bp_id, label):
     """Find a generic system by label using QE. Returns dict or None."""
     qe = {"query": f"node('system', system_type='server', label='{label}', name='gs')"}
@@ -931,7 +988,9 @@ def _build_result(
             )
             result["external"] = node.get("external", False)
             result["tags"] = overrides.get("tags", node.get("tags", []) or [])
-            result["asn"] = overrides.get("asn", node.get("domain_id"))
+            result["asn"] = overrides.get(
+                "asn", _get_system_asn(client_factory, bp_id, sys_id)
+            )
             result["loopback_ipv4"] = overrides.get(
                 "loopback_ipv4", node.get("loopback_ipv4")
             )
@@ -1303,10 +1362,12 @@ def _handle_update(
         changed = True
 
     # ── Update ASN ────────────────────────────────────────────────
-    current_asn = current.get("domain_id")
-    if asn is not None and current_asn != asn:
-        _set_system_property(client_factory, bp_id, sys_id, "domain_id", asn)
-        changes["asn"] = {"old": current_asn, "new": asn}
+    current_asn = _get_system_asn(client_factory, bp_id, sys_id)
+    # Coerce both to string for comparison (domain_id is stored as string)
+    desired_asn_str = str(asn) if asn is not None else None
+    if desired_asn_str is not None and current_asn != desired_asn_str:
+        _set_system_asn(client_factory, bp_id, sys_id, asn)
+        changes["asn"] = {"old": current_asn, "new": desired_asn_str}
         changed = True
 
     # ── Update loopback IPv4 ──────────────────────────────────────
@@ -1464,8 +1525,6 @@ def _apply_properties(
     unsafe_patch = {}
     if tags:
         unsafe_patch["tags"] = tags
-    if asn is not None:
-        unsafe_patch["domain_id"] = asn
     if loopback_ipv4:
         unsafe_patch["loopback_ipv4"] = loopback_ipv4
     if loopback_ipv6:
@@ -1476,6 +1535,10 @@ def _apply_properties(
         unsafe_patch["port_channel_id_max"] = port_channel_id_max
     if unsafe_patch:
         _patch_node_unsafe(client_factory, bp_id, sys_id, unsafe_patch)
+
+    # ASN must be set on the domain node, not the system node
+    if asn is not None:
+        _set_system_asn(client_factory, bp_id, sys_id, asn)
 
 
 def _handle_absent(module, client_factory):

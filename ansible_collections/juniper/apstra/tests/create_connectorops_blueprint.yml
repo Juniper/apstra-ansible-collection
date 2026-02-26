@@ -860,15 +860,17 @@
                 ipv6_addressing_type: none
                 bgp_peering_generic_systems:
                   bgp_peer:
-                    bfd: false
+                    bfd: true
                     ipv4_safi: true
                     ipv6_safi: false
                     ttl: 2
+                    keepalive_timer: 10
+                    holdtime_timer: 30
                     session_addressing_ipv4: addressed
                     session_addressing_ipv6: none
                     peer_from: interface
                     peer_to: interface_or_ip_endpoint
-                    neighbor_asn_type: dynamic
+                    neighbor_asn_type: static
                     routing_policies:
                       rp_attach:
                         rp_to_attach: "{{ routing_policy.id.routing_policy }}"
