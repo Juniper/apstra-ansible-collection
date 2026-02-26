@@ -55,28 +55,36 @@ options:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-  design_type:
+  id:
     description:
-      - The type of design element to manage.
-    type: str
-    required: true
-    choices:
-      - logical_device
-      - rack_type
-      - template
-  name:
-    description:
-      - The name/id of the design element.
-    type: str
-    required: true
-  spec:
-    description:
-      - The specification dict for the design element.
-      - For logical_device — panels list (same format as logical_devices.yaml).
-      - For rack_type — leafs and generics lists (same format as rack_types.yaml).
-      - For template — spine, racks, overlay_control_protocol, asn_allocation_policy.
+      - Identifies the design element.
+      - Must contain C(design_type) and C(name).
     type: dict
     required: true
+    suboptions:
+      design_type:
+        description:
+          - The type of design element to manage.
+        type: str
+        required: true
+        choices:
+          - logical_device
+          - rack_type
+          - template
+      name:
+        description:
+          - The name/id of the design element.
+        type: str
+        required: true
+  body:
+    description:
+      - The specification dict for the design element.
+      - For logical_device — must contain C(panels) list.
+      - For rack_type — must contain C(leafs) and optionally C(generics), C(access).
+      - For template — must contain C(spine), C(racks), and optionally
+        C(overlay_control_protocol), C(asn_allocation_policy).
+    type: dict
+    required: false
   state:
     description:
       - Desired state of the design element.
@@ -93,9 +101,10 @@ EXAMPLES = """
   juniper.apstra.design:
     api_url: "https://apstra:443/api"
     auth_token: "{{ token }}"
-    design_type: logical_device
-    name: simple_dc_vjunos_switch_96x1
-    spec:
+    id:
+      design_type: logical_device
+      name: simple_dc_vjunos_switch_96x1
+    body:
       panels:
         - panel1:
             portgroups:
@@ -110,14 +119,16 @@ EXAMPLES = """
                     - peer
                     - unused
                     - generic
+    state: present
 
 - name: Create rack type
   juniper.apstra.design:
     api_url: "https://apstra:443/api"
     auth_token: "{{ token }}"
-    design_type: rack_type
-    name: connectorops_vjunos-rack
-    spec:
+    id:
+      design_type: rack_type
+      name: connectorops_vjunos-rack
+    body:
       leafs:
         - leaf1:
             label: leaf-1
@@ -137,14 +148,16 @@ EXAMPLES = """
                   label: host1_leaf1_link
                   lag_mode: lacp_active
                   attachment_type: dualAttached
+    state: present
 
 - name: Create template
   juniper.apstra.design:
     api_url: "https://apstra:443/api"
     auth_token: "{{ token }}"
-    design_type: template
-    name: connectorops_2spine4leaf
-    spec:
+    id:
+      design_type: template
+      name: connectorops_2spine4leaf
+    body:
       spine:
         logical_device: simple_dc_vjunos_switch_96x1
         count: 2
@@ -152,6 +165,16 @@ EXAMPLES = """
         connectorops_vjunos-rack: 1
       overlay_control_protocol: evpn
       asn_allocation_policy: distinct
+    state: present
+
+- name: Delete a design element
+  juniper.apstra.design:
+    api_url: "https://apstra:443/api"
+    auth_token: "{{ token }}"
+    id:
+      design_type: template
+      name: connectorops_2spine4leaf
+    state: absent
 """
 
 RETURN = """
@@ -436,13 +459,8 @@ def _delete_design_element(client, design_type, name):
 def main():
     argument_spec = apstra_client_module_args()
     argument_spec.update(
-        design_type=dict(
-            type="str",
-            required=True,
-            choices=["logical_device", "rack_type", "template"],
-        ),
-        name=dict(type="str", required=True),
-        spec=dict(type="dict", required=True),
+        id=dict(type="dict", required=True),
+        body=dict(type="dict", required=False),
         state=dict(type="str", default="present", choices=["present", "absent"]),
     )
 
@@ -451,10 +469,22 @@ def main():
     if g is None:
         module.fail_json(msg="The 'aos' SDK package is required but not installed.")
 
-    design_type = module.params["design_type"]
-    name = module.params["name"]
-    spec = module.params["spec"]
+    id_param = module.params["id"] or {}
+    design_type = id_param.get("design_type")
+    name = id_param.get("name")
+    spec = module.params.get("body")
     state = module.params["state"]
+
+    if not design_type or design_type not in (
+        "logical_device",
+        "rack_type",
+        "template",
+    ):
+        module.fail_json(
+            msg="id.design_type is required and must be one of: logical_device, rack_type, template"
+        )
+    if not name:
+        module.fail_json(msg="id.name is required")
 
     try:
         client_factory = ApstraClientFactory.from_params(module)
@@ -462,10 +492,12 @@ def main():
 
         if state == "absent":
             deleted = _delete_design_element(client, design_type, name)
-            module.exit_json(changed=deleted, id=name, data={})
+            module.exit_json(changed=deleted, id=id_param, data={})
             return
 
         # state == "present" — idempotent create
+        if not spec:
+            module.fail_json(msg="body is required when state is 'present'")
         get_fn_map = {
             "logical_device": _get_logical_device,
             "rack_type": _get_rack_type,
@@ -481,7 +513,7 @@ def main():
         if existing:
             module.exit_json(
                 changed=False,
-                id=existing.get("id", name),
+                id=id_param,
                 data=existing,
                 msg=f"{design_type} '{name}' already exists.",
             )
@@ -490,7 +522,7 @@ def main():
         created = create_fn_map[design_type](client, name, spec)
         module.exit_json(
             changed=True,
-            id=created.get("id", name) if created else name,
+            id=id_param,
             data=created or {},
             msg=f"{design_type} '{name}' created successfully.",
         )

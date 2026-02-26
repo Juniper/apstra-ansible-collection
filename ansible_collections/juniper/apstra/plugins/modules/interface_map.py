@@ -69,18 +69,26 @@ options:
     type: str
     required: false
     default: APSTRA_AUTH_TOKEN environment variable
-  blueprint_id:
+  id:
     description:
-      - The ID of the blueprint in which to manage interface map
-        assignments.
-    type: str
+      - Identifies the blueprint scope.
+      - Must contain C(blueprint) key with the blueprint ID.
+    type: dict
     required: true
-  assignments:
+    suboptions:
+      blueprint:
+        description:
+          - The ID of the blueprint in which to manage interface map
+            assignments.
+        type: str
+        required: true
+  body:
     description:
-      - A dictionary mapping blueprint node IDs to interface map IDs.
+      - A dictionary containing the interface map assignments.
+      - Must contain an C(assignments) key mapping blueprint node IDs
+        to interface map IDs.
       - Values may be C(null) or an empty string to clear an assignment.
-      - "Example: C(node_id_1=Juniper_vJunos-switch_vJunos,
-        node_id_2=Arista_vEOS-lab_vEOS-lab)"
+      - "Example: C(assignments: {node_id_1: Juniper_vJunos-switch_vJunos})"
     type: dict
     required: true
   state:
@@ -100,39 +108,33 @@ EXAMPLES = """
 
 - name: Assign interface maps to spine and leaf switches
   juniper.apstra.interface_map:
-    blueprint_id: "{{ blueprint_id }}"
-    assignments:
-      "{{ spine_node_id }}": "Juniper_vJunos-switch_vJunos"
-      "{{ leaf_node_id }}": "Juniper_vJunos-switch_vJunos"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      assignments:
+        "{{ spine_node_id }}": "Juniper_vJunos-switch_vJunos"
+        "{{ leaf_node_id }}": "Juniper_vJunos-switch_vJunos"
     state: present
 
 # ── Assign different maps per role ────────────────────────────────
 
 - name: Assign interface maps based on device role
   juniper.apstra.interface_map:
-    blueprint_id: "{{ blueprint_id }}"
-    assignments: "{{ im_assignments }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      assignments: "{{ im_assignments }}"
     state: present
-  vars:
-    im_assignments: >-
-      {{
-        dict(
-          nodes | json_query('[?role==`spine`].id') |
-          product([spine_interface_map]) |
-          list +
-          nodes | json_query('[?role==`leaf`].id') |
-          product([leaf_interface_map]) |
-          list
-        )
-      }}
 
 # ── Clear interface map assignments ───────────────────────────────
 
 - name: Clear interface map for a specific node
   juniper.apstra.interface_map:
-    blueprint_id: "{{ blueprint_id }}"
-    assignments:
-      "{{ node_id }}": null
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      assignments:
+        "{{ node_id }}": null
     state: absent
 """
 
@@ -221,8 +223,10 @@ def _compute_changes(current, desired, state):
 def _handle_present(module, client_factory):
     """Handle state=present — assign interface maps."""
     p = module.params
-    blueprint_id = p["blueprint_id"]
-    desired = p["assignments"]
+    id_param = p["id"] or {}
+    blueprint_id = id_param.get("blueprint")
+    body = p["body"] or {}
+    desired = body.get("assignments", {})
 
     current = _get_assignments(client_factory, blueprint_id)
     patch, has_changes = _compute_changes(current, desired, "present")
@@ -248,8 +252,10 @@ def _handle_present(module, client_factory):
 def _handle_absent(module, client_factory):
     """Handle state=absent — clear interface map assignments."""
     p = module.params
-    blueprint_id = p["blueprint_id"]
-    desired = p["assignments"]
+    id_param = p["id"] or {}
+    blueprint_id = id_param.get("blueprint")
+    body = p["body"] or {}
+    desired = body.get("assignments", {})
 
     current = _get_assignments(client_factory, blueprint_id)
     patch, has_changes = _compute_changes(current, desired, "absent")
@@ -278,8 +284,8 @@ def _handle_absent(module, client_factory):
 
 def main():
     object_module_args = dict(
-        blueprint_id=dict(type="str", required=True),
-        assignments=dict(type="dict", required=True),
+        id=dict(type="dict", required=True),
+        body=dict(type="dict", required=True),
         state=dict(
             type="str",
             required=False,

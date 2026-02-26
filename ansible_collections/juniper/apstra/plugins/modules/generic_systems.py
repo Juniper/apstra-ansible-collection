@@ -75,135 +75,148 @@ options:
     type: str
     required: false
     default: APSTRA_AUTH_TOKEN environment variable
-  blueprint_id:
+  id:
     description:
-      - The ID of the datacenter blueprint.
-    type: str
+      - A dict identifying the target blueprint and optionally an
+        existing generic system.
     required: true
-  system_id:
-    description:
-      - The node ID of an existing generic system within the blueprint.
-      - Required for update and delete operations.
-      - Returned after create operations.
-    type: str
-    required: false
-  name:
-    description:
-      - The display name (label) of the generic system.
-      - Corresponds to C(Name) / C(label) in the Apstra graph.
-    type: str
-    required: false
-  hostname:
-    description:
-      - The hostname of the generic system.
-    type: str
-    required: false
-  tags:
-    description:
-      - List of tags to apply to the generic system node.
-    type: list
-    elements: str
-    required: false
-    default: []
-  links:
-    description:
-      - List of link definitions connecting switches to the generic system.
-      - Each link is a dictionary with the keys described below.
-    type: list
-    elements: dict
-    required: false
-    default: []
+    type: dict
     suboptions:
-      target_switch_id:
+      blueprint:
         description:
-          - The graph node ID of the target leaf/access switch.
+          - The ID of the datacenter blueprint.
+        required: true
         type: str
-        required: true
-      target_switch_if_name:
+      system_id:
         description:
-          - The physical interface name on the target switch (e.g. C(xe-0/0/6)).
-        type: str
-        required: true
-      target_switch_if_transform_id:
-        description:
-          - The interface transform ID controlling speed/breakout mode.
-        type: int
-        required: true
-      lag_mode:
-        description:
-          - LAG mode for this link.
-          - Use C(null) or omit for a standalone (non-LAG) link.
+          - The node ID of an existing generic system within the blueprint.
+          - Required for update and delete operations.
+          - Returned after create operations.
         type: str
         required: false
-        choices: ["lacp_active", "lacp_passive", "static_lag"]
-      group_label:
+  body:
+    description:
+      - A dict containing the generic system specification.
+    required: false
+    type: dict
+    suboptions:
+      name:
         description:
-          - Label used to group multiple links into a single LAG.
-          - All links sharing the same C(group_label) and C(lag_mode) form one LAG.
+          - The display name (label) of the generic system.
+          - Corresponds to C(Name) / C(label) in the Apstra graph.
+        type: str
+        required: false
+      hostname:
+        description:
+          - The hostname of the generic system.
         type: str
         required: false
       tags:
         description:
-          - List of tags to apply to this individual link.
+          - List of tags to apply to the generic system node.
         type: list
         elements: str
         required: false
         default: []
-  deploy_mode:
-    description:
-      - The deploy mode for the generic system.
-    type: str
-    required: false
-    choices: ["deploy", "ready", "drain", "undeploy"]
-    default: "deploy"
-  asn:
-    description:
-      - The ASN to assign to the generic system.
-      - Set to C(null) to clear the ASN.
-    type: int
-    required: false
-  loopback_ipv4:
-    description:
-      - The IPv4 loopback address (CIDR notation) for the generic system.
-      - Set to C(null) to clear the loopback.
-    type: str
-    required: false
-  loopback_ipv6:
-    description:
-      - The IPv6 loopback address (CIDR notation) for the generic system.
-      - Set to C(null) to clear the loopback.
-    type: str
-    required: false
-  port_channel_id_min:
-    description:
-      - Minimum port-channel ID for the generic system.
-      - Set to 0 to disable.
-    type: int
-    required: false
-    default: 0
-  port_channel_id_max:
-    description:
-      - Maximum port-channel ID for the generic system.
-      - Set to 0 to disable.
-    type: int
-    required: false
-    default: 0
-  external:
-    description:
-      - Whether this is an external generic system (outside of racks).
-      - External systems use a different API for creation and deletion.
-      - Once created, this property cannot be changed.
-    type: bool
-    required: false
-    default: false
-  clear_cts_on_destroy:
-    description:
-      - If true, clear all connectivity templates from the system's links
-        before deleting the generic system.
-      - Useful when CTs are applied and deletion would otherwise fail.
-    type: bool
-    required: false
-    default: false
+      links:
+        description:
+          - List of link definitions connecting switches to the generic system.
+          - Each link is a dictionary with the keys described below.
+        type: list
+        elements: dict
+        required: false
+        default: []
+        suboptions:
+          target_switch_id:
+            description:
+              - The graph node ID of the target leaf/access switch.
+            type: str
+            required: true
+          target_switch_if_name:
+            description:
+              - The physical interface name on the target switch (e.g. C(xe-0/0/6)).
+            type: str
+            required: true
+          target_switch_if_transform_id:
+            description:
+              - The interface transform ID controlling speed/breakout mode.
+            type: int
+            required: true
+          lag_mode:
+            description:
+              - LAG mode for this link.
+              - Use C(null) or omit for a standalone (non-LAG) link.
+            type: str
+            required: false
+            choices: ["lacp_active", "lacp_passive", "static_lag"]
+          group_label:
+            description:
+              - Label used to group multiple links into a single LAG.
+              - All links sharing the same C(group_label) and C(lag_mode) form one LAG.
+            type: str
+            required: false
+          tags:
+            description:
+              - List of tags to apply to this individual link.
+            type: list
+            elements: str
+            required: false
+            default: []
+      deploy_mode:
+        description:
+          - The deploy mode for the generic system.
+        type: str
+        required: false
+        choices: ["deploy", "ready", "drain", "undeploy"]
+        default: "deploy"
+      asn:
+        description:
+          - The ASN to assign to the generic system.
+          - Set to C(null) to clear the ASN.
+        type: int
+        required: false
+      loopback_ipv4:
+        description:
+          - The IPv4 loopback address (CIDR notation) for the generic system.
+          - Set to C(null) to clear the loopback.
+        type: str
+        required: false
+      loopback_ipv6:
+        description:
+          - The IPv6 loopback address (CIDR notation) for the generic system.
+          - Set to C(null) to clear the loopback.
+        type: str
+        required: false
+      port_channel_id_min:
+        description:
+          - Minimum port-channel ID for the generic system.
+          - Set to 0 to disable.
+        type: int
+        required: false
+        default: 0
+      port_channel_id_max:
+        description:
+          - Maximum port-channel ID for the generic system.
+          - Set to 0 to disable.
+        type: int
+        required: false
+        default: 0
+      external:
+        description:
+          - Whether this is an external generic system (outside of racks).
+          - External systems use a different API for creation and deletion.
+          - Once created, this property cannot be changed.
+        type: bool
+        required: false
+        default: false
+      clear_cts_on_destroy:
+        description:
+          - If true, clear all connectivity templates from the system's links
+            before deleting the generic system.
+          - Useful when CTs are applied and deletion would otherwise fail.
+        type: bool
+        required: false
+        default: false
   state:
     description:
       - Desired state of the generic system.
@@ -220,19 +233,21 @@ EXAMPLES = """
 
 - name: Create a generic system connected to a leaf switch
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "my-server-01"
-    hostname: "my-server-01.example.com"
-    tags:
-      - "server"
-      - "prod"
-    deploy_mode: "deploy"
-    links:
-      - target_switch_id: "{{ leaf_id }}"
-        target_switch_if_name: "xe-0/0/7"
-        target_switch_if_transform_id: 1
-        tags:
-          - "10G"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "my-server-01"
+      hostname: "my-server-01.example.com"
+      tags:
+        - "server"
+        - "prod"
+      deploy_mode: "deploy"
+      links:
+        - target_switch_id: "{{ leaf_id }}"
+          target_switch_if_name: "xe-0/0/7"
+          target_switch_if_transform_id: 1
+          tags:
+            - "10G"
     state: present
   register: gs_create
 
@@ -240,37 +255,39 @@ EXAMPLES = """
 
 - name: Create a 4x10G server with two LAG bonds
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "lag-server-01"
-    hostname: "lag-server-01.example.com"
-    tags:
-      - "server"
-      - "production"
-    links:
-      - target_switch_id: "{{ leaf_ids[0] }}"
-        target_switch_if_name: "xe-0/0/6"
-        target_switch_if_transform_id: 1
-        lag_mode: "lacp_active"
-        group_label: "bond0"
-        tags: ["10G", "bond0"]
-      - target_switch_id: "{{ leaf_ids[1] }}"
-        target_switch_if_name: "xe-0/0/6"
-        target_switch_if_transform_id: 1
-        lag_mode: "lacp_active"
-        group_label: "bond0"
-        tags: ["10G", "bond0"]
-      - target_switch_id: "{{ leaf_ids[0] }}"
-        target_switch_if_name: "xe-0/0/7"
-        target_switch_if_transform_id: 1
-        lag_mode: "lacp_active"
-        group_label: "bond1"
-        tags: ["10G", "bond1"]
-      - target_switch_id: "{{ leaf_ids[1] }}"
-        target_switch_if_name: "xe-0/0/7"
-        target_switch_if_transform_id: 1
-        lag_mode: "lacp_active"
-        group_label: "bond1"
-        tags: ["10G", "bond1"]
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "lag-server-01"
+      hostname: "lag-server-01.example.com"
+      tags:
+        - "server"
+        - "production"
+      links:
+        - target_switch_id: "{{ leaf_ids[0] }}"
+          target_switch_if_name: "xe-0/0/6"
+          target_switch_if_transform_id: 1
+          lag_mode: "lacp_active"
+          group_label: "bond0"
+          tags: ["10G", "bond0"]
+        - target_switch_id: "{{ leaf_ids[1] }}"
+          target_switch_if_name: "xe-0/0/6"
+          target_switch_if_transform_id: 1
+          lag_mode: "lacp_active"
+          group_label: "bond0"
+          tags: ["10G", "bond0"]
+        - target_switch_id: "{{ leaf_ids[0] }}"
+          target_switch_if_name: "xe-0/0/7"
+          target_switch_if_transform_id: 1
+          lag_mode: "lacp_active"
+          group_label: "bond1"
+          tags: ["10G", "bond1"]
+        - target_switch_id: "{{ leaf_ids[1] }}"
+          target_switch_if_name: "xe-0/0/7"
+          target_switch_if_transform_id: 1
+          lag_mode: "lacp_active"
+          group_label: "bond1"
+          tags: ["10G", "bond1"]
     state: present
   register: lag_server
 
@@ -278,11 +295,13 @@ EXAMPLES = """
 
 - name: Update generic system hostname and deploy mode
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    system_id: "{{ gs_create.system_id }}"
-    name: "my-server-01-updated"
-    hostname: "my-server-01-updated.example.com"
-    deploy_mode: "ready"
+    id:
+      blueprint: "{{ blueprint_id }}"
+      system_id: "{{ gs_create.system_id }}"
+    body:
+      name: "my-server-01-updated"
+      hostname: "my-server-01-updated.example.com"
+      deploy_mode: "ready"
     state: present
   register: gs_update
 
@@ -290,13 +309,15 @@ EXAMPLES = """
 
 - name: Configure system with ASN and loopbacks
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    system_id: "{{ gs_create.system_id }}"
-    asn: 65001
-    loopback_ipv4: "10.0.0.1/32"
-    loopback_ipv6: "fd00::1/128"
-    port_channel_id_min: 1
-    port_channel_id_max: 128
+    id:
+      blueprint: "{{ blueprint_id }}"
+      system_id: "{{ gs_create.system_id }}"
+    body:
+      asn: 65001
+      loopback_ipv4: "10.0.0.1/32"
+      loopback_ipv6: "fd00::1/128"
+      port_channel_id_min: 1
+      port_channel_id_max: 128
     state: present
   register: gs_props
 
@@ -304,10 +325,12 @@ EXAMPLES = """
 
 - name: Create external generic system
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "external-server-01"
-    hostname: "external-server-01.example.com"
-    external: true
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "external-server-01"
+      hostname: "external-server-01.example.com"
+      external: true
     state: present
   register: ext_gs
 
@@ -315,17 +338,20 @@ EXAMPLES = """
 
 - name: Delete a generic system
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    system_id: "{{ gs_create.system_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+      system_id: "{{ gs_create.system_id }}"
     state: absent
 
 # ── Delete with connectivity template cleanup ──────────────────────
 
 - name: Delete generic system and clear CTs first
   juniper.apstra.generic_systems:
-    blueprint_id: "{{ blueprint_id }}"
-    system_id: "{{ gs_create.system_id }}"
-    clear_cts_on_destroy: true
+    id:
+      blueprint: "{{ blueprint_id }}"
+      system_id: "{{ gs_create.system_id }}"
+    body:
+      clear_cts_on_destroy: true
     state: absent
 """
 
@@ -962,20 +988,23 @@ def _validate_links(links):
 
 def _handle_present(module, client_factory):
     """Handle state=present — create or update."""
-    p = module.params
-    bp_id = p["blueprint_id"]
-    sys_id = p.get("system_id")
-    name = p.get("name")
-    hostname = p.get("hostname")
-    tags = p.get("tags")  # None means "not specified by user"; [] means "clear tags"
-    links = p.get("links") or []
-    deploy_mode = p.get("deploy_mode")  # None means "not specified by user"
-    asn = p.get("asn")
-    loopback_ipv4 = p.get("loopback_ipv4")
-    loopback_ipv6 = p.get("loopback_ipv6")
-    port_channel_id_min = p.get("port_channel_id_min") or 0
-    port_channel_id_max = p.get("port_channel_id_max") or 0
-    is_external = p.get("external") or False
+    id_param = module.params.get("id") or {}
+    body = module.params.get("body") or {}
+    bp_id = id_param.get("blueprint")
+    if not bp_id:
+        raise ValueError("'id.blueprint' is required")
+    sys_id = id_param.get("system_id")
+    name = body.get("name")
+    hostname = body.get("hostname")
+    tags = body.get("tags")  # None means "not specified by user"; [] means "clear tags"
+    links = body.get("links") or []
+    deploy_mode = body.get("deploy_mode")  # None means "not specified by user"
+    asn = body.get("asn")
+    loopback_ipv4 = body.get("loopback_ipv4")
+    loopback_ipv6 = body.get("loopback_ipv6")
+    port_channel_id_min = body.get("port_channel_id_min") or 0
+    port_channel_id_max = body.get("port_channel_id_max") or 0
+    is_external = body.get("external") or False
 
     _validate_links(links)
 
@@ -1444,13 +1473,16 @@ def _apply_properties(
 
 def _handle_absent(module, client_factory):
     """Handle state=absent — delete a generic system."""
-    p = module.params
-    bp_id = p["blueprint_id"]
-    sys_id = p.get("system_id")
-    name = p.get("name")
-    hostname = p.get("hostname")
-    is_external = p.get("external") or False
-    clear_cts = p.get("clear_cts_on_destroy") or False
+    id_param = module.params.get("id") or {}
+    body = module.params.get("body") or {}
+    bp_id = id_param.get("blueprint")
+    if not bp_id:
+        raise ValueError("'id.blueprint' is required")
+    sys_id = id_param.get("system_id")
+    name = body.get("name")
+    hostname = body.get("hostname")
+    is_external = body.get("external") or False
+    clear_cts = body.get("clear_cts_on_destroy") or False
 
     # Try to resolve system by name/hostname if no system_id given
     if not sys_id:
@@ -1543,43 +1575,8 @@ def _handle_absent(module, client_factory):
 
 def main():
     object_module_args = dict(
-        blueprint_id=dict(type="str", required=True),
-        system_id=dict(type="str", required=False, default=None),
-        name=dict(type="str", required=False, default=None),
-        hostname=dict(type="str", required=False, default=None),
-        tags=dict(type="list", elements="str", required=False, default=None),
-        links=dict(
-            type="list",
-            elements="dict",
-            required=False,
-            default=[],
-            options=dict(
-                target_switch_id=dict(type="str", required=True),
-                target_switch_if_name=dict(type="str", required=True),
-                target_switch_if_transform_id=dict(type="int", required=True),
-                lag_mode=dict(
-                    type="str",
-                    required=False,
-                    default=None,
-                    choices=["lacp_active", "lacp_passive", "static_lag"],
-                ),
-                group_label=dict(type="str", required=False, default=None),
-                tags=dict(type="list", elements="str", required=False, default=[]),
-            ),
-        ),
-        deploy_mode=dict(
-            type="str",
-            required=False,
-            default=None,
-            choices=["deploy", "ready", "drain", "undeploy"],
-        ),
-        asn=dict(type="int", required=False, default=None),
-        loopback_ipv4=dict(type="str", required=False, default=None),
-        loopback_ipv6=dict(type="str", required=False, default=None),
-        port_channel_id_min=dict(type="int", required=False, default=0),
-        port_channel_id_max=dict(type="int", required=False, default=0),
-        external=dict(type="bool", required=False, default=False),
-        clear_cts_on_destroy=dict(type="bool", required=False, default=False),
+        id=dict(type="dict", required=True),
+        body=dict(type="dict", required=False),
         state=dict(
             type="str",
             required=False,

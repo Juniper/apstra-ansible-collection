@@ -69,12 +69,19 @@ options:
     type: str
     required: false
     default: APSTRA_AUTH_TOKEN environment variable
-  blueprint_id:
+  id:
     description:
-      - The ID of the blueprint in which to manage fabric settings.
-    type: str
+      - Identifies the blueprint scope.
+      - Must contain C(blueprint) key with the blueprint ID.
+    type: dict
     required: true
-  settings:
+    suboptions:
+      blueprint:
+        description:
+          - The ID of the blueprint in which to manage fabric settings.
+        type: str
+        required: true
+  body:
     description:
       - A dictionary of fabric settings to apply.
       - Only the keys provided will be updated; unspecified keys remain
@@ -94,8 +101,9 @@ EXAMPLES = """
 
 - name: Configure fabric L3 MTU
   juniper.apstra.fabric_settings:
-    blueprint_id: "{{ blueprint_id }}"
-    settings:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
       fabric_l3_mtu: 9170
       spine_leaf_links_mtu: 9170
       external_router_mtu: 9100
@@ -104,8 +112,9 @@ EXAMPLES = """
 
 - name: Set EVPN overlay parameters
   juniper.apstra.fabric_settings:
-    blueprint_id: "{{ blueprint_id }}"
-    settings:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
       overlay_control_protocol: "evpn"
       max_evpn_routes: 10000
       junos_evpn_max_nexthop_count: 2
@@ -114,16 +123,18 @@ EXAMPLES = """
 
 - name: Configure default anycast GW MAC
   juniper.apstra.fabric_settings:
-    blueprint_id: "{{ blueprint_id }}"
-    settings:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
       default_anycast_gw_mac: "00:00:5e:00:01:01"
 
 # ── Set anti-affinity policy ─────────────────────────────────────
 
 - name: Configure anti-affinity settings
   juniper.apstra.fabric_settings:
-    blueprint_id: "{{ blueprint_id }}"
-    settings:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
       anti_affinity:
         algorithm: "heuristic_enabled"
         max_links_count_per_slot: 1
@@ -134,16 +145,18 @@ EXAMPLES = """
 
 - name: Set ESI MAC MSB
   juniper.apstra.fabric_settings:
-    blueprint_id: "{{ blueprint_id }}"
-    settings:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
       esi_mac_msb: 2
 
 # ── Full fabric settings for a new blueprint ─────────────────────
 
 - name: Apply full fabric settings
   juniper.apstra.fabric_settings:
-    blueprint_id: "{{ blueprint_id }}"
-    settings:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
       fabric_l3_mtu: 9170
       spine_leaf_links_mtu: 9170
       external_router_mtu: 9100
@@ -225,8 +238,9 @@ def _deep_compare(current, desired):
 def _handle_settings(module, client_factory):
     """Apply fabric settings — always state=present for settings."""
     p = module.params
-    blueprint_id = p["blueprint_id"]
-    desired_settings = p["settings"]
+    id_param = p["id"] or {}
+    blueprint_id = id_param.get("blueprint")
+    desired_settings = p["body"]
 
     if not desired_settings:
         raise ValueError("'settings' must contain at least one key to update")
@@ -266,8 +280,8 @@ def _handle_settings(module, client_factory):
 
 def main():
     object_module_args = dict(
-        blueprint_id=dict(type="str", required=True),
-        settings=dict(type="dict", required=True),
+        id=dict(type="dict", required=True),
+        body=dict(type="dict", required=True),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | object_module_args

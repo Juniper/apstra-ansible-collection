@@ -68,96 +68,109 @@ options:
     type: str
     required: false
     default: APSTRA_AUTH_TOKEN environment variable
-  agent_id:
+  id:
     description:
-      - The ID of an existing system agent.
-      - Required for update and delete operations when C(management_ip)
-        is not specified.
-    type: str
+      - A dict identifying an existing system agent.
+      - Not required for C(state=gathered).
     required: false
-  management_ip:
-    description:
-      - The management IP address or hostname of the device to onboard.
-      - Used to create a new agent and for idempotent matching of
-        existing agents.
-    type: str
-    required: false
-  agent_type:
-    description:
-      - The type of system agent.
-      - C(offbox) runs the agent in an Apstra-managed container.
-      - C(onbox) installs the agent directly on the device.
-    type: str
-    required: false
-    choices: ["offbox", "onbox"]
-    default: "offbox"
-  label:
-    description:
-      - A human-readable label for the system agent.
-    type: str
-    required: false
-  operation_mode:
-    description:
-      - The operation mode for the agent.
-      - C(full_control) allows Apstra to manage the device configuration.
-    type: str
-    required: false
-    choices: ["full_control"]
-    default: "full_control"
-  device_username:
-    description:
-      - The username for authenticating to the managed device.
-    type: str
-    required: false
-  device_password:
-    description:
-      - The password for authenticating to the managed device.
-    type: str
-    required: false
-    no_log: true
-  platform:
-    description:
-      - The device platform/OS family.
-      - Usually auto-detected; only specify if needed.
-    type: str
-    required: false
-    choices: ["junos", "eos", "nxos"]
-  profile:
-    description:
-      - The system agent profile ID to use.
-    type: str
-    required: false
-  job_on_create:
-    description:
-      - Action to trigger automatically when the agent is created.
-      - C(check) validates device reachability; C(install) deploys the agent.
-    type: str
-    required: false
-    choices: ["check", "install"]
-  open_options:
-    description:
-      - Device driver options passed to the agent.
     type: dict
-    required: false
-  force_package_install:
+    suboptions:
+      agent_id:
+        description:
+          - The ID of an existing system agent.
+          - Required for update and delete operations when
+            C(management_ip) is not specified in C(body).
+        type: str
+        required: false
+  body:
     description:
-      - Force reinstallation of agent packages.
-    type: bool
+      - A dict containing the system agent specification.
     required: false
-    default: false
-  wait_for_connection:
-    description:
-      - If true, wait for the agent to reach C(connected) state after
-        creation or update.
-    type: bool
-    required: false
-    default: false
-  wait_timeout:
-    description:
-      - Maximum time in seconds to wait for the agent to connect.
-    type: int
-    required: false
-    default: 120
+    type: dict
+    suboptions:
+      management_ip:
+        description:
+          - The management IP address or hostname of the device to onboard.
+          - Used to create a new agent and for idempotent matching of
+            existing agents.
+        type: str
+        required: false
+      agent_type:
+        description:
+          - The type of system agent.
+          - C(offbox) runs the agent in an Apstra-managed container.
+          - C(onbox) installs the agent directly on the device.
+        type: str
+        required: false
+        choices: ["offbox", "onbox"]
+        default: "offbox"
+      label:
+        description:
+          - A human-readable label for the system agent.
+        type: str
+        required: false
+      operation_mode:
+        description:
+          - The operation mode for the agent.
+          - C(full_control) allows Apstra to manage the device configuration.
+        type: str
+        required: false
+        choices: ["full_control"]
+        default: "full_control"
+      device_username:
+        description:
+          - The username for authenticating to the managed device.
+        type: str
+        required: false
+      device_password:
+        description:
+          - The password for authenticating to the managed device.
+        type: str
+        required: false
+        no_log: true
+      platform:
+        description:
+          - The device platform/OS family.
+          - Usually auto-detected; only specify if needed.
+        type: str
+        required: false
+        choices: ["junos", "eos", "nxos"]
+      profile:
+        description:
+          - The system agent profile ID to use.
+        type: str
+        required: false
+      job_on_create:
+        description:
+          - Action to trigger automatically when the agent is created.
+          - C(check) validates device reachability; C(install) deploys the agent.
+        type: str
+        required: false
+        choices: ["check", "install"]
+      open_options:
+        description:
+          - Device driver options passed to the agent.
+        type: dict
+        required: false
+      force_package_install:
+        description:
+          - Force reinstallation of agent packages.
+        type: bool
+        required: false
+        default: false
+      wait_for_connection:
+        description:
+          - If true, wait for the agent to reach C(connected) state after
+            creation or update.
+        type: bool
+        required: false
+        default: false
+      wait_timeout:
+        description:
+          - Maximum time in seconds to wait for the agent to connect.
+        type: int
+        required: false
+        default: 120
   state:
     description:
       - Desired state of the system agent.
@@ -177,13 +190,14 @@ EXAMPLES = """
 
 - name: Onboard a Junos switch
   juniper.apstra.system_agents:
-    management_ip: "10.0.0.1"
-    agent_type: "offbox"
-    label: "spine-1"
-    operation_mode: "full_control"
-    device_username: "admin"
-    device_password: "admin@123"
-    job_on_create: "check"
+    body:
+      management_ip: "10.0.0.1"
+      agent_type: "offbox"
+      label: "spine-1"
+      operation_mode: "full_control"
+      device_username: "admin"
+      device_password: "admin@123"
+      job_on_create: "check"
     state: present
   register: agent
 
@@ -191,47 +205,53 @@ EXAMPLES = """
 
 - name: Onboard an EOS switch
   juniper.apstra.system_agents:
-    management_ip: "10.0.0.2"
-    agent_type: "offbox"
-    label: "leaf-1"
-    device_username: "admin"
-    device_password: "Arista123"
-    platform: "eos"
+    body:
+      management_ip: "10.0.0.2"
+      agent_type: "offbox"
+      label: "leaf-1"
+      device_username: "admin"
+      device_password: "Arista123"
+      platform: "eos"
     state: present
 
 # ── Update agent label ────────────────────────────────────────────
 
 - name: Update agent label
   juniper.apstra.system_agents:
-    agent_id: "{{ agent.agent_id }}"
-    label: "spine-1-updated"
+    id:
+      agent_id: "{{ agent.agent_id }}"
+    body:
+      label: "spine-1-updated"
     state: present
 
 # ── Delete an agent ───────────────────────────────────────────────
 
 - name: Delete system agent
   juniper.apstra.system_agents:
-    agent_id: "{{ agent.agent_id }}"
+    id:
+      agent_id: "{{ agent.agent_id }}"
     state: absent
 
 # ── Delete agent by management IP ─────────────────────────────────
 
 - name: Delete system agent by IP
   juniper.apstra.system_agents:
-    management_ip: "10.0.0.1"
+    body:
+      management_ip: "10.0.0.1"
     state: absent
 
 # ── Onboard and wait for connection ───────────────────────────────
 
 - name: Onboard and wait for device to connect
   juniper.apstra.system_agents:
-    management_ip: "10.0.0.3"
-    agent_type: "offbox"
-    label: "leaf-2"
-    device_username: "admin"
-    device_password: "admin@123"
-    wait_for_connection: true
-    wait_timeout: 180
+    body:
+      management_ip: "10.0.0.3"
+      agent_type: "offbox"
+      label: "leaf-2"
+      device_username: "admin"
+      device_password: "admin@123"
+      wait_for_connection: true
+      wait_timeout: 180
     state: present
 
 # ── List all agents (gather serial numbers) ───────────────────────
@@ -504,11 +524,13 @@ def _wait_for_connection(client_factory, agent_id, timeout):
 
 def _handle_present(module, client_factory):
     """Handle state=present — create or update."""
-    p = module.params
-    agent_id = p.get("agent_id")
-    management_ip = p.get("management_ip")
-    wait = p.get("wait_for_connection", False)
-    wait_timeout = p.get("wait_timeout", 120)
+    id_param = module.params.get("id") or {}
+    body = module.params.get("body") or {}
+    p = {**id_param, **body}  # merge for helper functions
+    agent_id = id_param.get("agent_id")
+    management_ip = body.get("management_ip")
+    wait = body.get("wait_for_connection", False)
+    wait_timeout = body.get("wait_timeout", 120)
 
     # Find existing agent
     existing = None
@@ -617,9 +639,10 @@ def _handle_gathered(module, client_factory):
 
 def _handle_absent(module, client_factory):
     """Handle state=absent — delete."""
-    p = module.params
-    agent_id = p.get("agent_id")
-    management_ip = p.get("management_ip")
+    id_param = module.params.get("id") or {}
+    body = module.params.get("body") or {}
+    agent_id = id_param.get("agent_id")
+    management_ip = body.get("management_ip")
 
     # Find the agent
     if not agent_id and management_ip:
@@ -648,38 +671,8 @@ def _handle_absent(module, client_factory):
 
 def main():
     object_module_args = dict(
-        agent_id=dict(type="str", required=False),
-        management_ip=dict(type="str", required=False),
-        agent_type=dict(
-            type="str",
-            required=False,
-            choices=["offbox", "onbox"],
-            default="offbox",
-        ),
-        label=dict(type="str", required=False),
-        operation_mode=dict(
-            type="str",
-            required=False,
-            choices=["full_control"],
-            default="full_control",
-        ),
-        device_username=dict(type="str", required=False),
-        device_password=dict(type="str", required=False, no_log=True),
-        platform=dict(
-            type="str",
-            required=False,
-            choices=["junos", "eos", "nxos"],
-        ),
-        profile=dict(type="str", required=False),
-        job_on_create=dict(
-            type="str",
-            required=False,
-            choices=["check", "install"],
-        ),
-        open_options=dict(type="dict", required=False),
-        force_package_install=dict(type="bool", required=False, default=False),
-        wait_for_connection=dict(type="bool", required=False, default=False),
-        wait_timeout=dict(type="int", required=False, default=120),
+        id=dict(type="dict", required=False),
+        body=dict(type="dict", required=False),
         state=dict(
             type="str",
             required=False,

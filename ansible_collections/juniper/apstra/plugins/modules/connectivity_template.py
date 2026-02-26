@@ -97,69 +97,82 @@ options:
     type: str
     required: false
     default: APSTRA_AUTH_TOKEN environment variable
-  blueprint_id:
+  id:
     description:
-      - The ID of the Apstra blueprint.
+      - A dict identifying the target blueprint and optionally an
+        existing Connectivity Template.
     required: true
-    type: str
-  name:
+    type: dict
+    suboptions:
+      blueprint:
+        description:
+          - The ID of the Apstra blueprint.
+        required: true
+        type: str
+      ct_id:
+        description:
+          - The UUID of an existing Connectivity Template.
+          - When provided, the module operates on this specific CT
+            instead of looking up by C(name) in C(body).
+        required: false
+        type: str
+  body:
     description:
-      - The display name of the Connectivity Template.
-      - Used as the unique identifier for idempotent operations.
-      - Required when C(state=present).
-    required: false
-    type: str
-  ct_id:
-    description:
-      - The UUID of an existing Connectivity Template.
-      - When provided, the module operates on this specific CT
-        instead of looking up by C(name).
-    required: false
-    type: str
-  type:
-    description:
-      - The type of Connectivity Template, which determines which
-        primitives are allowed and which application point type the
-        CT targets.
-      - Required when C(state=present).
-    required: false
-    type: str
-    choices:
-      - interface
-      - svi
-      - loopback
-      - protocol_endpoint
-      - system
-  description:
-    description:
-      - An optional description for the Connectivity Template.
-    required: false
-    type: str
-    default: ""
-  tags:
-    description:
-      - A list of tags to apply to the CT.
-    required: false
-    type: list
-    elements: str
-  primitives:
-    description:
-      - A dict-of-named-dicts keyed by B(plural) primitive type name.
-      - Each top-level key is a primitive type (e.g. C(ip_links),
-        C(virtual_network_singles), C(bgp_peering_generic_systems)).
-      - Under each type key is a dict of named instances.
-      - Each instance is a dict of type-specific attributes passed
-        directly to the Apstra API.
-      - Child primitives are nested as additional dict keys using
-        their plural type name (e.g. C(bgp_peering_generic_systems)
-        inside an C(ip_links) instance).
-      - "Supported primitive types: C(ip_links), C(virtual_network_singles),
-        C(virtual_network_multiples), C(bgp_peering_generic_systems),
-        C(bgp_peering_ip_endpoints), C(routing_policies),
-        C(static_routes), C(custom_static_routes),
-        C(dynamic_bgp_peerings), C(routing_zone_constraints)."
+      - A dict containing the Connectivity Template specification.
     required: false
     type: dict
+    suboptions:
+      name:
+        description:
+          - The display name of the Connectivity Template.
+          - Used as the unique identifier for idempotent operations.
+          - Required when C(state=present).
+        required: false
+        type: str
+      type:
+        description:
+          - The type of Connectivity Template, which determines which
+            primitives are allowed and which application point type the
+            CT targets.
+          - Required when C(state=present).
+        required: false
+        type: str
+        choices:
+          - interface
+          - svi
+          - loopback
+          - protocol_endpoint
+          - system
+      description:
+        description:
+          - An optional description for the Connectivity Template.
+        required: false
+        type: str
+        default: ""
+      tags:
+        description:
+          - A list of tags to apply to the CT.
+        required: false
+        type: list
+        elements: str
+      primitives:
+        description:
+          - A dict-of-named-dicts keyed by B(plural) primitive type name.
+          - Each top-level key is a primitive type (e.g. C(ip_links),
+            C(virtual_network_singles), C(bgp_peering_generic_systems)).
+          - Under each type key is a dict of named instances.
+          - Each instance is a dict of type-specific attributes passed
+            directly to the Apstra API.
+          - Child primitives are nested as additional dict keys using
+            their plural type name (e.g. C(bgp_peering_generic_systems)
+            inside an C(ip_links) instance).
+          - "Supported primitive types: C(ip_links), C(virtual_network_singles),
+            C(virtual_network_multiples), C(bgp_peering_generic_systems),
+            C(bgp_peering_ip_endpoints), C(routing_policies),
+            C(static_routes), C(custom_static_routes),
+            C(dynamic_bgp_peerings), C(routing_zone_constraints)."
+        required: false
+        type: dict
   state:
     description:
       - Desired state of the Connectivity Template.
@@ -175,171 +188,189 @@ EXAMPLES = """
 # Interface CT: IP Link + BGP Peering + Routing Policy (full nesting)
 - name: Create BGP-to-SRX Connectivity Template
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "BGP-2-SRX"
-    type: interface
-    description: "CT for external router connectivity"
-    tags:
-      - prod
-      - border
-    primitives:
-      ip_links:
-        srx_link:
-          security_zone: "{{ routing_zone_id }}"
-          interface_type: tagged
-          vlan_id: 100
-          ipv4_addressing_type: numbered
-          ipv6_addressing_type: none
-          bgp_peering_generic_systems:
-            srx_peer:
-              bfd: false
-              ipv4_safi: true
-              ipv6_safi: false
-              ttl: 2
-              session_addressing_ipv4: addressed
-              session_addressing_ipv6: link_local
-              peer_from: interface
-              peer_to: interface_or_ip_endpoint
-              neighbor_asn_type: dynamic
-              routing_policies:
-                default_rp:
-                  rp_to_attach: "{{ routing_policy_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "BGP-2-SRX"
+      type: interface
+      description: "CT for external router connectivity"
+      tags:
+        - prod
+        - border
+      primitives:
+        ip_links:
+          srx_link:
+            security_zone: "{{ routing_zone_id }}"
+            interface_type: tagged
+            vlan_id: 100
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+            bgp_peering_generic_systems:
+              srx_peer:
+                bfd: false
+                ipv4_safi: true
+                ipv6_safi: false
+                ttl: 2
+                session_addressing_ipv4: addressed
+                session_addressing_ipv6: link_local
+                peer_from: interface
+                peer_to: interface_or_ip_endpoint
+                neighbor_asn_type: dynamic
+                routing_policies:
+                  default_rp:
+                    rp_to_attach: "{{ routing_policy_id }}"
     state: present
   register: ct_result
 
 # Interface CT: IP Link with Static Route child
 - name: Create IP Link with Static Route CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Static-Route-Link"
-    type: interface
-    primitives:
-      ip_links:
-        static_link:
-          security_zone: "{{ routing_zone_id }}"
-          interface_type: tagged
-          vlan_id: 200
-          ipv4_addressing_type: numbered
-          ipv6_addressing_type: none
-          static_routes:
-            default_route:
-              network: "0.0.0.0/0"
-              share_ip_endpoint: false
-              routing_policies:
-                static_rp: {}
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Static-Route-Link"
+      type: interface
+      primitives:
+        ip_links:
+          static_link:
+            security_zone: "{{ routing_zone_id }}"
+            interface_type: tagged
+            vlan_id: 200
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+            static_routes:
+              default_route:
+                network: "0.0.0.0/0"
+                share_ip_endpoint: false
+                routing_policies:
+                  static_rp: {}
     state: present
 
 # Interface CT: IP Link with Custom Static Route child
 - name: Create IP Link with Custom Static Route CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Custom-Static-Link"
-    type: interface
-    primitives:
-      ip_links:
-        custom_link:
-          security_zone: "{{ routing_zone_id }}"
-          interface_type: untagged
-          ipv4_addressing_type: numbered
-          ipv6_addressing_type: none
-          custom_static_routes:
-            mgmt_route:
-              network: "10.0.0.0/8"
-              next_hop: next_hop_ip
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Custom-Static-Link"
+      type: interface
+      primitives:
+        ip_links:
+          custom_link:
+            security_zone: "{{ routing_zone_id }}"
+            interface_type: untagged
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+            custom_static_routes:
+              mgmt_route:
+                network: "10.0.0.0/8"
+                next_hop: next_hop_ip
     state: present
 
 # Interface CT: IP Link with Routing Policy (direct — no BGP/static in between)
 - name: Create IP Link with direct Routing Policy CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "IP-Link-Direct-RP"
-    type: interface
-    primitives:
-      ip_links:
-        direct_rp_link:
-          security_zone: "{{ routing_zone_id }}"
-          interface_type: tagged
-          vlan_id: 150
-          ipv4_addressing_type: numbered
-          ipv6_addressing_type: none
-          routing_policies:
-            export_filter:
-              rp_to_attach: "{{ routing_policy_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "IP-Link-Direct-RP"
+      type: interface
+      primitives:
+        ip_links:
+          direct_rp_link:
+            security_zone: "{{ routing_zone_id }}"
+            interface_type: tagged
+            vlan_id: 150
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+            routing_policies:
+              export_filter:
+                rp_to_attach: "{{ routing_policy_id }}"
     state: present
 
 # Interface CT: Virtual Network (Single) — simple VLAN access
 - name: Create VN Single CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "VLAN-100-Access"
-    type: interface
-    primitives:
-      virtual_network_singles:
-        vlan100:
-          vn_node_id: "{{ virtual_network_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "VLAN-100-Access"
+      type: interface
+      primitives:
+        virtual_network_singles:
+          vlan100:
+            vn_node_id: "{{ virtual_network_id }}"
     state: present
 
 # Interface CT: Virtual Network (Multiple) — trunk with multiple VLANs
 - name: Create VN Multiple CT (trunk)
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Trunk-VLANs"
-    type: interface
-    primitives:
-      virtual_network_multiples:
-        trunk_vlans:
-          tagged_vn_node_ids:
-            - "{{ vn_id_1 }}"
-            - "{{ vn_id_2 }}"
-          untagged_vn_node_id: "{{ native_vn_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Trunk-VLANs"
+      type: interface
+      primitives:
+        virtual_network_multiples:
+          trunk_vlans:
+            tagged_vn_node_ids:
+              - "{{ vn_id_1 }}"
+              - "{{ vn_id_2 }}"
+            untagged_vn_node_id: "{{ native_vn_id }}"
     state: present
 
 # Interface CT: Routing Zone Constraint
 - name: Create Routing Zone Constraint CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "RZ-Constraint-Intf"
-    type: interface
-    primitives:
-      routing_zone_constraints:
-        allow_default_only:
-          routing_zone_constraint_mode: allow
-          constraints:
-            - "{{ routing_zone_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "RZ-Constraint-Intf"
+      type: interface
+      primitives:
+        routing_zone_constraints:
+          allow_default_only:
+            routing_zone_constraint_mode: allow
+            constraints:
+              - "{{ routing_zone_id }}"
     state: present
 
 # Interface CT: Custom Static Route (top-level)
 - name: Create Custom Static Route CT for interface
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Custom-Static-Intf"
-    type: interface
-    primitives:
-      custom_static_routes:
-        default_gw:
-          network: "0.0.0.0/0"
-          next_hop: next_hop_ip
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Custom-Static-Intf"
+      type: interface
+      primitives:
+        custom_static_routes:
+          default_gw:
+            network: "0.0.0.0/0"
+            next_hop: next_hop_ip
     state: present
 
 # Interface CT: Multiple primitives in one CT
 - name: Create CT with both IP Link and Routing Zone Constraint
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Multi-Primitive-CT"
-    type: interface
-    primitives:
-      ip_links:
-        server_link:
-          security_zone: "{{ routing_zone_id }}"
-          interface_type: tagged
-          vlan_id: 300
-          ipv4_addressing_type: numbered
-          ipv6_addressing_type: none
-      routing_zone_constraints:
-        rz_limit:
-          routing_zone_constraint_mode: allow
-          constraints:
-            - "{{ routing_zone_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Multi-Primitive-CT"
+      type: interface
+      primitives:
+        ip_links:
+          server_link:
+            security_zone: "{{ routing_zone_id }}"
+            interface_type: tagged
+            vlan_id: 300
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+        routing_zone_constraints:
+          rz_limit:
+            routing_zone_constraint_mode: allow
+            constraints:
+              - "{{ routing_zone_id }}"
     state: present
 
 # ── SVI CT type examples ─────────────────────────────────────────────
@@ -347,83 +378,93 @@ EXAMPLES = """
 # SVI CT: BGP Peering (Generic System) with Routing Policy
 - name: Create SVI BGP CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "SVI-BGP-Peering"
-    type: svi
-    primitives:
-      bgp_peering_generic_systems:
-        external_peer:
-          bfd: true
-          ipv4_safi: true
-          ipv6_safi: false
-          ttl: 2
-          session_addressing_ipv4: addressed
-          session_addressing_ipv6: link_local
-          peer_from: interface
-          peer_to: interface_or_ip_endpoint
-          neighbor_asn_type: dynamic
-          routing_policies:
-            export_rp:
-              rp_to_attach: "{{ routing_policy_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "SVI-BGP-Peering"
+      type: svi
+      primitives:
+        bgp_peering_generic_systems:
+          external_peer:
+            bfd: true
+            ipv4_safi: true
+            ipv6_safi: false
+            ttl: 2
+            session_addressing_ipv4: addressed
+            session_addressing_ipv6: link_local
+            peer_from: interface
+            peer_to: interface_or_ip_endpoint
+            neighbor_asn_type: dynamic
+            routing_policies:
+              export_rp:
+                rp_to_attach: "{{ routing_policy_id }}"
     state: present
 
 # SVI CT: Dynamic BGP Peering
 - name: Create SVI Dynamic BGP CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "SVI-Dynamic-BGP"
-    type: svi
-    primitives:
-      dynamic_bgp_peerings:
-        auto_peer:
-          ipv4_enabled: true
-          ipv6_enabled: false
-          ttl: 1
-          session_addressing_ipv4: addressed
-          session_addressing_ipv6: link_local
-          bfd: false
-          password: ""
-          routing_policies:
-            bgp_rp: {}
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "SVI-Dynamic-BGP"
+      type: svi
+      primitives:
+        dynamic_bgp_peerings:
+          auto_peer:
+            ipv4_enabled: true
+            ipv6_enabled: false
+            ttl: 1
+            session_addressing_ipv4: addressed
+            session_addressing_ipv6: link_local
+            bfd: false
+            password: ""
+            routing_policies:
+              bgp_rp: {}
     state: present
 
 # SVI CT: Static Route
 - name: Create SVI Static Route CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "SVI-Static-Route"
-    type: svi
-    primitives:
-      static_routes:
-        default_route:
-          network: "0.0.0.0/0"
-          share_ip_endpoint: false
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "SVI-Static-Route"
+      type: svi
+      primitives:
+        static_routes:
+          default_route:
+            network: "0.0.0.0/0"
+            share_ip_endpoint: false
     state: present
 
 # SVI CT: Virtual Network (Single)
 - name: Create SVI VN Single CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "SVI-VN-Single"
-    type: svi
-    primitives:
-      virtual_network_singles:
-        svi_vlan:
-          vn_node_id: "{{ virtual_network_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "SVI-VN-Single"
+      type: svi
+      primitives:
+        virtual_network_singles:
+          svi_vlan:
+            vn_node_id: "{{ virtual_network_id }}"
     state: present
 
 # SVI CT: Routing Zone Constraint
 - name: Create SVI Routing Zone Constraint CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "SVI-RZ-Constraint"
-    type: svi
-    primitives:
-      routing_zone_constraints:
-        svi_rz_limit:
-          routing_zone_constraint_mode: deny
-          constraints:
-            - "{{ routing_zone_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "SVI-RZ-Constraint"
+      type: svi
+      primitives:
+        routing_zone_constraints:
+          svi_rz_limit:
+            routing_zone_constraint_mode: deny
+            constraints:
+              - "{{ routing_zone_id }}"
     state: present
 
 # ── Loopback CT type examples ────────────────────────────────────────
@@ -431,48 +472,54 @@ EXAMPLES = """
 # Loopback CT: BGP Peering (IP Endpoint) with Routing Policy
 - name: Create Loopback BGP IP Endpoint CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Loopback-BGP"
-    type: loopback
-    primitives:
-      bgp_peering_ip_endpoints:
-        lo0_peer:
-          ipv4_safi: true
-          ipv6_safi: false
-          bfd: false
-          ttl: 2
-          session_addressing_ipv4: addressed
-          session_addressing_ipv6: link_local
-          password: ""
-          routing_policies:
-            lo_rp: {}
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Loopback-BGP"
+      type: loopback
+      primitives:
+        bgp_peering_ip_endpoints:
+          lo0_peer:
+            ipv4_safi: true
+            ipv6_safi: false
+            bfd: false
+            ttl: 2
+            session_addressing_ipv4: addressed
+            session_addressing_ipv6: link_local
+            password: ""
+            routing_policies:
+              lo_rp: {}
     state: present
 
 # Loopback CT: Static Route
 - name: Create Loopback Static Route CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Loopback-Static"
-    type: loopback
-    primitives:
-      static_routes:
-        lo_static:
-          network: "192.168.1.0/24"
-          share_ip_endpoint: false
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Loopback-Static"
+      type: loopback
+      primitives:
+        static_routes:
+          lo_static:
+            network: "192.168.1.0/24"
+            share_ip_endpoint: false
     state: present
 
 # Loopback CT: Routing Zone Constraint
 - name: Create Loopback Routing Zone Constraint CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Loopback-RZ-Constraint"
-    type: loopback
-    primitives:
-      routing_zone_constraints:
-        lo_rz_limit:
-          routing_zone_constraint_mode: allow
-          constraints:
-            - "{{ routing_zone_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Loopback-RZ-Constraint"
+      type: loopback
+      primitives:
+        routing_zone_constraints:
+          lo_rz_limit:
+            routing_zone_constraint_mode: allow
+            constraints:
+              - "{{ routing_zone_id }}"
     state: present
 
 # ── Protocol Endpoint CT type examples ───────────────────────────────
@@ -480,35 +527,39 @@ EXAMPLES = """
 # Protocol Endpoint CT: BGP Peering (IP Endpoint)
 - name: Create Protocol Endpoint BGP CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Proto-EP-BGP"
-    type: protocol_endpoint
-    primitives:
-      bgp_peering_ip_endpoints:
-        ep_peer:
-          ipv4_safi: true
-          ipv6_safi: false
-          bfd: true
-          ttl: 1
-          session_addressing_ipv4: addressed
-          session_addressing_ipv6: link_local
-          routing_policies:
-            ep_rp:
-              rp_to_attach: "{{ routing_policy_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Proto-EP-BGP"
+      type: protocol_endpoint
+      primitives:
+        bgp_peering_ip_endpoints:
+          ep_peer:
+            ipv4_safi: true
+            ipv6_safi: false
+            bfd: true
+            ttl: 1
+            session_addressing_ipv4: addressed
+            session_addressing_ipv6: link_local
+            routing_policies:
+              ep_rp:
+                rp_to_attach: "{{ routing_policy_id }}"
     state: present
 
 # Protocol Endpoint CT: Routing Zone Constraint
 - name: Create Protocol Endpoint RZ Constraint CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "Proto-EP-RZ-Constraint"
-    type: protocol_endpoint
-    primitives:
-      routing_zone_constraints:
-        ep_rz_limit:
-          routing_zone_constraint_mode: allow
-          constraints:
-            - "{{ routing_zone_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Proto-EP-RZ-Constraint"
+      type: protocol_endpoint
+      primitives:
+        routing_zone_constraints:
+          ep_rz_limit:
+            routing_zone_constraint_mode: allow
+            constraints:
+              - "{{ routing_zone_id }}"
     state: present
 
 # ── System CT type examples ──────────────────────────────────────────
@@ -516,16 +567,18 @@ EXAMPLES = """
 # System CT: Custom Static Route
 - name: Create System Custom Static Route CT
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "System-Static-Route"
-    type: system
-    primitives:
-      custom_static_routes:
-        sys_default:
-          network: "0.0.0.0/0"
-          next_hop: next_hop_ip
-          routing_policies:
-            sys_rp: {}
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "System-Static-Route"
+      type: system
+      primitives:
+        custom_static_routes:
+          sys_default:
+            network: "0.0.0.0/0"
+            next_hop: next_hop_ip
+            routing_policies:
+              sys_rp: {}
     state: present
 
 # ── Update and delete examples ───────────────────────────────────────
@@ -533,32 +586,37 @@ EXAMPLES = """
 # Update an existing CT by name (idempotent — re-run detects no change)
 - name: Update BGP-2-SRX CT (change VLAN)
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "BGP-2-SRX"
-    type: interface
-    description: "Updated CT — new VLAN"
-    primitives:
-      ip_links:
-        srx_link:
-          security_zone: "{{ routing_zone_id }}"
-          interface_type: tagged
-          vlan_id: 200
-          ipv4_addressing_type: numbered
-          ipv6_addressing_type: none
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "BGP-2-SRX"
+      type: interface
+      description: "Updated CT — new VLAN"
+      primitives:
+        ip_links:
+          srx_link:
+            security_zone: "{{ routing_zone_id }}"
+            interface_type: tagged
+            vlan_id: 200
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
     state: present
 
 # Delete a CT by name
 - name: Delete Connectivity Template by name
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "BGP-2-SRX"
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "BGP-2-SRX"
     state: absent
 
 # Delete a CT by ID (using registered output from create)
 - name: Delete Connectivity Template by ID
   juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_id: "{{ ct_result.ct_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_id: "{{ ct_result.ct_id }}"
     state: absent
 """
 
@@ -747,17 +805,8 @@ def _refresh_rp_bindings(ep_client, blueprint_id, hierarchy):
 
 def main():
     object_module_args = dict(
-        blueprint_id=dict(type="str", required=True),
-        name=dict(type="str", required=False),
-        ct_id=dict(type="str", required=False),
-        type=dict(
-            type="str",
-            required=False,
-            choices=CT_TYPES,
-        ),
-        description=dict(type="str", required=False, default=""),
-        tags=dict(type="list", elements="str", required=False),
-        primitives=dict(type="dict", required=False),
+        id=dict(type="dict", required=True),
+        body=dict(type="dict", required=False),
         state=dict(
             type="str",
             required=False,
@@ -777,15 +826,20 @@ def main():
         client_factory = ApstraClientFactory.from_params(module)
         ep_client = client_factory.get_endpointpolicy_client()
 
-        # Validate params
-        blueprint_id = module.params["blueprint_id"]
-        name = module.params.get("name")
-        ct_id = module.params.get("ct_id")
-        ct_type = module.params.get("type")
-        description = module.params.get("description", "") or ""
-        tags = module.params.get("tags") or []
-        primitives = module.params.get("primitives")
+        # Extract params from id / body
+        id_param = module.params["id"] or {}
+        body = module.params.get("body") or {}
         state = module.params["state"]
+
+        blueprint_id = id_param.get("blueprint")
+        if not blueprint_id:
+            raise ValueError("'id.blueprint' is required")
+        ct_id = id_param.get("ct_id")
+        name = body.get("name")
+        ct_type = body.get("type")
+        description = body.get("description", "") or ""
+        tags = body.get("tags") or []
+        primitives = body.get("primitives")
 
         # ── Lookup existing CT ────────────────────────────────────────
         current_parsed = None

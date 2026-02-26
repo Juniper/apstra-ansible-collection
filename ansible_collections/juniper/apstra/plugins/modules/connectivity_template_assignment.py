@@ -75,32 +75,40 @@ options:
     type: str
     required: false
     default: APSTRA_AUTH_TOKEN environment variable
-  blueprint_id:
+  id:
     description:
-      - The ID of the Apstra blueprint.
+      - Identifies the blueprint and connectivity template.
+      - Must contain C(blueprint) key with the blueprint ID.
+      - Must contain either C(ct_id) (UUID) or C(ct_name) (label) to
+        identify the Connectivity Template.
+    type: dict
     required: true
-    type: str
-  ct_id:
+    suboptions:
+      blueprint:
+        description:
+          - The ID of the Apstra blueprint.
+        required: true
+        type: str
+      ct_id:
+        description:
+          - The UUID of the Connectivity Template to assign.
+          - Either C(ct_id) or C(ct_name) must be provided.
+        required: false
+        type: str
+      ct_name:
+        description:
+          - The name (label) of the Connectivity Template to assign.
+          - Used to look up the CT when C(ct_id) is not provided.
+        required: false
+        type: str
+  body:
     description:
-      - The UUID of the Connectivity Template to assign.
-      - Either C(ct_id) or C(ct_name) must be provided.
-    required: false
-    type: str
-  ct_name:
-    description:
-      - The name (label) of the Connectivity Template to assign.
-      - Used to look up the CT when C(ct_id) is not provided.
-    required: false
-    type: str
-  application_point_ids:
-    description:
-      - A list of interface node IDs to assign the CT to (when state
-        is present) or unassign from (when state is absent).
-      - These are the graph node IDs of interfaces in the blueprint,
-        obtainable from the application-points API or from graph queries.
+      - The assignment payload.
+      - Must contain C(application_point_ids) list of interface node IDs
+        to assign the CT to (when state is present) or unassign from
+        (when state is absent).
+    type: dict
     required: true
-    type: list
-    elements: str
   state:
     description:
       - Desired state of the CT assignments.
@@ -115,91 +123,40 @@ options:
 EXAMPLES = """
 # ── Assign by CT ID ──────────────────────────────────────────────────
 
-# Assign a CT to a single interface by CT ID
-- name: Assign CT to one interface
-  juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_id: "{{ ct_id }}"
-    application_point_ids:
-      - "{{ interface_id }}"
-    state: present
-
-# Assign a CT to multiple interfaces at once (bulk)
 - name: Assign CT to multiple interfaces
   juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_id: "{{ ct_id }}"
-    application_point_ids:
-      - "G31G9dCSVcDS9PoeYg"
-      - "x2LgjvQJTCNdPBQL9A"
-      - "Hk9PqW3mTfNcRbYx1Z"
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_id: "{{ ct_id }}"
+    body:
+      application_point_ids:
+        - "G31G9dCSVcDS9PoeYg"
+        - "x2LgjvQJTCNdPBQL9A"
     state: present
 
 # ── Assign by CT name ────────────────────────────────────────────────
 
-# Assign a CT by name lookup (no need to know the CT UUID)
 - name: Assign BGP-2-SRX CT to interfaces
   juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_name: "BGP-2-SRX"
-    application_point_ids:
-      - "{{ interface_id }}"
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_name: "BGP-2-SRX"
+    body:
+      application_point_ids:
+        - "{{ interface_id }}"
     state: present
 
-# ── Using registered output from connectivity_template ───────────────
+# ── Unassign CT from interfaces ──────────────────────────────────────
 
-# First create the CT, then assign it in a follow-up task
-- name: Create the CT
-  juniper.apstra.connectivity_template:
-    blueprint_id: "{{ blueprint_id }}"
-    name: "VLAN-100-Access"
-    type: interface
-    primitives:
-      virtual_network_singles:
-        vlan100:
-          vn_node_id: "{{ virtual_network_id }}"
-    state: present
-  register: ct_result
-
-- name: Assign the CT using registered output
-  juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_id: "{{ ct_result.ct_id }}"
-    application_point_ids:
-      - "{{ interface_id_1 }}"
-      - "{{ interface_id_2 }}"
-    state: present
-
-# ── Unassign (remove) CT from interfaces ─────────────────────────────
-
-# Unassign a CT from specific interfaces by CT ID
 - name: Unassign CT from interfaces
   juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_id: "{{ ct_id }}"
-    application_point_ids:
-      - "G31G9dCSVcDS9PoeYg"
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_id: "{{ ct_id }}"
+    body:
+      application_point_ids:
+        - "G31G9dCSVcDS9PoeYg"
     state: absent
-
-# Unassign a CT by name
-- name: Unassign CT from interfaces by name
-  juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_name: "BGP-2-SRX"
-    application_point_ids:
-      - "{{ interface_id }}"
-    state: absent
-
-# ── Idempotent re-run ────────────────────────────────────────────────
-
-# Running the same assign again produces changed=false
-- name: Assign CT (idempotent — no change on second run)
-  juniper.apstra.connectivity_template_assignment:
-    blueprint_id: "{{ blueprint_id }}"
-    ct_name: "VLAN-100-Access"
-    application_point_ids:
-      - "{{ interface_id }}"
-    state: present
 """
 
 RETURN = """
@@ -291,10 +248,8 @@ def _walk_app_points_tree(node, ct_id, states):
 
 def main():
     object_module_args = dict(
-        blueprint_id=dict(type="str", required=True),
-        ct_id=dict(type="str", required=False),
-        ct_name=dict(type="str", required=False),
-        application_point_ids=dict(type="list", elements="str", required=True),
+        id=dict(type="dict", required=True),
+        body=dict(type="dict", required=True),
         state=dict(
             type="str",
             required=False,
@@ -315,10 +270,12 @@ def main():
         ep_client = client_factory.get_endpointpolicy_client()
 
         # Validate params
-        blueprint_id = module.params["blueprint_id"]
-        ct_id = module.params.get("ct_id")
-        ct_name = module.params.get("ct_name")
-        application_point_ids = module.params["application_point_ids"]
+        id_param = module.params["id"] or {}
+        blueprint_id = id_param.get("blueprint")
+        ct_id = id_param.get("ct_id")
+        ct_name = id_param.get("ct_name")
+        body = module.params["body"] or {}
+        application_point_ids = body.get("application_point_ids", [])
         state = module.params["state"]
 
         # ── Resolve CT ID ─────────────────────────────────────────────

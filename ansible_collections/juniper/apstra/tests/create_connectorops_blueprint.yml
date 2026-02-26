@@ -163,12 +163,13 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        management_ip: "{{ item.value.mgmt_ip }}"
-        agent_type: "offbox"
-        label: "{{ item.key }}"
-        operation_mode: "full_control"
-        device_username: "{{ device_username }}"
-        device_password: "{{ device_password }}"
+        body:
+          management_ip: "{{ item.value.mgmt_ip }}"
+          agent_type: "offbox"
+          label: "{{ item.key }}"
+          operation_mode: "full_control"
+          device_username: "{{ device_username }}"
+          device_password: "{{ device_password }}"
         state: present
       loop: "{{ devices | dict2items }}"
       loop_control:
@@ -209,9 +210,10 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        design_type: logical_device
-        name: "{{ item.key }}"
-        spec: "{{ item.value }}"
+        id:
+          design_type: logical_device
+          name: "{{ item.key }}"
+        body: "{{ item.value }}"
         state: present
       loop: "{{ logical_devices | dict2items }}"
       loop_control:
@@ -223,9 +225,10 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        design_type: rack_type
-        name: "{{ item.key }}"
-        spec: "{{ item.value }}"
+        id:
+          design_type: rack_type
+          name: "{{ item.key }}"
+        body: "{{ item.value }}"
         state: present
       loop: "{{ rack_types | dict2items }}"
       loop_control:
@@ -237,9 +240,10 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        design_type: template
-        name: "{{ item.key }}"
-        spec: "{{ item.value }}"
+        id:
+          design_type: template
+          name: "{{ item.key }}"
+        body: "{{ item.value }}"
         state: present
       loop: "{{ design_templates | dict2items }}"
       loop_control:
@@ -324,8 +328,10 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        blueprint_id: "{{ blueprint_id }}"
-        assignments: "{{ im_assignments }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          assignments: "{{ im_assignments }}"
         state: present
       register: imap_result
 
@@ -639,16 +645,18 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ _srx_system_id_map[item.key] }}"
-        name: "{{ item.key }}"
-        hostname: "{{ item.key }}"
-        asn: "{{ item.value.asn }}"
-        loopback_ipv4: "{{ item.value.loopback_ip }}"
-        deploy_mode: "deploy"
-        external: true
-        tags:
-          - "srx"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ _srx_system_id_map[item.key] }}"
+        body:
+          name: "{{ item.key }}"
+          hostname: "{{ item.key }}"
+          asn: "{{ item.value.asn }}"
+          loopback_ipv4: "{{ item.value.loopback_ip }}"
+          deploy_mode: "deploy"
+          external: true
+          tags:
+            - "srx"
         state: present
       loop: "{{ srx_nodes | dict2items }}"
       loop_control:
@@ -777,8 +785,9 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        blueprint_id: "{{ blueprint_id }}"
-        settings:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
           external_router_mtu: "{{ external_router_mtu }}"
       register: fabric_result
 
@@ -822,31 +831,33 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        blueprint_id: "{{ blueprint_id }}"
-        name: "BGP-2-SRX"
-        type: interface
-        description: "BGP peering to SRX external routers"
-        primitives:
-          ip_links:
-            srx_link:
-              interface_type: untagged
-              security_zone: "{{ default_rz_id }}"
-              ipv4_addressing_type: numbered
-              ipv6_addressing_type: none
-              bgp_peering_generic_systems:
-                bgp_peer:
-                  bfd: false
-                  ipv4_safi: true
-                  ipv6_safi: false
-                  ttl: 2
-                  session_addressing_ipv4: addressed
-                  session_addressing_ipv6: none
-                  peer_from: interface
-                  peer_to: interface_or_ip_endpoint
-                  neighbor_asn_type: dynamic
-                  routing_policies:
-                    rp_attach:
-                      rp_to_attach: "{{ routing_policy.id.routing_policy }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "BGP-2-SRX"
+          type: interface
+          description: "BGP peering to SRX external routers"
+          primitives:
+            ip_links:
+              srx_link:
+                interface_type: untagged
+                security_zone: "{{ default_rz_id }}"
+                ipv4_addressing_type: numbered
+                ipv6_addressing_type: none
+                bgp_peering_generic_systems:
+                  bgp_peer:
+                    bfd: false
+                    ipv4_safi: true
+                    ipv6_safi: false
+                    ttl: 2
+                    session_addressing_ipv4: addressed
+                    session_addressing_ipv6: none
+                    peer_from: interface
+                    peer_to: interface_or_ip_endpoint
+                    neighbor_asn_type: dynamic
+                    routing_policies:
+                      rp_attach:
+                        rp_to_attach: "{{ routing_policy.id.routing_policy }}"
         state: present
       register: ct_result
 
@@ -879,9 +890,11 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
-        blueprint_id: "{{ blueprint_id }}"
-        ct_id: "{{ ct_result.ct_id }}"
-        application_point_ids: "{{ srx_interface_ids }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_id: "{{ ct_result.ct_id }}"
+        body:
+          application_point_ids: "{{ srx_interface_ids }}"
         state: present
       when: srx_interface_ids | length > 0
 
