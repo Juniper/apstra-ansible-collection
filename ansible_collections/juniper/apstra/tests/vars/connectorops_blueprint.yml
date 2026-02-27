@@ -217,6 +217,13 @@ configlet_template_text: |
   set security policies from-zone evpn to-zone evpn policy C2D match source-l3vpn-vrf-group CATS
   set security policies from-zone evpn to-zone evpn policy C2D match destination-l3vpn-vrf-group DOGS
   set security policies from-zone evpn to-zone evpn policy C2D then reject
+  set security policies from-zone evpn to-zone evpn policy infra description "control plane permit"
+  set security policies from-zone evpn to-zone evpn policy infra match source-address any
+  set security policies from-zone evpn to-zone evpn policy infra match destination-address any
+  set security policies from-zone evpn to-zone evpn policy infra match application junos-bgp
+  set security policies from-zone evpn to-zone evpn policy infra match application junos-icmp-ping
+  set security policies from-zone evpn to-zone evpn policy infra match application bfd-mhop
+  set security policies from-zone evpn to-zone evpn policy infra then permit
   set security zones security-zone evpn host-inbound-traffic system-services all
   set security zones security-zone evpn host-inbound-traffic protocols all
   set security zones security-zone evpn interfaces ge-0/0/0.0
