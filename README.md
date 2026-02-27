@@ -2,7 +2,7 @@
 
 # Juniper Apstra Ansible Collection
 
-This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra AOS platform.
+This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra platform.
 
 - [Juniper Apstra Ansible Collection](#juniper-apstra-ansible-collection)
   - [Installation and Usage](#installation-and-usage)
@@ -29,14 +29,14 @@ See [README](ansible_collections/juniper/apstra/README.md).
 
 ## Contributing
 
-If you would like to contribute to this project, please follow the guidelines outlined in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+If you would like to contribute to this project, please open an issue or submit a pull request on the [GitHub repository](https://github.com/Juniper/apstra-ansible-collection). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html) for general guidelines.
 
 ## Development Environment
 
 The following tools are recommended for development of this collection:
 1. [brew.sh](https://brew.sh/) -- Only needed for _Mac OS X_
 1. [pyenv](https://github.com/pyenv/pyenv/blob/master/README.md)
-2. [pipenv](https://github.com/pyenv/pyenv/blob/master/README.md)
+2. [pipenv](https://pipenv.pypa.io/en/latest/)
 3. [pre-commit](https://github.com/pre-commit/pre-commit)
 
 ### Setup
@@ -109,7 +109,7 @@ This will start a new interactive prompt in which the known supported version of
 
 ### Test Configuration
 
-To run tests, you should have an Apstra 5.0 instance in the lab.
+To run tests, you should have an Apstra 5.0 (or later) instance in the lab.
 
 At the root of your 'apstra-ansible-collection' repo, create a .env file. Put the authentication files you need in there. `pipenv` will set these when the pipenv is initialized. Here is an example.
 
@@ -183,8 +183,8 @@ Here's an example of how the Apstra SDK can be used to perform CRUD operations.
 
 ```python
         # Instantiate the client
-        client_factory = ApstraClientFactory.from_params(module.params)
-        client = client_factory.l3clos_client()
+        client_factory = ApstraClientFactory.from_params(module)
+        client = client_factory.get_l3clos_client()
 
         # Gather facts using the persistent connection
 

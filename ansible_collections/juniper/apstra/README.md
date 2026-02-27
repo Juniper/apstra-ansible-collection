@@ -4,7 +4,7 @@
 
 This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra platform.
 
-This collection has been validated on Juniper Apstra version 5.0.
+This collection has been validated on Juniper Apstra version 5.0 and later (SDK 6.1.0).
 
 ## Support
 
@@ -31,28 +31,39 @@ For more information about communication, see the [Ansible communication guide](
 
 ## Ansible version compatibility
 
-This collection has been tested against following Ansible versions: **>=2.15**.
+This collection has been tested against following Ansible versions: **>=2.16.14**.
 
 ## Included Content
 
 ### Modules
 Name | Description
 --- | ---
-[juniper.apstra.apstra_facts](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/apstra_facts_module.rst) | Collect network facts from Apstra
-[juniper.apstra.authenticate](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/authenticate_module.rst) | Authenticate to Apstra API
-[juniper.apstra.blueprint](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Manage blueprints
-[juniper.apstra.endpoint_policy](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/endpoint_policy_module.rst) | Manage endpoint policies
-[juniper.apstra.resource_group](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/resource_group_module.rst) | Manage resource groups
-[juniper.apstra.routing_policy](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/routing_policy_module.rst) | Manage routing policies
-[juniper.apstra.security_zone](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/security_zone_module.rst) | Manage security zones
-[juniper.apstra.tag](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/tag_module.rst) | Manage tags
-[juniper.apstra.virtual_network](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/virtual_network_module.rst) | Manage virtual networks
+[juniper.apstra.apstra_facts](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/apstra_facts_module.rst) | Gather facts from Apstra (blueprints, virtual networks, security zones, endpoint policies, resource pools, and more). Use `gather_network_facts: all` or pass a filtered list of object types.
+[juniper.apstra.authenticate](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/authenticate_module.rst) | Log in to Apstra and retrieve a session token for use by subsequent modules. Also supports explicit logout.
+[juniper.apstra.blueprint](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Full lifecycle management of Apstra blueprints — create, commit, lock/unlock, and delete. Supports graph queries (`state: queried`) and per-node property patches (`state: node_updated`). Uses a tag-based mutex to prevent concurrent modifications.
+[juniper.apstra.configlets](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/configlets_module.rst) | Create, update, and delete configlets in Apstra. Supports global catalog configlets and blueprint-scoped configlets with role-based targeting conditions.
+[juniper.apstra.connectivity_template](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/connectivity_template_module.rst) | Create, update, and delete Connectivity Templates (CTs) in an Apstra blueprint. CTs are composed of network primitives (IP Link, BGP Peering, Routing Policy, etc.) and target an application point type (`interface`, `svi`, `loopback`, etc.). Idempotent by name.
+[juniper.apstra.connectivity_template_assignment](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/connectivity_template_assignment_module.rst) | Assign or unassign Connectivity Templates to application point nodes (interfaces) within an Apstra blueprint.
+[juniper.apstra.design](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Create and manage design-layer objects (logical devices, rack types, templates) required before blueprint creation.
+[juniper.apstra.endpoint_policy](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/endpoint_policy_module.rst) | Create, update, and delete endpoint policies and their application points within an Apstra blueprint.
+[juniper.apstra.external_gateway](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/external_gateway_module.rst) | Create, update, and delete external EVPN remote gateways in an Apstra blueprint for inter-DC or WAN BGP/L2VPN peering.
+[juniper.apstra.fabric_settings](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Manage fabric-wide settings in an Apstra blueprint (MTU, EVPN parameters, overlay protocol, anti-affinity, SVI/anycast defaults).
+[juniper.apstra.generic_systems](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/generic_systems_module.rst) | Create, update, and delete generic (external) systems in an Apstra blueprint, including their links to fabric switches (LAG mode, speed, port assignments).
+[juniper.apstra.interface_map](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Assign interface maps to blueprint switch nodes, linking them to device profiles that define physical port layout and naming.
+[juniper.apstra.property_set](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/property_set_module.rst) | Create, update, and delete property sets (key-value stores). Supports both global catalog scope and blueprint scope.
+[juniper.apstra.resource_group](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/resource_group_module.rst) | Assign global resource pools (ASN, IP, IPv6, VLAN, VNI) to named resource groups within an Apstra blueprint.
+[juniper.apstra.resource_pools](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/resource_pools_module.rst) | Create, update, and delete global resource pools in Apstra. Supported types: ASN, Integer, IP, IPv6, VLAN, and VNI.
+[juniper.apstra.routing_policy](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/routing_policy_module.rst) | Create, update, and delete routing policies in an Apstra blueprint (BGP import/export filters, aggregate prefixes, extra routes).
+[juniper.apstra.security_zone](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/security_zone_module.rst) | Create, update, and delete security zones (VRFs) in an Apstra blueprint, including VNI ID, DHCP relay, and routing policy association.
+[juniper.apstra.system_agents](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Onboard, update, and delete NOS system agents in Apstra to connect physical devices to the management plane.
+[juniper.apstra.tag](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/tag_module.rst) | Create, update, and delete tags in Apstra. Tags can be applied to blueprint objects and used as configlet targeting selectors.
+[juniper.apstra.virtual_network](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/virtual_network_module.rst) | Create, update, and delete virtual networks (VXLAN/VLAN) in an Apstra blueprint. Configures VN type, VNI ID, IPv4/IPv6 gateways, DHCP, and security zone binding. Supports lookup by label.
 
 Click the `Content` button to see the list of content included in this collection.
 
 ## Installation
 
-You can install the Juniper Networks Apstr collection with the Ansible Galaxy CLI:
+You can install the Juniper Networks Apstra collection with the Ansible Galaxy CLI:
 
 ```shell
 ansible-galaxy collection install juniper.apstra
@@ -118,7 +129,7 @@ The collection is simply an Ansible interface to specific Apstra API. This is wh
 
 ## Contributing to this collection
 
-We welcome community contributions to this collection. If you find problems, please open an issue or create a PR against the [Juniper Networks Apstr collection repository](https://github.com/Juniper/apstra-ansible-collection). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html#contributing-maintained-collections) for complete details.
+We welcome community contributions to this collection. If you find problems, please open an issue or create a PR against the [Juniper Networks Apstra collection repository](https://github.com/Juniper/apstra-ansible-collection). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html#contributing-maintained-collections) for complete details.
 
 You can also join us on:
 
@@ -139,7 +150,11 @@ Release notes are available [here](https://github.com/Juniper/apstra-ansible-col
 
 ## Roadmap
 
-<!-- Optional. Include the roadmap for this collection, and the proposed release/versioning strategy so users can anticipate the upgrade/update cycle. -->
+- Expand coverage of Apstra freeform blueprint resources.
+- Add support for additional design-level objects (rack types, interface groups).
+- Provide idempotent management of system agent profiles.
+- Improve diff output to surface per-field change details for all modules.
+- Publish dedicated documentation pages for `design`, `fabric_settings`, `interface_map`, and `system_agents` modules.
 
 ## More Information
 
@@ -151,6 +166,6 @@ Release notes are available [here](https://github.com/Juniper/apstra-ansible-col
 
 ## Licensing
 
-GNU General Public License v3.0 or later.
+This collection is available under multiple licenses depending on the component. See [LICENSE](https://github.com/Juniper/apstra-ansible-collection/blob/main/LICENSE) for the full text.
 
-See [LICENSE](https://www.gnu.org/licenses/gpl-3.0.txt) to see the full text.
+Primary license: **Apache-2.0**. Additional licenses used in this project: MIT, GPL-3.0-or-later, BSD-3-Clause.
