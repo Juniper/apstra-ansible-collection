@@ -134,9 +134,11 @@ install: build
 	test-resource_pools \
 	test-property_set \
 	test-external_gateway \
+	test-customize_external_gateway \
 	test-connectivity_template \
 	test-configlets \
 	test-generic_systems \
+	test-customize_generic_systems \
 	test-system_agents \
 	test-interface_map \
 	test-fabric_settings
@@ -218,7 +220,7 @@ create-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-interface_map test-fabric_settings
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-customize_generic_systems test-system_agents test-interface_map test-fabric_settings
 
 clean-pipenv:
 	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true

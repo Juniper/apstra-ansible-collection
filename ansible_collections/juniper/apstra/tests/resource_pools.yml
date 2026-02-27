@@ -54,7 +54,7 @@
 
     - name: Display resource groups
       ansible.builtin.debug:
-        var: resource_groups_response.json
+        var: resource_groups_response.json['items']
 
     # ── ASN Pool Tests ──────────────────────────────────────────────────
 
@@ -107,18 +107,15 @@
         var: asn_resource_group
 
     - name: Assign ASN pool to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
         body:
           pool_ids:
             - "{{ asn_pool_id }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       register: asn_assign_result
       when: asn_resource_group is defined and asn_resource_group
 
@@ -220,17 +217,14 @@
 
     # Unassign before delete
     - name: Unassign ASN pool from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/asn/{{ asn_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
         body:
           pool_ids: []
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       when: asn_resource_group is defined and asn_resource_group
 
     # Delete ASN pool
@@ -290,18 +284,15 @@
       when: ip_resource_groups | length > 0
 
     - name: Assign IP pool to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
         body:
           pool_ids:
             - "{{ ip_pool_id }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       register: ip_assign_result
       when: ip_resource_group is defined and ip_resource_group
 
@@ -389,17 +380,14 @@
 
     # Unassign and delete
     - name: Unassign IP pool from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/ip/{{ ip_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
         body:
           pool_ids: []
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       when: ip_resource_group is defined and ip_resource_group
 
     - name: Delete IP pool
@@ -662,7 +650,7 @@
 
     - name: Display resource groups after VN creation
       ansible.builtin.debug:
-        var: rg_after_vn.json
+        var: rg_after_vn.json['items']
 
     - name: Create VNI pool
       juniper.apstra.resource_pools:
@@ -707,18 +695,15 @@
       when: vni_resource_groups | length > 0
 
     - name: Assign VNI pool to blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "vni"
+          group_name: "{{ vni_resource_group.name }}"
         body:
           pool_ids:
             - "{{ vni_pool_id }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       register: vni_assign_result
       when: vni_resource_group is defined and vni_resource_group
 
@@ -810,17 +795,14 @@
 
     # Unassign and delete
     - name: Unassign VNI pool from blueprint
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/resource_groups/vni/{{ vni_resource_group.name }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ auth_result.token }}"
-          Content-Type: "application/json"
-        body_format: json
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "vni"
+          group_name: "{{ vni_resource_group.name }}"
         body:
           pool_ids: []
-        validate_certs: false
-        status_code: [200, 202, 204]
+        auth_token: "{{ auth_result.token }}"
       when: vni_resource_group is defined and vni_resource_group
 
     - name: Delete VNI pool

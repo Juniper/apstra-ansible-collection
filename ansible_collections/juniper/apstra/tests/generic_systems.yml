@@ -112,6 +112,95 @@
         var: imap_assign.status
       when: not use_existing_blueprint | bool
 
+    # ── Discover spines and assign interface maps ──────────────────
+
+    - name: Query spines via QE
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body:
+          query: "node('system', role='spine', name='spine')"
+        validate_certs: false
+        status_code: 200
+      register: spines_qe
+      when: not use_existing_blueprint | bool
+
+    - name: Extract spine IDs
+      ansible.builtin.set_fact:
+        spine_ids: "{{ spines_qe.json['items'] | map(attribute='spine') | map(attribute='id') | list }}"
+      when: not use_existing_blueprint | bool
+
+    - name: Display spine IDs
+      ansible.builtin.debug:
+        msg: "Found {{ spine_ids | length }} spines: {{ spine_ids }}"
+      when: not use_existing_blueprint | bool
+
+    - name: Build spine interface map assignment body
+      ansible.builtin.set_fact:
+        spine_imap_body:
+          assignments: "{{ {spine_ids[0]: 'Juniper_vQFX__AOS-7x10-Spine'} }}"
+      when: not use_existing_blueprint | bool
+
+    - name: Assign interface map to test spine
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/interface-map-assignments"
+        method: PATCH
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body: "{{ spine_imap_body }}"
+        validate_certs: false
+        status_code: [200, 202, 204]
+      register: spine_imap_assign
+      when: not use_existing_blueprint | bool
+
+    - name: Display spine interface map assignment result
+      ansible.builtin.debug:
+        var: spine_imap_assign.status
+      when: not use_existing_blueprint | bool
+
+    - name: Query all interfaces on test spine
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+        body_format: json
+        body:
+          query: >-
+            node('system', id='{{ spine_ids[0] }}', name='sys')
+            .out('hosted_interfaces')
+            .node('interface', name='intf')
+        validate_certs: false
+        status_code: 200
+      register: spine_all_intf_qe
+      when: not use_existing_blueprint | bool
+
+    - name: Extract physical interface names on spine
+      ansible.builtin.set_fact:
+        spine_phys_if_names: >-
+          {{ spine_all_intf_qe.json['items']
+             | map(attribute='intf')
+             | map(attribute='if_name')
+             | select('match', '^(ge|xe|et)-')
+             | list }}
+      when: not use_existing_blueprint | bool
+
+    - name: Compute spine interface prefix and max used port
+      ansible.builtin.set_fact:
+        spine_if_prefix: >-
+          {{ (spine_phys_if_names | first | regex_replace('[^/]+$', ''))
+             if spine_phys_if_names | length > 0 else 'xe-0/0/' }}
+        spine_max_port: >-
+          {{ spine_phys_if_names
+             | map('regex_replace', '^.*/', '')
+             | map('int')
+             | max | default(-1) | int }}
+      when: not use_existing_blueprint | bool
+
     # ── Set test variables based on run mode ──────────────────────────
 
     - name: Set test variables (standalone mode - vQFX defaults)
@@ -122,6 +211,8 @@
         test_if_name_3: "xe-0/0/9"
         test_if_name_4: "xe-0/0/10"
         test_if_transform_id: 1
+        test_spine_id: "{{ spine_ids[0] }}"
+        test_spine_if_1: "{{ spine_if_prefix | trim }}{{ spine_max_port | int + 1 }}"
       when: not use_existing_blueprint | bool
 
     - name: Set test variables (existing blueprint mode - user-provided)
@@ -140,6 +231,8 @@
           leaf={{ test_leaf_id }},
           if1={{ test_if_name_1 }}, if2={{ test_if_name_2 }},
           if3={{ test_if_name_3 }}, if4={{ test_if_name_4 }},
+          spine={{ test_spine_id }},
+          spine_if1={{ test_spine_if_1 }},
           transform={{ test_if_transform_id }}
 
     # ══════════════════════════════════════════════════════════════════
@@ -485,12 +578,18 @@
     #  TEST 12: Create external generic system
     # ══════════════════════════════════════════════════════════════════
 
-    - name: "TEST 12 - Create external generic system"
+    - name: "TEST 12 - Create external generic system linked to spine"
       juniper.apstra.generic_systems:
         blueprint_id: "{{ blueprint_id }}"
         name: "test-ext-gs-tf"
         hostname: "test-ext-gs-tf"
         external: true
+        links:
+          - target_switch_id: "{{ test_spine_id }}"
+            target_switch_if_name: "{{ test_spine_if_1 }}"
+            target_switch_if_transform_id: "{{ test_if_transform_id }}"
+            tags:
+              - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_create
@@ -504,8 +603,9 @@
         that:
           - ext_gs_create.changed
           - ext_gs_create.system_id is defined
+          - ext_gs_create.links | length > 0
         fail_msg: "TEST 12 FAILED: External GS creation"
-        success_msg: "TEST 12 PASSED: External GS created"
+        success_msg: "TEST 12 PASSED: External GS created with spine link"
 
     - name: Save external system ID
       ansible.builtin.set_fact:
@@ -521,6 +621,12 @@
         name: "test-ext-gs-tf"
         hostname: "test-ext-gs-tf"
         external: true
+        links:
+          - target_switch_id: "{{ test_spine_id }}"
+            target_switch_if_name: "{{ test_spine_if_1 }}"
+            target_switch_if_transform_id: "{{ test_if_transform_id }}"
+            tags:
+              - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_idem

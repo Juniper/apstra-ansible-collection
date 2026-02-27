@@ -205,3 +205,40 @@ def node_needs_update(current_node, desired):
         if current_value != value:
             changes[key] = value
     return changes
+
+
+def set_node_tags(client_factory, blueprint_id, node_id, tags):
+    """Set tags on a blueprint node.
+
+    Tags are outside ``_SAFE_PATCH_FIELDS`` so ``allow_unsafe=True``
+    is automatically applied by ``patch_node``.
+
+    Args:
+        client_factory: ``ApstraClientFactory``.
+        blueprint_id: Blueprint UUID.
+        node_id: Node UUID.
+        tags: List of tag strings.
+
+    Returns:
+        dict: The patch response.
+    """
+    return patch_node(client_factory, blueprint_id, node_id, {"tags": tags})
+
+
+def set_node_property(client_factory, blueprint_id, node_id, prop, value):
+    """Set a single property on a blueprint node.
+
+    Routes through safe or unsafe PATCH automatically based on the
+    property name.
+
+    Args:
+        client_factory: ``ApstraClientFactory``.
+        blueprint_id: Blueprint UUID.
+        node_id: Node UUID.
+        prop: The property name.
+        value: The property value.
+
+    Returns:
+        dict: The patch response.
+    """
+    return patch_node(client_factory, blueprint_id, node_id, {prop: value})
