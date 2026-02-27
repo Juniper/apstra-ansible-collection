@@ -133,7 +133,13 @@ install: build
 	test-resource_group \
 	test-resource_pools \
 	test-property_set \
-	test-configlets
+	test-external_gateway \
+	test-connectivity_template \
+	test-configlets \
+	test-generic_systems \
+	test-system_agents \
+	test-interface_map \
+	test-fabric_settings
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -171,10 +177,48 @@ test-resource_pools: install
 test-property_set: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/property_set.yml
 
+test-external_gateway: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/external_gateway.yml
+
+BLUEPRINT_ID ?=
+test-customize_external_gateway: install
+	@if [ -z "$(BLUEPRINT_ID)" ]; then echo "ERROR: BLUEPRINT_ID is required. Usage: make test-customize_external_gateway BLUEPRINT_ID=<id>"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_external_gateway.yml -e blueprint_id=$(BLUEPRINT_ID)
+
+test-customize_connectivity_template: install
+	@if [ -z "$(BLUEPRINT_ID)" ]; then echo "ERROR: BLUEPRINT_ID is required. Usage: make test-customize_connectivity_template BLUEPRINT_ID=<id>"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_connectivity_template.yml -e blueprint_id=$(BLUEPRINT_ID)
+
+test-connectivity_template: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/connectivity_template.yml
+
 test-configlets: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/configlets.yml
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools
+test-generic_systems: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/generic_systems.yml
+
+test-customize_generic_systems: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/customize_generic_systems.yml
+
+test-system_agents: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/system_agents.yml
+
+test-interface_map: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interface_map.yml
+
+test-fabric_settings: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/fabric_settings.yml
+
+TESTBED_FILE ?=
+create-connectorops-blueprint: install
+	@if [ -z "$(TESTBED_FILE)" ]; then echo "ERROR: TESTBED_FILE is required. Usage: make create-connectorops-blueprint TESTBED_FILE=/path/to/testbed.yaml"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+		$(APSTRA_COLLECTION_ROOT)/tests/create_connectorops_blueprint.yml \
+		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
+		-e testbed_file=$(TESTBED_FILE)
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-interface_map test-fabric_settings
 
 # Integration Tests
 .PHONY: test-integration-property_set

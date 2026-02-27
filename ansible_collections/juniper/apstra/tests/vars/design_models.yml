@@ -1,0 +1,137 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# AOS Design Models — ConnectorOps elements
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Extracted from apstra-marvis/tests/dc_assurance/config/aos_models/
+# Only includes elements needed for the ConnectorOps blueprint.
+#
+# Chain: logical_device → rack_type → template → blueprint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Logical Devices ───────────────────────────────────────────────────────────
+logical_devices:
+  simple_dc_vjunos_switch_96x1:
+    panels:
+      - panel1:
+          portgroups:
+            - portgroup1:
+                ports: 96
+                speed: 1
+                connects_to:
+                  - superspine
+                  - spine
+                  - leaf
+                  - access
+                  - peer
+                  - unused
+                  - generic
+
+# ── Rack Types ────────────────────────────────────────────────────────────────
+rack_types:
+  connectorops_vjunos-rack:
+    leafs:
+      - leaf1:
+          label: leaf-1
+          link_per_spine_count: 1
+          link_per_spine_speed: 1
+          logical_device: simple_dc_vjunos_switch_96x1
+          redundancy_protocol: esi
+      - leaf3border:
+          label: border-leaf-1
+          link_per_spine_count: 1
+          link_per_spine_speed: 1
+          logical_device: simple_dc_vjunos_switch_96x1
+      - leaf4border:
+          label: border-leaf-2
+          link_per_spine_count: 1
+          link_per_spine_speed: 1
+          logical_device: simple_dc_vjunos_switch_96x1
+    generics:
+      - host1:
+          label: host-1
+          logical_device: AOS-2x1-1
+          links:
+            - link1:
+                link_speed: 1
+                target_switch_label: leaf-1
+                link_per_switch_count: 1
+                label: host1_leaf1_link
+                lag_mode: lacp_active
+                attachment_type: dualAttached
+      - host2:
+          label: host-2
+          logical_device: AOS-2x1-1
+          links:
+            - link1:
+                link_speed: 1
+                target_switch_label: leaf-1
+                link_per_switch_count: 1
+                label: host2_leaf1_link
+                lag_mode: lacp_active
+                attachment_type: dualAttached
+      - host3:
+          label: host-3
+          logical_device: AOS-2x1-1
+          links:
+            - link1:
+                link_speed: 1
+                target_switch_label: leaf-1
+                link_per_switch_count: 1
+                label: host3_leaf1_link
+                lag_mode: lacp_active
+                attachment_type: dualAttached
+      - host4:
+          label: host-4
+          logical_device: AOS-2x1-1
+          links:
+            - link1:
+                link_speed: 1
+                target_switch_label: leaf-1
+                link_per_switch_count: 1
+                label: host4_leaf1_link
+                lag_mode: lacp_active
+                attachment_type: dualAttached
+      - host5:
+          label: host-5
+          logical_device: AOS-2x1-1
+          tags:
+            - srx
+          links:
+            - link1:
+                link_speed: 1
+                target_switch_label: border-leaf-1
+                link_per_switch_count: 1
+                label: host5_leaf1_link
+            - link2:
+                link_speed: 1
+                target_switch_label: border-leaf-2
+                link_per_switch_count: 1
+                label: host5_leaf2_link
+      - host6:
+          label: host-6
+          logical_device: AOS-2x1-1
+          tags:
+            - srx
+          links:
+            - link1:
+                link_speed: 1
+                target_switch_label: border-leaf-1
+                link_per_switch_count: 1
+                label: host6_leaf1_link
+            - link2:
+                link_speed: 1
+                target_switch_label: border-leaf-2
+                link_per_switch_count: 1
+                label: host6_leaf2_link
+
+# ── Templates ─────────────────────────────────────────────────────────────────
+design_templates:
+  connectorops_2spine4leaf:
+    spine:
+      logical_device: simple_dc_vjunos_switch_96x1
+      count: 2
+    racks:
+      connectorops_vjunos-rack: 1
+    overlay_control_protocol: evpn
+    asn_allocation_policy: distinct

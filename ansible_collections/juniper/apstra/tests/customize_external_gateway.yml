@@ -1,0 +1,343 @@
+---
+# Customize test: Apply external gateway configuration to an existing blueprint.
+# This playbook auto-discovers external router nodes in the blueprint and creates
+# remote gateways for each one, matching the payload used by the tests repo
+# (dc_assurance srx_handler.create_remote_gateway).
+#
+# The playbook does NOT create or delete the blueprint, and does NOT remove
+# the gateway configuration it applies.
+#
+# Usage (auto-discover mode — for connectorops integration):
+#   make test-customize_external_gateway BLUEPRINT_ID=<your-blueprint-id>
+#
+# Or directly:
+#   pipenv run ansible-playbook -v tests/customize_external_gateway.yml \
+#       -e blueprint_id=<your-blueprint-id>
+#
+# Optional overrides:
+#   -e ttl=30                        (default: 30)
+#   -e keepalive_timer=10            (default: 10)
+#   -e holdtime_timer=30             (default: 30)
+#   -e evpn_route_types=type5_only   (default: type5_only)
+#
+# Manual single-gateway mode (bypasses auto-discovery):
+#   -e manual_mode=true -e gw_name=my_gw -e gw_ip=10.1.1.1 \
+#   -e gw_asn=65500 -e local_gw_nodes='["nodeId1","nodeId2"]'
+
+- name: Apply external gateway to existing blueprint
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    # Auto-discovery is default; set manual_mode=true to override
+    manual_mode: false
+    # BGP timer defaults (matching tests repo srx_handler.py payload)
+    ttl: 30
+    keepalive_timer: 10
+    holdtime_timer: 30
+    evpn_route_types: "type5_only"
+    # Manual mode overrides (only used when manual_mode=true)
+    gw_name: "ansible_ext_gw"
+    gw_ip: "10.99.99.1"
+    gw_asn: 65500
+  tasks:
+    - name: Validate blueprint_id is provided
+      ansible.builtin.assert:
+        that:
+          - blueprint_id is defined
+          - blueprint_id | length > 0
+        fail_msg: >-
+          blueprint_id is required. Pass it with:
+          -e blueprint_id=<your-blueprint-id>
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ==================================================================
+    #  Gather blueprint nodes (used by both modes)
+    # ==================================================================
+
+    - name: Get blueprint nodes
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - "blueprints.nodes"
+        id:
+          blueprint: "{{ blueprint_id }}"
+      register: bp_facts
+
+    - name: Set nodes dict
+      ansible.builtin.set_fact:
+        all_nodes: "{{ bp_facts.ansible_facts.apstra_facts.blueprints[blueprint_id].nodes }}"
+
+    # ==================================================================
+    #  AUTO-DISCOVER MODE — find external router nodes in the blueprint
+    # ==================================================================
+
+    - name: Find external router nodes
+      ansible.builtin.set_fact:
+        external_nodes: >-
+          {{ all_nodes | dict2items
+             | selectattr('value.external', 'equalto', true)
+             | map(attribute='value')
+             | list }}
+      when: not manual_mode | bool
+
+    - name: Show discovered external router nodes
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ external_nodes | length }} external router node(s):
+          {{ external_nodes | map(attribute='label') | list }}
+      when: not manual_mode | bool
+
+    - name: Verify at least one external node exists
+      ansible.builtin.assert:
+        that:
+          - external_nodes | length > 0
+        fail_msg: >-
+          No external router nodes (external=true) found in blueprint
+          {{ blueprint_id }}. Ensure external routers are deployed before
+          running this playbook.
+      when: not manual_mode | bool
+
+    # ---- Build Apstra API base URL for direct API calls ----
+
+    - name: Build API base URL
+      ansible.builtin.set_fact:
+        apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') | regex_replace('/api$', '') }}"
+      when: not manual_mode | bool
+
+    # ---- Get cabling map to find connected leaf nodes ----
+
+    - name: Get cabling map
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/api/blueprints/{{ blueprint_id }}/cabling-map"
+        method: GET
+        headers:
+          Authtoken: "{{ auth.token }}"
+        validate_certs: false
+        return_content: true
+      register: cabling_map_response
+      when: not manual_mode | bool
+
+    # ---- Fetch ASN and loopback for each external node ----
+
+    - name: Fetch domain (ASN) for each external node
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/api/blueprints/{{ blueprint_id }}/systems/{{ item.id }}/domain"
+        method: GET
+        headers:
+          Authtoken: "{{ auth.token }}"
+        validate_certs: false
+        return_content: true
+      register: domain_responses
+      loop: "{{ external_nodes }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when: not manual_mode | bool
+
+    - name: Fetch loopback for each external node
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/api/blueprints/{{ blueprint_id }}/systems/{{ item.id }}/loopback/0"
+        method: GET
+        headers:
+          Authtoken: "{{ auth.token }}"
+        validate_certs: false
+        return_content: true
+      register: loopback_responses
+      loop: "{{ external_nodes }}"
+      loop_control:
+        label: "{{ item.label }}"
+      when: not manual_mode | bool
+
+    # ---- Build gateway configs from discovered data ----
+
+    - name: Build gateway configs from discovered data
+      ansible.builtin.set_fact:
+        gateway_configs: >-
+          {%- set configs = [] -%}
+          {%- set links = cabling_map_response.json.links | default([]) -%}
+          {%- for ext_node in external_nodes -%}
+            {%- set node_label = ext_node.label -%}
+            {%- set node_id = ext_node.id -%}
+            {%- set domain_resp = domain_responses.results[loop.index0] -%}
+            {%- set loopback_resp = loopback_responses.results[loop.index0] -%}
+            {%- set asn = domain_resp.json.domain_id | default(0) | int -%}
+            {%- set lb_ip_raw = loopback_resp.json.ipv4_addr | default('') -%}
+            {%- set lb_ip = lb_ip_raw.split('/')[0] if '/' in lb_ip_raw else lb_ip_raw -%}
+            {%- set leaf_ids = [] -%}
+            {%- for link in links -%}
+              {%- set endpoints = link.endpoints | default([]) -%}
+              {%- if endpoints | length == 2 -%}
+                {%- set ep0_sys = endpoints[0].system.id | default('') -%}
+                {%- set ep1_sys = endpoints[1].system.id | default('') -%}
+                {%- if ep0_sys == node_id -%}
+                  {%- set peer_id = ep1_sys -%}
+                  {%- set peer_role = endpoints[1].system.role | default('') -%}
+                  {%- if peer_role == 'leaf' and peer_id not in leaf_ids -%}
+                    {%- set _ = leaf_ids.append(peer_id) -%}
+                  {%- endif -%}
+                {%- elif ep1_sys == node_id -%}
+                  {%- set peer_id = ep0_sys -%}
+                  {%- set peer_role = endpoints[0].system.role | default('') -%}
+                  {%- if peer_role == 'leaf' and peer_id not in leaf_ids -%}
+                    {%- set _ = leaf_ids.append(peer_id) -%}
+                  {%- endif -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- set cfg = {
+                  "gw_name": "remote_gw_" ~ node_label,
+                  "gw_ip": lb_ip,
+                  "gw_asn": asn,
+                  "local_gw_nodes": leaf_ids,
+                  "ttl": ttl | int,
+                  "keepalive_timer": keepalive_timer | int,
+                  "holdtime_timer": holdtime_timer | int,
+                  "evpn_route_types": evpn_route_types,
+                  "node_label": node_label
+            } -%}
+            {%- set _ = configs.append(cfg) -%}
+          {%- endfor -%}
+          {{ configs }}
+      when: not manual_mode | bool
+
+    - name: Show gateway configs to be applied
+      ansible.builtin.debug:
+        msg: |
+          {% for cfg in gateway_configs %}
+          Gateway {{ loop.index }}:
+            gw_name: {{ cfg.gw_name }}
+            gw_ip: {{ cfg.gw_ip }}
+            gw_asn: {{ cfg.gw_asn }}
+            local_gw_nodes: {{ cfg.local_gw_nodes }}
+            ttl: {{ cfg.ttl }}
+            keepalive_timer: {{ cfg.keepalive_timer }}
+            holdtime_timer: {{ cfg.holdtime_timer }}
+            evpn_route_types: {{ cfg.evpn_route_types }}
+          {% endfor %}
+      when: not manual_mode | bool
+
+    - name: Validate all gateway configs have required data
+      ansible.builtin.assert:
+        that:
+          - item.gw_ip | length > 0
+          - item.gw_asn | int > 0
+          - item.local_gw_nodes | length > 0
+        fail_msg: >-
+          Incomplete data for external node '{{ item.node_label }}':
+          gw_ip={{ item.gw_ip }}, gw_asn={{ item.gw_asn }},
+          local_gw_nodes={{ item.local_gw_nodes }}.
+          Ensure ASN and loopback are assigned to external routers
+          before running this playbook.
+      loop: "{{ gateway_configs }}"
+      loop_control:
+        label: "{{ item.gw_name }}"
+      when: not manual_mode | bool
+
+    # ---- Create remote gateways (auto-discover) ----
+
+    - name: Create remote gateway for each external router
+      juniper.apstra.external_gateway:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          gw_name: "{{ item.gw_name }}"
+          gw_ip: "{{ item.gw_ip }}"
+          gw_asn: "{{ item.gw_asn }}"
+          local_gw_nodes: "{{ item.local_gw_nodes }}"
+          ttl: "{{ item.ttl }}"
+          keepalive_timer: "{{ item.keepalive_timer }}"
+          holdtime_timer: "{{ item.holdtime_timer }}"
+          evpn_route_types: "{{ item.evpn_route_types }}"
+        auth_token: "{{ auth.token }}"
+      register: auto_ext_gw_results
+      loop: "{{ gateway_configs }}"
+      loop_control:
+        label: "{{ item.gw_name }}"
+      when: not manual_mode | bool
+
+    - name: Show auto-discover summary
+      ansible.builtin.debug:
+        msg: >-
+          Created {{ auto_ext_gw_results.results
+            | selectattr('changed', 'equalto', true) | list | length }}
+          remote gateway(s) for blueprint {{ blueprint_id }}:
+          {% for r in auto_ext_gw_results.results %}
+          {{ r.item.gw_name }} → ID: {{ r.id.remote_gateway | default('existing') }}
+          {% endfor %}
+      when: not manual_mode | bool
+
+    # ==================================================================
+    #  MANUAL MODE — use provided parameters directly
+    # ==================================================================
+
+    - name: Extract spine node IDs (manual mode fallback for local_gw_nodes)
+      ansible.builtin.set_fact:
+        spine_nodes: >-
+          {{ all_nodes | dict2items
+             | selectattr('value.role', 'equalto', 'spine')
+             | map(attribute='value.id')
+             | list }}
+      when: manual_mode | bool and local_gw_nodes is not defined
+
+    - name: Set local_gw_nodes from spines if not provided (manual mode)
+      ansible.builtin.set_fact:
+        local_gw_nodes: "{{ spine_nodes }}"
+      when: manual_mode | bool and local_gw_nodes is not defined
+
+    - name: Create or update external gateway (manual mode)
+      juniper.apstra.external_gateway:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          gw_name: "{{ gw_name }}"
+          gw_ip: "{{ gw_ip }}"
+          gw_asn: "{{ gw_asn }}"
+          local_gw_nodes: "{{ local_gw_nodes }}"
+          ttl: "{{ ttl }}"
+          keepalive_timer: "{{ keepalive_timer }}"
+          holdtime_timer: "{{ holdtime_timer }}"
+          evpn_route_types: "{{ evpn_route_types }}"
+        auth_token: "{{ auth.token }}"
+      register: manual_ext_gw
+      when: manual_mode | bool
+
+    - name: Show manual mode result
+      ansible.builtin.debug:
+        msg: >-
+          External gateway '{{ gw_name }}' applied to blueprint
+          {{ blueprint_id }}. Gateway ID:
+          {{ manual_ext_gw.id.remote_gateway | default('N/A') }}.
+          Changed: {{ manual_ext_gw.changed }}.
+      when: manual_mode | bool
+
+    # ==================================================================
+    #  Commit blueprint changes
+    # ==================================================================
+
+    - name: Commit blueprint to apply external gateway configuration
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: committed
+        commit_timeout: 60
+        auth_token: "{{ auth.token }}"
+      register: commit_result
+
+    - name: Show commit result
+      ansible.builtin.debug:
+        msg: >-
+          Blueprint {{ blueprint_id }} committed successfully.
+          Changed: {{ commit_result.changed }}.
+
+    # ==================================================================
+    #  Cleanup
+    # ==================================================================
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"

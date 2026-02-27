@@ -1,0 +1,268 @@
+---
+# Test playbook for connectivity_template and connectivity_template_assignment modules.
+# Targets: Apstra server 10.88.136.73, blueprint vgavini-anisble-testbed-0
+#
+# Usage:
+#   export APSTRA_API_URL=https://10.88.136.73/api
+#   export APSTRA_USERNAME=admin
+#   export APSTRA_PASSWORD=Apstramarvis@123
+#   ansible-playbook tests/connectivity_template.yml
+
+- name: Test connectivity_template CRUD and assignment
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    blueprint_id: "5077ec2c-fd4e-4f29-87e9-ff528d556779"
+    routing_zone_id: "Fim56-lMI9JwA5idYQ"
+
+  tasks:
+    # ── Authentication ────────────────────────────────────────────────
+    - name: Authenticate to Apstra
+      juniper.apstra.authenticate:
+        verify_certificates: false
+        logout: false
+      register: auth
+
+    # ── Test 1: Create CT (IP Link + BGP + Routing Policy) ───────────
+    - name: "Test 1 - Create BGP-2-SRX CT"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        blueprint_id: "{{ blueprint_id }}"
+        name: "BGP-2-SRX-Test"
+        type: interface
+        description: "Ansible CT test - IP Link + BGP + Routing Policy"
+        primitives:
+          ip_links:
+            srx_link:
+              security_zone: "{{ routing_zone_id }}"
+              interface_type: tagged
+              vlan_id: 100
+              ipv4_addressing_type: numbered
+              ipv6_addressing_type: none
+              bgp_peering_generic_systems:
+                bgp_peer:
+                  bfd: false
+                  ipv4_safi: true
+                  ipv6_safi: false
+                  ttl: 2
+                  session_addressing_ipv4: addressed
+                  session_addressing_ipv6: link_local
+                  peer_from: interface
+                  peer_to: interface_or_ip_endpoint
+                  neighbor_asn_type: dynamic
+                  routing_policies:
+                    default_rp: {}
+        state: present
+      register: ct_create
+
+    - name: Show create result
+      ansible.builtin.debug:
+        var: ct_create
+
+    - name: Assert CT was created
+      ansible.builtin.assert:
+        that:
+          - ct_create.ct_id is defined
+          - >-
+            ct_create.msg == "connectivity_template created successfully" or
+            ct_create.msg == "connectivity_template updated successfully" or
+            ct_create.msg == "connectivity_template already exists, no changes needed"
+        fail_msg: "CT creation failed"
+
+    # ── Commit after create ───────────────────────────────────────────
+    - name: "Commit blueprint after CT create"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+        commit_timeout: 60
+        auth_token: "{{ auth.token }}"
+      register: commit_create
+
+    - name: Show commit result
+      ansible.builtin.debug:
+        msg: "Blueprint committed. Changed: {{ commit_create.changed }}"
+
+    # ── Test 2: Idempotent re-run (no changes) ───────────────────────
+    - name: "Test 2 - Re-run same CT (idempotent)"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        blueprint_id: "{{ blueprint_id }}"
+        name: "BGP-2-SRX-Test"
+        type: interface
+        description: "Ansible CT test - IP Link + BGP + Routing Policy"
+        primitives:
+          ip_links:
+            srx_link:
+              security_zone: "{{ routing_zone_id }}"
+              interface_type: tagged
+              vlan_id: 100
+              ipv4_addressing_type: numbered
+              ipv6_addressing_type: none
+              bgp_peering_generic_systems:
+                bgp_peer:
+                  bfd: false
+                  ipv4_safi: true
+                  ipv6_safi: false
+                  ttl: 2
+                  session_addressing_ipv4: addressed
+                  session_addressing_ipv6: link_local
+                  peer_from: interface
+                  peer_to: interface_or_ip_endpoint
+                  neighbor_asn_type: dynamic
+                  routing_policies:
+                    default_rp: {}
+        state: present
+      register: ct_idempotent
+
+    - name: Assert no changes on second run
+      ansible.builtin.assert:
+        that:
+          - ct_idempotent.changed == false
+          - "'no changes needed' in ct_idempotent.msg"
+        fail_msg: "Idempotency failed - CT was modified on second run"
+
+    # ── Test 3: Update CT (change vlan_id) ────────────────────────────
+    - name: "Test 3 - Update CT (change VLAN from 100 to 200)"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        blueprint_id: "{{ blueprint_id }}"
+        name: "BGP-2-SRX-Test"
+        type: interface
+        description: "Ansible CT test - Updated VLAN"
+        primitives:
+          ip_links:
+            srx_link:
+              security_zone: "{{ routing_zone_id }}"
+              interface_type: tagged
+              vlan_id: 200
+              ipv4_addressing_type: numbered
+              ipv6_addressing_type: none
+              bgp_peering_generic_systems:
+                bgp_peer:
+                  bfd: false
+                  ipv4_safi: true
+                  ipv6_safi: false
+                  ttl: 2
+                  session_addressing_ipv4: addressed
+                  session_addressing_ipv6: link_local
+                  peer_from: interface
+                  peer_to: interface_or_ip_endpoint
+                  neighbor_asn_type: dynamic
+        state: present
+      register: ct_update
+
+    - name: Assert CT was updated
+      ansible.builtin.assert:
+        that:
+          - ct_update.changed == true
+          - ct_update.msg == "connectivity_template updated successfully"
+        fail_msg: "CT update failed"
+
+    # ── Commit after update ───────────────────────────────────────────
+    - name: "Commit blueprint after CT update"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+        commit_timeout: 60
+        auth_token: "{{ auth.token }}"
+      register: commit_update
+
+    - name: Show commit result
+      ansible.builtin.debug:
+        msg: "Blueprint committed. Changed: {{ commit_update.changed }}"
+
+    # # ── Test 4: Delete CT ─────────────────────────────────────────────
+    # - name: "Test 4 - Delete CT by name"
+    #   juniper.apstra.connectivity_template:
+    #     auth_token: "{{ auth.token }}"
+    #     verify_certificates: false
+    #     blueprint_id: "{{ blueprint_id }}"
+    #     name: "BGP-2-SRX-Test"
+    #     state: absent
+    #   register: ct_delete
+
+    # - name: Assert CT was deleted
+    #   ansible.builtin.assert:
+    #     that:
+    #       - ct_delete.changed == true
+    #       - ct_delete.msg == "connectivity_template deleted successfully"
+    #     fail_msg: "CT deletion failed"
+
+    # # ── Test 5: Delete non-existent CT (idempotent) ───────────────────
+    # - name: "Test 5 - Delete non-existent CT (idempotent)"
+    #   juniper.apstra.connectivity_template:
+    #     auth_token: "{{ auth.token }}"
+    #     verify_certificates: false
+    #     blueprint_id: "{{ blueprint_id }}"
+    #     name: "BGP-2-SRX-Test"
+    #     state: absent
+    #   register: ct_delete_idempotent
+
+    # - name: Assert no changes for non-existent CT
+    #   ansible.builtin.assert:
+    #     that:
+    #       - ct_delete_idempotent.changed == false
+    #     fail_msg: "Delete idempotency failed"
+
+    # # ── Test 6: Create simple VN Single CT ────────────────────────────
+    # - name: "Test 6 - Create simple VN Single CT"
+    #   juniper.apstra.connectivity_template:
+    #     auth_token: "{{ auth.token }}"
+    #     verify_certificates: false
+    #     blueprint_id: "{{ blueprint_id }}"
+    #     name: "Simple-VN-Test"
+    #     type: interface
+    #     primitives:
+    #       virtual_network_singles:
+    #         vlan_access:
+    #           vn_node_id: ""
+    #     state: present
+    #   register: ct_vn
+
+    # - name: Show VN CT result
+    #   ansible.builtin.debug:
+    #     var: ct_vn
+
+    # # ── Test 7: CT type validation - reject invalid primitive ─────────
+    # - name: "Test 7 - Reject invalid primitive for system CT type"
+    #   juniper.apstra.connectivity_template:
+    #     auth_token: "{{ auth.token }}"
+    #     verify_certificates: false
+    #     blueprint_id: "{{ blueprint_id }}"
+    #     name: "Invalid-System-CT"
+    #     type: system
+    #     primitives:
+    #       ip_links:
+    #         bad_link:
+    #           interface_type: tagged
+    #     state: present
+    #   register: ct_invalid
+    #   ignore_errors: true
+
+    # - name: Assert validation caught the error
+    #   ansible.builtin.assert:
+    #     that:
+    #       - ct_invalid.failed == true
+    #       - "'not allowed for CT type' in ct_invalid.msg"
+    #     fail_msg: "CT type validation did not catch invalid primitive"
+
+    # # ── Cleanup ───────────────────────────────────────────────────────
+    # - name: "Cleanup - Delete VN CT"
+    #   juniper.apstra.connectivity_template:
+    #     auth_token: "{{ auth.token }}"
+    #     verify_certificates: false
+    #     blueprint_id: "{{ blueprint_id }}"
+    #     name: "Simple-VN-Test"
+    #     state: absent
+
+    # - name: "All tests passed!"
+    #   ansible.builtin.debug:
+    #     msg: "All 7 connectivity_template tests passed successfully"

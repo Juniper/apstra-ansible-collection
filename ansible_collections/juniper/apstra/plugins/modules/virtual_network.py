@@ -191,6 +191,25 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Coerce integer fields that the API requires as int, not str
+        # Note: vn_id must remain a string per the API spec
+        if body:
+            for int_field in ("vlan_id", "l3_mtu"):
+                if int_field in body and body[int_field] is not None:
+                    body[int_field] = int(body[int_field])
+            # Ensure vn_id is a string
+            if "vn_id" in body and body["vn_id"] is not None:
+                body["vn_id"] = str(body["vn_id"])
+            # Ensure bound_to items are dicts ({system_id: ...})
+            if "bound_to" in body and isinstance(body["bound_to"], list):
+                coerced = []
+                for entry in body["bound_to"]:
+                    if isinstance(entry, str):
+                        coerced.append({"system_id": entry})
+                    else:
+                        coerced.append(entry)
+                body["bound_to"] = coerced
+
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
         if len(missing_id) > 1 or (

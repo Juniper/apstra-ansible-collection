@@ -1,0 +1,40 @@
+{
+ "collection_info": {
+  "namespace": "juniper",
+  "name": "apstra",
+  "version": "1.0.5",
+  "authors": [
+   "Pratik Dave <pratikd@juniper.net>",
+   "Edwin Jacques <ejacques@juniper.net>"
+  ],
+  "readme": "README.md",
+  "tags": [
+   "juniper",
+   "junipernetworks",
+   "apstra",
+   "networking",
+   "aos"
+  ],
+  "description": "This collection provides modules to interact with Apstra.",
+  "license": [
+   "Apache-2.0",
+   "MIT",
+   "GPL-3.0-or-later",
+   "BSD-3-Clause"
+  ],
+  "license_file": null,
+  "dependencies": {},
+  "repository": "https://github.com/Juniper/apstra-ansible-collection",
+  "documentation": null,
+  "homepage": "https://www.juniper.net/us/en/products/network-automation/apstra.html",
+  "issues": "https://github.com/Juniper/apstra-ansible-collection/issues"
+ },
+ "file_manifest_file": {
+  "name": "FILES.json",
+  "ftype": "file",
+  "chksum_type": "sha256",
+  "chksum_sha256": "fd3141ae299a9315544c4f69e59195b1938a42da0afca4d39fe3113187aca139",
+  "format": 1
+ },
+ "format": 1
+}

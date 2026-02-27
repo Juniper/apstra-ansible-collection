@@ -1,0 +1,158 @@
+---
+# ── Test playbook for juniper.apstra.fabric_settings ──────────────
+#
+# Prerequisites:
+#   - Apstra server reachable
+#   - Will create/delete its own test blueprint
+#
+# Usage:
+#   ansible-playbook tests/fabric_settings.yml
+
+- name: Test fabric_settings module
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_fs_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Setup: Create blueprint ───────────────────────────────────
+    - name: Create test blueprint
+      juniper.apstra.blueprint:
+        body:
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ── Test 1: Set fabric L3 MTU ─────────────────────────────────
+    - name: "Test 1: Set fabric_l3_mtu"
+      juniper.apstra.fabric_settings:
+        blueprint_id: "{{ bp.id }}"
+        settings:
+          fabric_l3_mtu: 9170
+        auth_token: "{{ auth.token }}"
+      register: mtu_result
+
+    - name: Display MTU result
+      ansible.builtin.debug:
+        var: mtu_result
+
+    - name: Verify MTU change
+      ansible.builtin.assert:
+        that:
+          - mtu_result.changed
+          - mtu_result.settings.fabric_l3_mtu == 9170
+        fail_msg: "Fabric MTU setting failed"
+        success_msg: "Test 1 PASSED: fabric_l3_mtu set to 9170"
+
+    # ── Test 2: Idempotent MTU ────────────────────────────────────
+    - name: "Test 2: Set same MTU again (idempotent)"
+      juniper.apstra.fabric_settings:
+        blueprint_id: "{{ bp.id }}"
+        settings:
+          fabric_l3_mtu: 9170
+        auth_token: "{{ auth.token }}"
+      register: mtu_idem_result
+
+    - name: Display idempotent result
+      ansible.builtin.debug:
+        var: mtu_idem_result
+
+    - name: Verify idempotency
+      ansible.builtin.assert:
+        that:
+          - not mtu_idem_result.changed
+        fail_msg: "Fabric MTU was not idempotent"
+        success_msg: "Test 2 PASSED: Idempotent (no change)"
+
+    # ── Test 3: Set multiple settings ─────────────────────────────
+    - name: "Test 3: Set multiple fabric settings"
+      juniper.apstra.fabric_settings:
+        blueprint_id: "{{ bp.id }}"
+        settings:
+          external_router_mtu: 9100
+          spine_leaf_links_mtu: 9170
+        auth_token: "{{ auth.token }}"
+      register: multi_result
+
+    - name: Display multi-setting result
+      ansible.builtin.debug:
+        var: multi_result
+
+    - name: Verify multi-setting change
+      ansible.builtin.assert:
+        that:
+          - multi_result.changed
+        fail_msg: "Multi-setting update failed"
+        success_msg: "Test 3 PASSED: Multiple settings updated"
+
+    # ── Test 4: Change one, keep another ──────────────────────────
+    - name: "Test 4: Change one setting, keep another unchanged"
+      juniper.apstra.fabric_settings:
+        blueprint_id: "{{ bp.id }}"
+        settings:
+          external_router_mtu: 9200
+          spine_leaf_links_mtu: 9170
+        auth_token: "{{ auth.token }}"
+      register: partial_result
+
+    - name: Display partial update result
+      ansible.builtin.debug:
+        var: partial_result
+
+    - name: Verify partial change detected
+      ansible.builtin.assert:
+        that:
+          - partial_result.changed
+        fail_msg: "Partial update detection failed"
+        success_msg: "Test 4 PASSED: Partial change detected correctly"
+
+    # ── Test 5: ESI MAC MSB ──────────────────────────────────────
+    - name: "Test 5: Set ESI MAC MSB"
+      juniper.apstra.fabric_settings:
+        blueprint_id: "{{ bp.id }}"
+        settings:
+          esi_mac_msb: 2
+        auth_token: "{{ auth.token }}"
+      register: esi_result
+
+    - name: Verify ESI MAC MSB
+      ansible.builtin.assert:
+        that:
+          - esi_result is defined
+        fail_msg: "ESI MAC MSB setting failed"
+        success_msg: "Test 5 PASSED: ESI MAC MSB configured"
+
+    # ── Cleanup: Delete blueprint ─────────────────────────────────
+    - name: Delete test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: bp_delete
+
+    - name: All fabric_settings tests passed
+      ansible.builtin.debug:
+        msg: "All 5 fabric_settings tests PASSED"
