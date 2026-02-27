@@ -15,17 +15,16 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.blueprint import (
-    api_patch,
-    get_blueprint_node,
-    patch_blueprint_node_unsafe,
-    update_blueprint_node,
-    set_blueprint_node_tags,
-    set_blueprint_node_property,
-    find_system_by_label,
-    find_system_by_hostname,
-    get_system_link_ids,
-    get_system_links_detail,
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
+    get_node as get_blueprint_node,
+    patch_node,
+    set_node_tags as set_blueprint_node_tags,
+    set_node_property as set_blueprint_node_property,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+    run_qe_query,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_generic_systems import (
     create_switch_system_links,
     add_links_to_system,
     delete_switch_system_links,
@@ -33,6 +32,97 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.blueprint im
     delete_external_generic_system,
     clear_cts_from_links,
 )
+
+
+# ── Local QE-based helpers ───────────────────────────────────────────────
+# These are thin wrappers around bp_query.run_qe_query (SDK).
+# They are module-specific convenience functions, not reusable utilities.
+
+
+def find_system_by_label(client_factory, blueprint_id, label):
+    """Find a generic system by label using QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        f"node('system', system_type='server', label='{label}', name='gs')",
+    )
+    if items:
+        return items[0].get("gs", items[0])
+    return None
+
+
+def find_system_by_hostname(client_factory, blueprint_id, hostname):
+    """Find a generic system by hostname using QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        f"node('system', system_type='server', hostname='{hostname}', name='gs')",
+    )
+    if items:
+        return items[0].get("gs", items[0])
+    return None
+
+
+def get_system_link_ids(client_factory, blueprint_id, sys_id):
+    """Get all physical (ethernet) link IDs for a system via QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        (
+            f"node('system', id='{sys_id}', name='gs')"
+            f".out('hosted_interfaces').node('interface', name='intf')"
+            f".out('link').node('link', name='link')"
+        ),
+    )
+    link_ids = set()
+    for item in items:
+        if isinstance(item, dict):
+            link_info = item.get("link", {})
+            if isinstance(link_info, dict) and link_info.get("id"):
+                if link_info.get("link_type") != "aggregate_link":
+                    link_ids.add(link_info["id"])
+    return list(link_ids)
+
+
+def get_system_links_detail(client_factory, blueprint_id, sys_id):
+    """Get detailed link+interface info for a system via QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        (
+            f"node('system', id='{sys_id}', name='gs')"
+            f".out('hosted_interfaces').node('interface', name='gs_intf')"
+            f".out('link').node('link', link_type='ethernet', name='link')"
+            f".in_('link').node('interface', name='sw_intf')"
+            f".in_('hosted_interfaces').node('system', name='switch')"
+        ),
+    )
+    links = []
+    seen_link_ids = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        link = item.get("link", {})
+        sw = item.get("switch", {})
+        sw_intf = item.get("sw_intf", {})
+        if sw.get("id") == sys_id:
+            continue
+        lid = link.get("id")
+        if lid in seen_link_ids:
+            continue
+        seen_link_ids.add(lid)
+        links.append(
+            {
+                "link_id": lid,
+                "target_switch_id": sw.get("id"),
+                "target_switch_if_name": sw_intf.get("if_name"),
+                "lag_mode": link.get("lag_mode"),
+                "group_label": link.get("group_label"),
+                "tags": link.get("tags", []) or [],
+            }
+        )
+    return links
+
 
 DOCUMENTATION = """
 ---
@@ -439,10 +529,6 @@ _READ_ONLY_FIELDS = frozenset(
 )
 
 
-# Properties that the Apstra node PATCH API accepts without allow_unsafe
-_SAFE_PATCH_FIELDS = frozenset({"label", "deploy_mode", "system_id", "hostname"})
-
-
 # ──────────────────────────────────────────────────────────────────
 #  Link digest for idempotent diffing
 # ──────────────────────────────────────────────────────────────────
@@ -839,9 +925,7 @@ def _handle_update(
         changes["deploy_mode"] = {"old": current.get("deploy_mode"), "new": deploy_mode}
 
     if patch_body:
-        update_blueprint_node(
-            client_factory, bp_id, sys_id, patch_body, safe_fields=_SAFE_PATCH_FIELDS
-        )
+        patch_node(client_factory, bp_id, sys_id, patch_body)
         changed = True
 
     # ── Update tags ───────────────────────────────────────────────
@@ -855,14 +939,7 @@ def _handle_update(
     # ── Update ASN ────────────────────────────────────────────────
     current_asn = current.get("domain_id")
     if asn is not None and current_asn != asn:
-        set_blueprint_node_property(
-            client_factory,
-            bp_id,
-            sys_id,
-            "domain_id",
-            asn,
-            safe_fields=_SAFE_PATCH_FIELDS,
-        )
+        set_blueprint_node_property(client_factory, bp_id, sys_id, "domain_id", asn)
         changes["asn"] = {"old": current_asn, "new": asn}
         changed = True
 
@@ -870,12 +947,7 @@ def _handle_update(
     current_lo4 = current.get("loopback_ipv4")
     if loopback_ipv4 is not None and current_lo4 != loopback_ipv4:
         set_blueprint_node_property(
-            client_factory,
-            bp_id,
-            sys_id,
-            "loopback_ipv4",
-            loopback_ipv4,
-            safe_fields=_SAFE_PATCH_FIELDS,
+            client_factory, bp_id, sys_id, "loopback_ipv4", loopback_ipv4
         )
         changes["loopback_ipv4"] = {"old": current_lo4, "new": loopback_ipv4}
         changed = True
@@ -884,12 +956,7 @@ def _handle_update(
     current_lo6 = current.get("loopback_ipv6")
     if loopback_ipv6 is not None and current_lo6 != loopback_ipv6:
         set_blueprint_node_property(
-            client_factory,
-            bp_id,
-            sys_id,
-            "loopback_ipv6",
-            loopback_ipv6,
-            safe_fields=_SAFE_PATCH_FIELDS,
+            client_factory, bp_id, sys_id, "loopback_ipv6", loopback_ipv6
         )
         changes["loopback_ipv6"] = {"old": current_lo6, "new": loopback_ipv6}
         changed = True
@@ -899,23 +966,13 @@ def _handle_update(
     cur_pc_max = current.get("port_channel_id_max", 0) or 0
     if port_channel_id_min is not None and cur_pc_min != port_channel_id_min:
         set_blueprint_node_property(
-            client_factory,
-            bp_id,
-            sys_id,
-            "port_channel_id_min",
-            port_channel_id_min,
-            safe_fields=_SAFE_PATCH_FIELDS,
+            client_factory, bp_id, sys_id, "port_channel_id_min", port_channel_id_min
         )
         changes["port_channel_id_min"] = {"old": cur_pc_min, "new": port_channel_id_min}
         changed = True
     if port_channel_id_max is not None and cur_pc_max != port_channel_id_max:
         set_blueprint_node_property(
-            client_factory,
-            bp_id,
-            sys_id,
-            "port_channel_id_max",
-            port_channel_id_max,
-            safe_fields=_SAFE_PATCH_FIELDS,
+            client_factory, bp_id, sys_id, "port_channel_id_max", port_channel_id_max
         )
         changes["port_channel_id_max"] = {"old": cur_pc_max, "new": port_channel_id_max}
         changed = True
@@ -1027,7 +1084,7 @@ def _apply_properties(
     if deploy_mode and deploy_mode != "deploy":
         safe_patch["deploy_mode"] = deploy_mode
     if safe_patch:
-        api_patch(client_factory, f"/blueprints/{bp_id}/nodes/{sys_id}", safe_patch)
+        patch_node(client_factory, bp_id, sys_id, safe_patch)
 
     # Unsafe properties (require allow_unsafe=true)
     unsafe_patch = {}
@@ -1044,7 +1101,7 @@ def _apply_properties(
     if port_channel_id_max:
         unsafe_patch["port_channel_id_max"] = port_channel_id_max
     if unsafe_patch:
-        patch_blueprint_node_unsafe(client_factory, bp_id, sys_id, unsafe_patch)
+        patch_node(client_factory, bp_id, sys_id, unsafe_patch)
 
 
 def _handle_absent(module, client_factory):

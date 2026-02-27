@@ -6,434 +6,106 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 """
-Reusable blueprint utility functions for Apstra Ansible modules.
+Blueprint utility functions for Apstra Ansible modules.
 
-This module provides helper functions for common blueprint operations
-such as managing resource groups and configlets. These utilities are
-designed to be imported by Ansible modules to avoid code duplication
-and to ensure consistent blueprint API interactions across the collection.
+Delegates to focused utility modules:
+
+  - **bp_nodes**          – node read / patch via SDK
+  - **bp_query**          – QE graph queries via SDK
+  - **bp_configlets**     – blueprint configlet CRUD via raw API
+  - **bp_resource_pools** – resource-group operations via raw API
+
+This module retains helpers that require ``raw_request`` because the
+SDK does not expose a dedicated endpoint (switch-system-links,
+external-generic-systems, obj-policy-export).
 
 Usage::
 
     from ansible_collections.juniper.apstra.plugins.module_utils.apstra.blueprint import (
-        list_resource_groups,
-        get_resource_group,
-        assign_resource_pools,
-        list_blueprint_configlets,
-        get_blueprint_configlet,
+        find_system_by_label,
+        create_switch_system_links,
+        ...
     )
 """
 
-
-# ── Blueprint Resource Group Utilities ──────────────────────────────────
-
-
-def list_resource_groups(client_factory, blueprint_id):
-    """
-    List all resource groups in a blueprint.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :return: A list of resource group dicts.
-    """
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(f"/blueprints/{blueprint_id}/resource_groups")
-    if resp.status_code == 200:
-        data = resp.json()
-        return data.get("items", [])
-    return []
-
-
-def get_resource_groups_by_type(client_factory, blueprint_id, resource_type):
-    """
-    Get resource groups filtered by type.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param resource_type: The resource type to filter by (e.g., 'asn', 'ip', 'vni').
-    :return: A list of matching resource group dicts.
-    """
-    all_groups = list_resource_groups(client_factory, blueprint_id)
-    return [g for g in all_groups if g.get("type") == resource_type]
-
-
-def get_resource_group(client_factory, blueprint_id, resource_type, group_name):
-    """
-    Get a specific resource group.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param resource_type: The resource type (e.g., 'asn', 'ip').
-    :param group_name: The resource group name.
-    :return: The resource group dict, or None.
-    """
-    ra_client = client_factory.get_resource_allocation_client()
-    try:
-        return (
-            ra_client.blueprints[blueprint_id]
-            .resource_groups[resource_type][group_name]
-            .get()
-        )
-    except Exception:
-        return None
-
-
-def update_resource_group(
-    client_factory, blueprint_id, resource_type, group_name, data
-):
-    """
-    Update a resource group.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param resource_type: The resource type.
-    :param group_name: The resource group name.
-    :param data: The update data (e.g., {'pool_ids': [...]}).
-    :return: The updated resource group dict.
-    """
-    ra_client = client_factory.get_resource_allocation_client()
-    return (
-        ra_client.blueprints[blueprint_id]
-        .resource_groups[resource_type][group_name]
-        .update(data)
-    )
-
-
-def assign_resource_pools(
-    client_factory, blueprint_id, resource_type, group_name, pool_ids
-):
-    """
-    Assign resource pools to a resource group.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param resource_type: The resource type.
-    :param group_name: The resource group name.
-    :param pool_ids: List of pool IDs to assign.
-    :return: The updated resource group dict.
-    """
-    return update_resource_group(
-        client_factory,
-        blueprint_id,
-        resource_type,
-        group_name,
-        {"pool_ids": pool_ids},
-    )
-
-
-def unassign_resource_pools(client_factory, blueprint_id, resource_type, group_name):
-    """
-    Unassign all resource pools from a resource group.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param resource_type: The resource type.
-    :param group_name: The resource group name.
-    :return: The updated resource group dict.
-    """
-    return assign_resource_pools(
-        client_factory, blueprint_id, resource_type, group_name, []
-    )
-
-
-# ── Blueprint Configlet Utilities ───────────────────────────────────────
-
-
-def list_blueprint_configlets(client_factory, blueprint_id):
-    """
-    List all configlets for a blueprint.
-
-    Uses raw_request because the SDK does not expose a dedicated endpoint.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :return: A list of configlet dicts.
-    """
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(f"/blueprints/{blueprint_id}/configlets")
-    if resp.status_code == 200:
-        data = resp.json()
-        return data.get("items", [])
-    return []
-
-
-def get_blueprint_configlet(client_factory, blueprint_id, configlet_id):
-    """
-    Get a single blueprint configlet by ID.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param configlet_id: The configlet ID.
-    :return: The configlet dict, or None.
-    """
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets/{configlet_id}"
-    )
-    if resp.status_code == 200:
-        return resp.json()
-    return None
-
-
-def create_blueprint_configlet(client_factory, blueprint_id, body):
-    """
-    Create a blueprint configlet.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param body: The configlet body.
-    :return: The created configlet dict.
-    :raises Exception: If creation fails.
-    """
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets", "POST", data=body
-    )
-    if resp.status_code in (200, 201):
-        return resp.json()
-    raise Exception(
-        f"Failed to create blueprint configlet: {resp.status_code} {resp.text}"
-    )
-
-
-def update_blueprint_configlet(client_factory, blueprint_id, configlet_id, body):
-    """
-    Update a blueprint configlet (PUT).
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param configlet_id: The configlet ID.
-    :param body: The update body.
-    :raises Exception: If update fails.
-    """
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets/{configlet_id}", "PUT", data=body
-    )
-    if resp.status_code not in (200, 202, 204):
-        raise Exception(
-            f"Failed to update blueprint configlet: {resp.status_code} {resp.text}"
-        )
-    return None
-
-
-def delete_blueprint_configlet(client_factory, blueprint_id, configlet_id):
-    """
-    Delete a blueprint configlet.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param configlet_id: The configlet ID.
-    :raises Exception: If deletion fails.
-    """
-    base_client = client_factory.get_base_client()
-    resp = base_client.raw_request(
-        f"/blueprints/{blueprint_id}/configlets/{configlet_id}", "DELETE"
-    )
-    if resp.status_code not in (200, 202, 204):
-        raise Exception(
-            f"Failed to delete blueprint configlet: {resp.status_code} {resp.text}"
-        )
-
-
-def find_blueprint_configlet_by_label(client_factory, blueprint_id, label):
-    """
-    Find a blueprint configlet by label.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param label: The configlet label.
-    :return: The configlet dict, or None.
-    """
-    items = list_blueprint_configlets(client_factory, blueprint_id)
-    for item in items:
-        if isinstance(item, dict) and item.get("label") == label:
-            return item
-    return None
-
-
-# ── Low-level Blueprint API Helpers ─────────────────────────────────────
-
-
-def api_get(client_factory, path):
-    """Issue a GET request via the base client and return parsed JSON or None.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param path: The API path (e.g., '/blueprints/{id}/nodes/{node_id}').
-    :return: Parsed JSON dict, or None if not found.
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(path)
-    if resp.status_code == 200:
-        return resp.json()
-    return None
-
-
-def api_post(client_factory, path, data, ok_codes=(200, 201, 202)):
-    """Issue a POST request via the base client.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param path: The API path.
-    :param data: The request body (dict).
-    :param ok_codes: Tuple of acceptable HTTP status codes.
-    :return: Parsed JSON response.
-    :raises Exception: If the response status is not in ok_codes.
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(path, "POST", data=data)
-    if resp.status_code in ok_codes:
-        try:
-            return resp.json()
-        except Exception:
-            return {}
-    raise Exception(f"POST {path} failed: {resp.status_code} {resp.text}")
-
-
-def api_patch(client_factory, path, data, ok_codes=(200, 202, 204)):
-    """Issue a PATCH request via the base client.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param path: The API path.
-    :param data: The request body (dict).
-    :param ok_codes: Tuple of acceptable HTTP status codes.
-    :return: Parsed JSON response.
-    :raises Exception: If the response status is not in ok_codes.
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(path, "PATCH", data=data)
-    if resp.status_code in ok_codes:
-        try:
-            return resp.json()
-        except Exception:
-            return {}
-    raise Exception(f"PATCH {path} failed: {resp.status_code} {resp.text}")
-
-
-def api_put(client_factory, path, data, ok_codes=(200, 202, 204)):
-    """Issue a PUT request via the base client.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param path: The API path.
-    :param data: The request body (dict).
-    :param ok_codes: Tuple of acceptable HTTP status codes.
-    :return: Parsed JSON response.
-    :raises Exception: If the response status is not in ok_codes.
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(path, "PUT", data=data)
-    if resp.status_code in ok_codes:
-        try:
-            return resp.json()
-        except Exception:
-            return {}
-    raise Exception(f"PUT {path} failed: {resp.status_code} {resp.text}")
-
-
-def api_delete(client_factory, path, ok_codes=(200, 202, 204)):
-    """Issue a DELETE request via the base client.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param path: The API path.
-    :param ok_codes: Tuple of acceptable HTTP status codes.
-    :raises Exception: If the response status is not in ok_codes.
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(path, "DELETE")
-    if resp.status_code not in ok_codes:
-        raise Exception(f"DELETE {path} failed: {resp.status_code} {resp.text}")
-
-
-# ── Blueprint Node Utilities ───────────────────────────────────────────
-
-
-def get_blueprint_node(client_factory, blueprint_id, node_id):
-    """GET /api/blueprints/{bp}/nodes/{node} — returns dict or None.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param node_id: The node ID.
-    :return: The node dict, or None if not found.
-    """
-    return api_get(client_factory, f"/blueprints/{blueprint_id}/nodes/{node_id}")
-
-
-def patch_blueprint_node(client_factory, blueprint_id, node_id, patch_body):
-    """PATCH /api/blueprints/{bp}/nodes/{node} — standard safe PATCH.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param node_id: The node ID.
-    :param patch_body: Dict of fields to patch.
-    :return: Parsed JSON response.
-    """
-    return api_patch(
-        client_factory, f"/blueprints/{blueprint_id}/nodes/{node_id}", patch_body
-    )
+# ── Delegates ────────────────────────────────────────────────────────────
+# Import from focused modules and re-export so that existing consumer
+# imports continue to work without changes.
+
+# SDK-based
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (  # noqa: F401
+    get_node as get_blueprint_node,
+    patch_node as patch_blueprint_node,
+)
+
+# SDK-based
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (  # noqa: F401
+    run_qe_query as blueprint_qe_query,
+)
+
+# API-based (raw_request)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_configlets import (  # noqa: F401
+    list_blueprint_configlets,
+    get_blueprint_configlet,
+    create_blueprint_configlet,
+    update_blueprint_configlet,
+    delete_blueprint_configlet,
+    find_blueprint_configlet_by_label,
+)
+
+# API-based (raw_request)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_resource_pools import (  # noqa: F401
+    list_resource_groups,
+    get_resource_groups_by_type,
+    get_resource_group,
+    update_resource_group,
+    assign_resource_pools,
+    unassign_resource_pools,
+)
+
+
+# ── Blueprint Node Convenience Wrappers ─────────────────────────────────
+# These thin wrappers keep the same signatures as before, but delegate to
+# the SDK-based ``bp_nodes`` module internally.
 
 
 def patch_blueprint_node_unsafe(client_factory, blueprint_id, node_id, patch_body):
-    """PATCH /api/blueprints/{bp}/nodes/{node}?allow_unsafe=true.
+    """PATCH a blueprint node with allow_unsafe=true.
 
-    Required for node properties outside the safe set (tags, domain_id,
-    loopback_ipv4/ipv6, port_channel_id_*, etc.).
+    Delegates to ``bp_nodes.patch_node`` which auto-detects the need for
+    ``allow_unsafe`` based on field names.  Passing only unsafe fields
+    guarantees the ``allow_unsafe=True`` code-path is taken.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
     :param node_id: The node ID.
     :param patch_body: Dict of fields to patch.
     :return: Parsed JSON response.
-    :raises Exception: If the PATCH fails.
     """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(
-        f"/blueprints/{blueprint_id}/nodes/{node_id}?allow_unsafe=true",
-        "PATCH",
-        data=patch_body,
-    )
-    if resp.status_code not in (200, 202, 204):
-        raise Exception(
-            f"PATCH (unsafe) /blueprints/{blueprint_id}/nodes/{node_id} failed: "
-            f"{resp.status_code} {resp.text}"
-        )
-    try:
-        return resp.json()
-    except Exception:
-        return {}
+    return patch_blueprint_node(client_factory, blueprint_id, node_id, patch_body)
 
 
 def update_blueprint_node(
     client_factory, blueprint_id, node_id, patch_body, safe_fields=None
 ):
-    """PATCH a blueprint node, routing fields through safe or unsafe endpoints.
+    """PATCH a blueprint node, routing through safe or unsafe as needed.
 
-    Fields in *safe_fields* go through the normal PATCH endpoint; all
-    others go through PATCH with allow_unsafe=true.
+    Delegates to ``bp_nodes.patch_node`` which handles ``allow_unsafe``
+    automatically.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
     :param node_id: The node ID.
     :param patch_body: Dict of fields to patch.
-    :param safe_fields: Frozenset of field names safe for normal PATCH.
+    :param safe_fields: Accepted for backward compatibility but ignored;
+        ``bp_nodes.patch_node`` auto-detects safe vs unsafe fields.
     :return: Parsed JSON response.
     """
-    if safe_fields is None:
-        safe_fields = frozenset()
-    safe = {k: v for k, v in patch_body.items() if k in safe_fields}
-    unsafe = {k: v for k, v in patch_body.items() if k not in safe_fields}
-    result = {}
-    if safe:
-        result = patch_blueprint_node(client_factory, blueprint_id, node_id, safe)
-    if unsafe:
-        result = patch_blueprint_node_unsafe(
-            client_factory, blueprint_id, node_id, unsafe
-        )
-    return result
+    return patch_blueprint_node(client_factory, blueprint_id, node_id, patch_body)
 
 
 def set_blueprint_node_tags(client_factory, blueprint_id, node_id, tags):
-    """Set tags on a blueprint node.
-
-    Tags are not in the safe-PATCH set, so allow_unsafe=true is required.
+    """Set tags on a blueprint node (requires allow_unsafe).
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
@@ -441,9 +113,7 @@ def set_blueprint_node_tags(client_factory, blueprint_id, node_id, tags):
     :param tags: List of tag strings.
     :return: Parsed JSON response.
     """
-    return patch_blueprint_node_unsafe(
-        client_factory, blueprint_id, node_id, {"tags": tags}
-    )
+    return patch_blueprint_node(client_factory, blueprint_id, node_id, {"tags": tags})
 
 
 def set_blueprint_node_property(
@@ -451,40 +121,20 @@ def set_blueprint_node_property(
 ):
     """Set a single property on a blueprint node.
 
-    Routes through safe or unsafe PATCH as appropriate.
-
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
     :param node_id: The node ID.
     :param prop: The property name.
     :param value: The property value.
-    :param safe_fields: Frozenset of field names safe for normal PATCH.
+    :param safe_fields: Accepted for backward compatibility but ignored.
     :return: Parsed JSON response.
     """
-    if safe_fields is None:
-        safe_fields = frozenset()
-    if prop in safe_fields:
-        return patch_blueprint_node(
-            client_factory, blueprint_id, node_id, {prop: value}
-        )
-    return patch_blueprint_node_unsafe(
-        client_factory, blueprint_id, node_id, {prop: value}
-    )
-
-
-def blueprint_qe_query(client_factory, blueprint_id, query):
-    """Execute a QE (Query Engine) query against a blueprint.
-
-    :param client_factory: An ApstraClientFactory instance.
-    :param blueprint_id: The blueprint ID.
-    :param query: The QE query string.
-    :return: List of result items.
-    """
-    resp = api_post(client_factory, f"/blueprints/{blueprint_id}/qe", {"query": query})
-    return resp.get("items", []) if resp else []
+    return patch_blueprint_node(client_factory, blueprint_id, node_id, {prop: value})
 
 
 # ── Blueprint Generic System Utilities ─────────────────────────────────
+# These use ``bp_query.run_qe_query`` (SDK) for graph queries, and
+# ``raw_request`` only for endpoints the SDK does not cover.
 
 
 def find_system_by_label(client_factory, blueprint_id, label):
@@ -616,10 +266,36 @@ def get_system_links_detail(client_factory, blueprint_id, sys_id):
     return links
 
 
+# ── Raw API helpers (no SDK coverage) ───────────────────────────────────
+# The following endpoints are not exposed by any SDK client, so we use
+# ``raw_request`` directly.
+
+
+def _raw_post(client_factory, path, data, ok_codes=(200, 201, 202)):
+    """Issue a POST via raw_request.  Internal helper."""
+    base = client_factory.get_base_client()
+    resp = base.raw_request(path, "POST", data=data)
+    if resp.status_code in ok_codes:
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+    raise Exception(f"POST {path} failed: {resp.status_code} {resp.text}")
+
+
+def _raw_delete(client_factory, path, ok_codes=(200, 202, 204)):
+    """Issue a DELETE via raw_request.  Internal helper."""
+    base = client_factory.get_base_client()
+    resp = base.raw_request(path, "DELETE")
+    if resp.status_code not in ok_codes:
+        raise Exception(f"DELETE {path} failed: {resp.status_code} {resp.text}")
+
+
 def create_switch_system_links(client_factory, blueprint_id, links, name, hostname):
     """Create a new generic system via switch-system-links API.
 
     Builds the payload from the flat link list, creating one new system.
+    No SDK support — uses ``raw_request``.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
@@ -696,7 +372,7 @@ def create_switch_system_links(client_factory, blueprint_id, links, name, hostna
             }
         ],
     }
-    return api_post(
+    return _raw_post(
         client_factory, f"/blueprints/{blueprint_id}/switch-system-links", body
     )
 
@@ -705,6 +381,7 @@ def add_links_to_system(client_factory, blueprint_id, sys_id, links):
     """Add links to an existing generic system.
 
     POST /api/blueprints/{bp}/switch-system-links with system_id set.
+    No SDK support — uses ``raw_request``.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
@@ -733,7 +410,7 @@ def add_links_to_system(client_factory, blueprint_id, sys_id, links):
         api_links.append(api_link)
 
     body = {"links": api_links}
-    return api_post(
+    return _raw_post(
         client_factory, f"/blueprints/{blueprint_id}/switch-system-links", body
     )
 
@@ -743,6 +420,7 @@ def delete_switch_system_links(client_factory, blueprint_id, link_ids):
 
     POST /api/blueprints/{bp}/delete-switch-system-links.
     Removing the last link removes the generic system itself.
+    No SDK support — uses ``raw_request``.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
@@ -765,6 +443,7 @@ def create_external_generic_system(client_factory, blueprint_id, name, hostname)
     """Create an external generic system.
 
     POST /api/blueprints/{bp}/external-generic-systems.
+    No SDK support — uses ``raw_request``.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
@@ -776,7 +455,7 @@ def create_external_generic_system(client_factory, blueprint_id, name, hostname)
         "label": name or hostname or "external-generic-system",
         "hostname": hostname or name or "external-generic-system",
     }
-    return api_post(
+    return _raw_post(
         client_factory, f"/blueprints/{blueprint_id}/external-generic-systems", body
     )
 
@@ -784,12 +463,14 @@ def create_external_generic_system(client_factory, blueprint_id, name, hostname)
 def delete_external_generic_system(client_factory, blueprint_id, sys_id):
     """DELETE /api/blueprints/{bp}/external-generic-systems/{sys}.
 
+    No SDK support — uses ``raw_request``.
+
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
     :param sys_id: The system node ID.
     :raises Exception: If the deletion fails.
     """
-    api_delete(
+    _raw_delete(
         client_factory,
         f"/blueprints/{blueprint_id}/external-generic-systems/{sys_id}",
     )
@@ -798,7 +479,8 @@ def delete_external_generic_system(client_factory, blueprint_id, sys_id):
 def clear_cts_from_links(client_factory, blueprint_id, sys_id):
     """Clear all connectivity templates from a system's link interfaces.
 
-    Queries interfaces, then removes CT assignments from each.
+    Uses ``bp_query`` (SDK) to discover interfaces, then ``raw_request``
+    for the obj-policy-export endpoint which has no SDK support.
 
     :param client_factory: An ApstraClientFactory instance.
     :param blueprint_id: The blueprint ID.
@@ -832,3 +514,52 @@ def clear_cts_from_links(client_factory, blueprint_id, sys_id):
             )
         except Exception:
             pass  # Best-effort CT clearing
+
+
+# ── Backward-compatible raw API helpers ──────────────────────────────────
+# Some callers still use these for paths that don't map neatly to the SDK
+# or to the dedicated utility modules.  New code should prefer bp_nodes,
+# bp_query, bp_configlets, or bp_resource_pools where possible.
+
+
+def api_get(client_factory, path):
+    """GET via raw_request, returns parsed JSON or None."""
+    base = client_factory.get_base_client()
+    resp = base.raw_request(path)
+    if resp.status_code == 200:
+        return resp.json()
+    return None
+
+
+def api_post(client_factory, path, data, ok_codes=(200, 201, 202)):
+    """POST via raw_request."""
+    return _raw_post(client_factory, path, data, ok_codes)
+
+
+def api_patch(client_factory, path, data, ok_codes=(200, 202, 204)):
+    """PATCH via raw_request."""
+    base = client_factory.get_base_client()
+    resp = base.raw_request(path, "PATCH", data=data)
+    if resp.status_code in ok_codes:
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+    raise Exception(f"PATCH {path} failed: {resp.status_code} {resp.text}")
+
+
+def api_put(client_factory, path, data, ok_codes=(200, 202, 204)):
+    """PUT via raw_request."""
+    base = client_factory.get_base_client()
+    resp = base.raw_request(path, "PUT", data=data)
+    if resp.status_code in ok_codes:
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+    raise Exception(f"PUT {path} failed: {resp.status_code} {resp.text}")
+
+
+def api_delete(client_factory, path, ok_codes=(200, 202, 204)):
+    """DELETE via raw_request."""
+    _raw_delete(client_factory, path, ok_codes)

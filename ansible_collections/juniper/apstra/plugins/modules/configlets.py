@@ -15,7 +15,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.blueprint import (
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_configlets import (
     list_blueprint_configlets,
     get_blueprint_configlet,
     create_blueprint_configlet,
