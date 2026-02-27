@@ -186,4 +186,3 @@ def find_blueprint_configlet_by_label(client_factory, blueprint_id, label):
         if isinstance(item, dict) and item.get("label") == label:
             return item
     return None
-    return None

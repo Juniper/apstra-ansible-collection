@@ -1,19 +1,17 @@
 # Copyright (c) 2024, Juniper Networks
 # BSD 3-Clause License
 
-"""Blueprint generic-system utilities (API-based).
+"""Blueprint generic-system API utilities.
 
-Provides helpers for generic-system operations that the AOS SDK does
-not expose natively.  Follows the same ``raw_request`` pattern as
-``bp_property_set.py``.
+Provides helpers for generic-system operations that require
+``raw_request`` — the SDK does not expose these endpoints.
 
 API endpoints used::
 
-    POST   /api/blueprints/{bp}/switch-system-links          → create / add links
-    POST   /api/blueprints/{bp}/delete-switch-system-links    → delete links
-    POST   /api/blueprints/{bp}/external-generic-systems      → create external GS
-    DELETE /api/blueprints/{bp}/external-generic-systems/{id} → delete external GS
-    POST   /api/blueprints/{bp}/obj-policy-export             → clear CTs
+    POST   /api/blueprints/{bp}/switch-system-links          -> create / add links
+    POST   /api/blueprints/{bp}/delete-switch-system-links    -> delete links
+    POST   /api/blueprints/{bp}/external-generic-systems      -> create external GS
+    DELETE /api/blueprints/{bp}/external-generic-systems/{id} -> delete external GS
 
 Usage inside a module::
 
@@ -23,17 +21,12 @@ Usage inside a module::
         delete_switch_system_links,
         create_external_generic_system,
         delete_external_generic_system,
-        clear_cts_from_links,
     )
 """
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
-    run_qe_query,
-)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -273,51 +266,3 @@ def delete_external_generic_system(client_factory, blueprint_id, sys_id):
         client_factory,
         f"/blueprints/{blueprint_id}/external-generic-systems/{sys_id}",
     )
-
-
-# ──────────────────────────────────────────────────────────────────
-#  Connectivity-template clearing
-# ──────────────────────────────────────────────────────────────────
-
-
-def clear_cts_from_links(client_factory, blueprint_id, sys_id):
-    """Clear all connectivity templates from a system's link interfaces.
-
-    Uses ``bp_query.run_qe_query`` (SDK) to discover interfaces, then
-    ``raw_request`` for the ``obj-policy-export`` endpoint which has
-    no SDK support.
-
-    Args:
-        client_factory: An ``ApstraClientFactory`` instance.
-        blueprint_id: The blueprint UUID.
-        sys_id: The system node ID.
-    """
-    items = run_qe_query(
-        client_factory,
-        blueprint_id,
-        (
-            f"node('system', id='{sys_id}', name='gs')"
-            f".out('hosted_interfaces')"
-            f".node('interface', if_type='ethernet', name='intf')"
-        ),
-    )
-    intf_ids = []
-    for item in items:
-        if isinstance(item, dict):
-            intf = item.get("intf", {})
-            if isinstance(intf, dict) and intf.get("id"):
-                intf_ids.append(intf["id"])
-
-    if not intf_ids:
-        return
-
-    for intf_id in intf_ids:
-        try:
-            base = client_factory.get_base_client()
-            base.raw_request(
-                f"/blueprints/{blueprint_id}/obj-policy-export",
-                "POST",
-                data={"policy_type_name": "", "application_points": [intf_id]},
-            )
-        except Exception:
-            pass  # Best-effort CT clearing

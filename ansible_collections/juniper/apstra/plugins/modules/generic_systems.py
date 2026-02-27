@@ -15,113 +15,28 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
+
+# SDK-based helpers (node read/write)
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
     get_node as get_blueprint_node,
     patch_node,
     set_node_tags as set_blueprint_node_tags,
     set_node_property as set_blueprint_node_property,
 )
+
+# SDK-based helpers (QE graph queries)
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
     run_qe_query,
 )
+
+# API-based helpers (raw_request — no SDK coverage)
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_generic_systems import (
     create_switch_system_links,
     add_links_to_system,
     delete_switch_system_links,
     create_external_generic_system,
     delete_external_generic_system,
-    clear_cts_from_links,
 )
-
-
-# ── Local QE-based helpers ───────────────────────────────────────────────
-# These are thin wrappers around bp_query.run_qe_query (SDK).
-# They are module-specific convenience functions, not reusable utilities.
-
-
-def find_system_by_label(client_factory, blueprint_id, label):
-    """Find a generic system by label using QE."""
-    items = run_qe_query(
-        client_factory,
-        blueprint_id,
-        f"node('system', system_type='server', label='{label}', name='gs')",
-    )
-    if items:
-        return items[0].get("gs", items[0])
-    return None
-
-
-def find_system_by_hostname(client_factory, blueprint_id, hostname):
-    """Find a generic system by hostname using QE."""
-    items = run_qe_query(
-        client_factory,
-        blueprint_id,
-        f"node('system', system_type='server', hostname='{hostname}', name='gs')",
-    )
-    if items:
-        return items[0].get("gs", items[0])
-    return None
-
-
-def get_system_link_ids(client_factory, blueprint_id, sys_id):
-    """Get all physical (ethernet) link IDs for a system via QE."""
-    items = run_qe_query(
-        client_factory,
-        blueprint_id,
-        (
-            f"node('system', id='{sys_id}', name='gs')"
-            f".out('hosted_interfaces').node('interface', name='intf')"
-            f".out('link').node('link', name='link')"
-        ),
-    )
-    link_ids = set()
-    for item in items:
-        if isinstance(item, dict):
-            link_info = item.get("link", {})
-            if isinstance(link_info, dict) and link_info.get("id"):
-                if link_info.get("link_type") != "aggregate_link":
-                    link_ids.add(link_info["id"])
-    return list(link_ids)
-
-
-def get_system_links_detail(client_factory, blueprint_id, sys_id):
-    """Get detailed link+interface info for a system via QE."""
-    items = run_qe_query(
-        client_factory,
-        blueprint_id,
-        (
-            f"node('system', id='{sys_id}', name='gs')"
-            f".out('hosted_interfaces').node('interface', name='gs_intf')"
-            f".out('link').node('link', link_type='ethernet', name='link')"
-            f".in_('link').node('interface', name='sw_intf')"
-            f".in_('hosted_interfaces').node('system', name='switch')"
-        ),
-    )
-    links = []
-    seen_link_ids = set()
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        link = item.get("link", {})
-        sw = item.get("switch", {})
-        sw_intf = item.get("sw_intf", {})
-        if sw.get("id") == sys_id:
-            continue
-        lid = link.get("id")
-        if lid in seen_link_ids:
-            continue
-        seen_link_ids.add(lid)
-        links.append(
-            {
-                "link_id": lid,
-                "target_switch_id": sw.get("id"),
-                "target_switch_if_name": sw_intf.get("if_name"),
-                "lag_mode": link.get("lag_mode"),
-                "group_label": link.get("group_label"),
-                "tags": link.get("tags", []) or [],
-            }
-        )
-    return links
 
 
 DOCUMENTATION = """
@@ -503,6 +418,133 @@ msg:
   type: str
   returned: always
 """
+
+# ──────────────────────────────────────────────────────────────────
+#  SDK-based system discovery helpers  (QE queries + node reads)
+# ──────────────────────────────────────────────────────────────────
+
+
+def find_system_by_label(client_factory, blueprint_id, label):
+    """Find a generic system by label using QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        f"node('system', system_type='server', label='{label}', name='gs')",
+    )
+    if items:
+        return items[0].get("gs", items[0])
+    return None
+
+
+def find_system_by_hostname(client_factory, blueprint_id, hostname):
+    """Find a generic system by hostname using QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        f"node('system', system_type='server', hostname='{hostname}', name='gs')",
+    )
+    if items:
+        return items[0].get("gs", items[0])
+    return None
+
+
+def get_system_link_ids(client_factory, blueprint_id, sys_id):
+    """Get all physical (ethernet) link IDs for a system via QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        (
+            f"node('system', id='{sys_id}', name='gs')"
+            f".out('hosted_interfaces').node('interface', name='intf')"
+            f".out('link').node('link', name='link')"
+        ),
+    )
+    link_ids = set()
+    for item in items:
+        if isinstance(item, dict):
+            link_info = item.get("link", {})
+            if isinstance(link_info, dict) and link_info.get("id"):
+                if link_info.get("link_type") != "aggregate_link":
+                    link_ids.add(link_info["id"])
+    return list(link_ids)
+
+
+def get_system_links_detail(client_factory, blueprint_id, sys_id):
+    """Get detailed link+interface info for a system via QE."""
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        (
+            f"node('system', id='{sys_id}', name='gs')"
+            f".out('hosted_interfaces').node('interface', name='gs_intf')"
+            f".out('link').node('link', link_type='ethernet', name='link')"
+            f".in_('link').node('interface', name='sw_intf')"
+            f".in_('hosted_interfaces').node('system', name='switch')"
+        ),
+    )
+    links = []
+    seen_link_ids = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        link = item.get("link", {})
+        sw = item.get("switch", {})
+        sw_intf = item.get("sw_intf", {})
+        if sw.get("id") == sys_id:
+            continue
+        lid = link.get("id")
+        if lid in seen_link_ids:
+            continue
+        seen_link_ids.add(lid)
+        links.append(
+            {
+                "link_id": lid,
+                "target_switch_id": sw.get("id"),
+                "target_switch_if_name": sw_intf.get("if_name"),
+                "lag_mode": link.get("lag_mode"),
+                "group_label": link.get("group_label"),
+                "tags": link.get("tags", []) or [],
+            }
+        )
+    return links
+
+
+def clear_cts_from_links(client_factory, blueprint_id, sys_id):
+    """Clear all connectivity templates from a system's link interfaces.
+
+    Uses QE (SDK) to discover interfaces, then raw_request for the
+    obj-policy-export endpoint.
+    """
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        (
+            f"node('system', id='{sys_id}', name='gs')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_type='ethernet', name='intf')"
+        ),
+    )
+    intf_ids = []
+    for item in items:
+        if isinstance(item, dict):
+            intf = item.get("intf", {})
+            if isinstance(intf, dict) and intf.get("id"):
+                intf_ids.append(intf["id"])
+
+    if not intf_ids:
+        return
+
+    for intf_id in intf_ids:
+        try:
+            base = client_factory.get_base_client()
+            base.raw_request(
+                f"/blueprints/{blueprint_id}/obj-policy-export",
+                "POST",
+                data={"policy_type_name": "", "application_points": [intf_id]},
+            )
+        except Exception:
+            pass  # Best-effort CT clearing
+
 
 # ──────────────────────────────────────────────────────────────────
 #  Constants
