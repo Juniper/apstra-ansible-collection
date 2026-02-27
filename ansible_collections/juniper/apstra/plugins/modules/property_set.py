@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_property_set import (
+    reimport_blueprint_property_set,
+)
 
 DOCUMENTATION = """
 ---
@@ -99,9 +102,15 @@ options:
   state:
     description:
       - Desired state of the property set.
+      - Use C(present) to create or update.
+      - Use C(absent) to delete.
+      - Use C(reimported) to force a reimport of a global property set
+        into a blueprint (PUT).  This refreshes the blueprint copy with
+        the latest values from the global catalog, even when the import
+        metadata (C(id), C(keys)) has not changed.
     required: false
     type: str
-    choices: ["present", "absent"]
+    choices: ["present", "absent", "reimported"]
     default: "present"
 """
 
@@ -223,6 +232,15 @@ EXAMPLES = """
         ntp_server: 10.0.0.2
     state: present
 
+# Blueprint scope -- reimport a property set (refresh after global update)
+- name: Reimport property set into blueprint
+  juniper.apstra.property_set:
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    body:
+      id: "dcqcn"
+    state: reimported
+
 # Blueprint scope -- delete a property set
 - name: Delete property set from blueprint
   juniper.apstra.property_set:
@@ -267,6 +285,24 @@ msg:
   type: str
   returned: always
 """
+
+
+def _reimport_blueprint_property_set(
+    client_factory, id, body, result, leaf_object_type
+):
+    """Reimport (PUT) a property set into a blueprint.
+
+    Delegates to the shared utility in ``module_utils.apstra.bp_property_set``
+    which handles the ``raw_request`` PUT (SDK has no ``.update()`` for
+    blueprint property-set resources).
+    """
+    bp_id = id["blueprint"]
+    ps_id = id[leaf_object_type]
+
+    outcome = reimport_blueprint_property_set(client_factory, bp_id, ps_id, body)
+    result["changed"] = outcome["changed"]
+    result["msg"] = outcome["msg"]
+    result["id"] = id
 
 
 def _handle_global_property_set(module, client_factory, id, body, state, result):
@@ -392,33 +428,42 @@ def _handle_blueprint_property_set(module, client_factory, id, body, state, resu
         current_object = client_factory.object_request(object_type, "get", id)
 
     # Make the requested changes
-    if state == "present":
+    if state in ("present", "reimported"):
         if current_object:
             result["id"] = id
             if body:
-                # Update the object
-                changes = {}
-                if client_factory.compare_and_update(current_object, body, changes):
-                    updated_object = client_factory.object_request(
-                        object_type, "patch", id, changes
+                if state == "reimported" or ("id" in body and current_object):
+                    # Reimport: PUT the import body to refresh the
+                    # blueprint copy with the latest global values.
+                    # The SDK freeform client has no .update() (PUT)
+                    # on blueprint property_sets, so use raw_request.
+                    _reimport_blueprint_property_set(
+                        client_factory, id, body, result, leaf_object_type
                     )
-                    result["changed"] = True
-                    if updated_object:
-                        result["response"] = updated_object
-                    result["changes"] = changes
-                    result["msg"] = f"{leaf_object_type} updated successfully"
                 else:
-                    result["changed"] = False
-                    result["msg"] = (
-                        f"{leaf_object_type} already exists, no changes needed"
-                    )
+                    # Partial update via PATCH
+                    changes = {}
+                    if client_factory.compare_and_update(current_object, body, changes):
+                        updated_object = client_factory.object_request(
+                            object_type, "patch", id, changes
+                        )
+                        result["changed"] = True
+                        if updated_object:
+                            result["response"] = updated_object
+                        result["changes"] = changes
+                        result["msg"] = f"{leaf_object_type} updated successfully"
+                    else:
+                        result["changed"] = False
+                        result["msg"] = (
+                            f"{leaf_object_type} already exists, " "no changes needed"
+                        )
             else:
                 result["changed"] = False
                 result["msg"] = f"No changes specified for {leaf_object_type}"
         else:
             if body is None:
                 raise ValueError(f"Must specify 'body' to create a {leaf_object_type}")
-            # Create the object
+            # Create / first import
             created = client_factory.object_request(object_type, "create", id, body)
             if isinstance(created, dict) and "id" in created:
                 object_id = created["id"]
@@ -453,7 +498,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent"],
+            choices=["present", "absent", "reimported"],
             default="present",
         ),
     )
@@ -480,6 +525,11 @@ def main():
         if is_blueprint_scope:
             _handle_blueprint_property_set(
                 module, client_factory, id, body, state, result
+            )
+        elif state == "reimported":
+            raise ValueError(
+                "state=reimported is only valid for blueprint-scoped "
+                "property sets (include 'blueprint' in id)"
             )
         else:
             _handle_global_property_set(module, client_factory, id, body, state, result)

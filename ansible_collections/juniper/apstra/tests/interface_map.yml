@@ -1,0 +1,185 @@
+---
+# ── Test playbook for juniper.apstra.interface_map ────────────────
+#
+# Prerequisites:
+#   - Apstra server reachable
+#   - A blueprint with switch nodes that need interface map assignments
+#   - Known interface_map_id for the device type in the blueprint
+#
+# Usage:
+#   ansible-playbook tests/interface_map.yml \
+#     -e template_id=L2_Virtual_EVPN
+
+- name: Test interface_map assignments
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    template_id: "{{ template | default('L2_Virtual_EVPN') }}"
+    interface_map_id: "{{ im_id | default('Juniper_vJunos-switch_vJunos') }}"
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_im_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Setup: Create blueprint ───────────────────────────────────
+    - name: Create test blueprint
+      juniper.apstra.blueprint:
+        body:
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "{{ template_id }}"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ── Discover nodes that need interface maps ───────────────────
+    - name: Get blueprint nodes (system nodes)
+      ansible.builtin.uri:
+        url: "{{ lookup('env', 'APSTRA_API_URL') }}/blueprints/{{ bp.id }}/nodes?node_type=system"
+        method: GET
+        headers:
+          AuthToken: "{{ auth.token }}"
+        validate_certs: false
+      register: nodes_response
+
+    - name: Find switch nodes needing interface maps
+      ansible.builtin.set_fact:
+        switch_nodes: >-
+          {{
+            nodes_response.json.nodes | dict2items |
+            selectattr('value.role', 'in', ['spine', 'leaf', 'superspine']) |
+            list
+          }}
+
+    - name: Display switch nodes
+      ansible.builtin.debug:
+        msg: "Found {{ switch_nodes | length }} switch nodes"
+
+    - name: Skip tests if no switch nodes
+      ansible.builtin.meta: end_play
+      when: switch_nodes | length == 0
+
+    # ── Build assignments dict ────────────────────────────────────
+    - name: Build interface map assignment dict
+      ansible.builtin.set_fact:
+        im_assignments: >-
+          {{
+            dict(switch_nodes | map(attribute='key') |
+            zip_longest([], fillvalue=interface_map_id))
+          }}
+
+    - name: Display planned assignments
+      ansible.builtin.debug:
+        var: im_assignments
+
+    # ── Test 1: Assign interface maps ─────────────────────────────
+    - name: "Test 1: Assign interface maps to switch nodes"
+      juniper.apstra.interface_map:
+        blueprint_id: "{{ bp.id }}"
+        assignments: "{{ im_assignments }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: assign_result
+
+    - name: Display assign result
+      ansible.builtin.debug:
+        var: assign_result
+
+    - name: Verify assignment
+      ansible.builtin.assert:
+        that:
+          - assign_result.changed
+        fail_msg: "Interface map assignment failed"
+        success_msg: "Test 1 PASSED: Interface maps assigned"
+
+    # ── Test 2: Idempotent assign ─────────────────────────────────
+    - name: "Test 2: Assign same interface maps again (idempotent)"
+      juniper.apstra.interface_map:
+        blueprint_id: "{{ bp.id }}"
+        assignments: "{{ im_assignments }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: idem_result
+
+    - name: Display idempotent result
+      ansible.builtin.debug:
+        var: idem_result
+
+    - name: Verify idempotency
+      ansible.builtin.assert:
+        that:
+          - not idem_result.changed
+        fail_msg: "Interface map assignment was not idempotent"
+        success_msg: "Test 2 PASSED: Idempotent (no change)"
+
+    # ── Test 3: Clear assignments ─────────────────────────────────
+    - name: Build clear assignments (first node only)
+      ansible.builtin.set_fact:
+        clear_assignment:
+          "{{ switch_nodes[0].key }}": null
+
+    - name: "Test 3: Clear interface map for first node"
+      juniper.apstra.interface_map:
+        blueprint_id: "{{ bp.id }}"
+        assignments: "{{ clear_assignment }}"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: clear_result
+
+    - name: Display clear result
+      ansible.builtin.debug:
+        var: clear_result
+
+    - name: Verify clear
+      ansible.builtin.assert:
+        that:
+          - clear_result.changed
+        fail_msg: "Interface map clear failed"
+        success_msg: "Test 3 PASSED: Interface map cleared"
+
+    # ── Test 4: Clear idempotent ──────────────────────────────────
+    - name: "Test 4: Clear same node again (idempotent)"
+      juniper.apstra.interface_map:
+        blueprint_id: "{{ bp.id }}"
+        assignments: "{{ clear_assignment }}"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: clear_idem_result
+
+    - name: Verify clear idempotency
+      ansible.builtin.assert:
+        that:
+          - not clear_idem_result.changed
+        fail_msg: "Interface map clear was not idempotent"
+        success_msg: "Test 4 PASSED: Clear idempotent"
+
+    # ── Cleanup: Delete blueprint ─────────────────────────────────
+    - name: Delete test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: bp_delete
+
+    - name: All interface_map tests passed
+      ansible.builtin.debug:
+        msg: "All 4 interface_map tests PASSED"

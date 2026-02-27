@@ -1,0 +1,477 @@
+---
+# Customize test: Create BGP-2-SRX connectivity template and apply it to
+# external router interfaces in an existing blueprint.
+#
+# This playbook auto-discovers external router nodes, their loopback IPs,
+# the Default routing zone, and connected leaf interfaces. It then:
+#   1. Creates a routing policy for the external routers
+#   2. Creates the BGP-2-SRX connectivity template (IP Link → BGP → Routing Policy)
+#   3. Assigns the CT to all leaf interfaces connected to external routers
+#   4. Assigns the "Link IPs - To Generic" IP pool to generic system links
+#   5. Commits the blueprint
+#
+# This matches the payload created by srx_handler.py in the tests repo.
+#
+# Usage (auto-discover mode — for connectorops integration):
+#   make test-customize_connectivity_template BLUEPRINT_ID=<blueprint-id>
+#
+# Or directly:
+#   pipenv run ansible-playbook -v tests/customize_connectivity_template.yml \
+#       -e blueprint_id=<your-blueprint-id>
+#
+# Optional overrides:
+#   -e ct_name="BGP-2-SRX"              (default: BGP-2-SRX)
+#   -e ttl=2                             (default: 2)
+#   -e keepalive_timer=10                (default: 10)
+#   -e holdtime_timer=30                 (default: 30)
+#   -e bfd=true                          (default: true)
+#   -e ip_pool_name="Private-172.16.0.0/12" (default: Private-172.16.0.0/12)
+
+- name: Create and apply connectivity template to existing blueprint
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    # CT name (matches tests repo srx_handler)
+    ct_name: "BGP-2-SRX"
+    # BGP timer defaults (matching tests repo srx_handler.py payload)
+    ttl: 2
+    keepalive_timer: 10
+    holdtime_timer: 30
+    bfd: true
+    # Routing policy defaults
+    rp_label: "ext_rtr_policy"
+    ip_pool_name: "Private-172.16.0.0/12"
+  tasks:
+    # ==================================================================
+    #  Validate input and authenticate
+    # ==================================================================
+
+    - name: Validate blueprint_id is provided
+      ansible.builtin.assert:
+        that:
+          - blueprint_id is defined
+          - blueprint_id | length > 0
+        fail_msg: >-
+          blueprint_id is required. Pass it with:
+          -e blueprint_id=<your-blueprint-id>
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ==================================================================
+    #  Build Apstra API base URL for direct API calls
+    # ==================================================================
+
+    - name: Build API base URL
+      ansible.builtin.set_fact:
+        apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') | regex_replace('/api$', '') }}"
+
+    # ==================================================================
+    #  Gather blueprint node and cabling information
+    # ==================================================================
+
+    - name: Get blueprint facts (nodes + security zones)
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - "blueprints.nodes"
+          - "blueprints.security_zones"
+        id:
+          blueprint: "{{ blueprint_id }}"
+      register: bp_facts
+
+    - name: Set nodes dict
+      ansible.builtin.set_fact:
+        all_nodes: "{{ bp_facts.ansible_facts.apstra_facts.blueprints[blueprint_id].nodes }}"
+
+    - name: Find external router nodes
+      ansible.builtin.set_fact:
+        external_nodes: >-
+          {{ all_nodes | dict2items
+             | selectattr('value.external', 'equalto', true)
+             | map(attribute='value')
+             | list }}
+
+    - name: Show discovered external router nodes
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ external_nodes | length }} external router node(s):
+          {{ external_nodes | map(attribute='label') | list }}
+
+    - name: Verify at least one external node exists
+      ansible.builtin.assert:
+        that:
+          - external_nodes | length > 0
+        fail_msg: >-
+          No external router nodes (external=true) found in blueprint
+          {{ blueprint_id }}. Ensure external routers are deployed before
+          running this playbook.
+
+    # ==================================================================
+    #  Discover routing zone (Default) for IP Link primitive
+    # ==================================================================
+
+    - name: Find Default routing zone
+      ansible.builtin.set_fact:
+        default_routing_zone_id: >-
+          {%- set zones = bp_facts.ansible_facts.apstra_facts.blueprints[blueprint_id].security_zones -%}
+          {%- for zone_id, zone in zones.items() -%}
+            {%- if zone.vrf_name == 'default' -%}
+              {{ zone_id }}
+            {%- endif -%}
+          {%- endfor -%}
+
+    - name: Show Default routing zone
+      ansible.builtin.debug:
+        msg: "Default routing zone ID: {{ default_routing_zone_id }}"
+
+    # ==================================================================
+    #  Discover external router loopback IP and IP pool for routing policy
+    # ==================================================================
+
+    - name: Fetch loopback for first external node
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/api/blueprints/{{ blueprint_id }}/systems/{{ external_nodes[0].id }}/loopback/0"
+        method: GET
+        headers:
+          Authtoken: "{{ auth.token }}"
+        validate_certs: false
+        return_content: true
+      register: first_loopback_response
+
+    - name: Extract first external router loopback /31
+      ansible.builtin.set_fact:
+        first_ext_loopback_31: >-
+          {%- set ip = first_loopback_response.json.ipv4_addr.split('/')[0] -%}
+          {%- set octets = ip.split('.') -%}
+          {%- set last = octets[3] | int -%}
+          {{ octets[0] }}.{{ octets[1] }}.{{ octets[2] }}.{{ last - (last % 2) }}/31
+
+    - name: Get IP pools
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - "ip_pools"
+      register: ip_facts
+
+    - name: Set IP pools list
+      ansible.builtin.set_fact:
+        all_ip_pools: "{{ ip_facts.ansible_facts.apstra_facts.ip_pools.values() | list }}"
+
+    - name: Find IP pool subnet for routing policy deny rule
+      ansible.builtin.set_fact:
+        rp_deny_subnet: >-
+          {%- set pool = all_ip_pools
+              | selectattr('display_name', 'equalto', ip_pool_name)
+              | first -%}
+          {%- if pool.subnets is defined and pool.subnets | length > 0 -%}
+            {{ pool.subnets[0].network }}
+          {%- elif pool.network is defined -%}
+            {{ pool.network }}
+          {%- else -%}
+            172.16.0.0/12
+          {%- endif -%}
+
+    - name: Show routing policy parameters
+      ansible.builtin.debug:
+        msg: >-
+          Routing policy: permit {{ first_ext_loopback_31 }}/32,
+          deny {{ rp_deny_subnet }}/32
+
+    # ==================================================================
+    #  Step 1: Create routing policy for external routers
+    # ==================================================================
+
+    - name: Create routing policy for external routers
+      juniper.apstra.routing_policy:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          label: "{{ rp_label }}"
+          description: "Routing policy for external routers (created by Ansible)"
+          import_policy: "all"
+          expect_default_ipv4_route: false
+          expect_default_ipv6_route: false
+          policy_type: "user_defined"
+          export_policy:
+            loopbacks: true
+            spine_leaf_links: true
+            spine_superspine_links: false
+            l2edge_subnets: true
+            static_routes: false
+          extra_import_routes:
+            - prefix: "{{ first_ext_loopback_31 }}"
+              le_mask: 32
+              action: "permit"
+              description: "Allow routes from first external router {{ external_nodes[0].label }}"
+            - prefix: "{{ rp_deny_subnet }}"
+              le_mask: 32
+              action: "deny"
+              description: "Deny routes from IP pool {{ ip_pool_name }}"
+          extra_export_routes:
+            - prefix: "{{ first_ext_loopback_31 }}"
+              le_mask: 32
+              action: "permit"
+              description: "Allow routes from first external router {{ external_nodes[0].label }}"
+            - prefix: "{{ rp_deny_subnet }}"
+              le_mask: 32
+              action: "deny"
+              description: "Deny routes from IP pool {{ ip_pool_name }}"
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: rp_result
+
+    - name: Set routing policy ID
+      ansible.builtin.set_fact:
+        routing_policy_id: "{{ rp_result.id.routing_policy }}"
+
+    - name: Show routing policy result
+      ansible.builtin.debug:
+        msg: >-
+          Routing policy '{{ rp_label }}' ID: {{ routing_policy_id }},
+          changed: {{ rp_result.changed }}
+
+    # ==================================================================
+    #  Step 2: Create BGP-2-SRX connectivity template
+    # ==================================================================
+
+    - name: Create connectivity template (BGP-2-SRX)
+      juniper.apstra.connectivity_template:
+        blueprint_id: "{{ blueprint_id }}"
+        name: "{{ ct_name }}"
+        type: interface
+        state: present
+        primitives:
+          ip_links:
+            ip_link_1:
+              interface_type: "untagged"
+              ipv4_addressing_type: "numbered"
+              ipv6_addressing_type: "none"
+              security_zone: "{{ default_routing_zone_id }}"
+              bgp_peering_generic_systems:
+                bgp_peering_1:
+                  session_addressing_ipv4: "addressed"
+                  session_addressing_ipv6: "none"
+                  neighbor_asn_type: "static"
+                  peer_from: "interface"
+                  peer_to: "interface_or_ip_endpoint"
+                  bfd: true
+                  keepalive_timer: 10
+                  holdtime_timer: 30
+                  ttl: 2
+                  ipv4_safi: true
+                  ipv6_safi: false
+                  routing_policies:
+                    rp_1:
+                      rp_to_attach: "{{ routing_policy_id }}"
+        auth_token: "{{ auth.token }}"
+      register: ct_result
+
+    - name: Show CT result
+      ansible.builtin.debug:
+        msg: >-
+          Connectivity template '{{ ct_name }}' CT ID: {{ ct_result.ct_id }},
+          changed: {{ ct_result.changed }}
+
+    # NOTE: The connectivity_template module now automatically patches
+    # routing policy primitives after obj-policy-import to refresh the
+    # Apstra UI graph binding. No manual PATCH workaround needed.
+
+    # ==================================================================
+    #  Step 3: Discover leaf interfaces connected to external routers
+    # ==================================================================
+
+    - name: Get cabling map
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/api/blueprints/{{ blueprint_id }}/cabling-map"
+        method: GET
+        headers:
+          Authtoken: "{{ auth.token }}"
+        validate_certs: false
+        return_content: true
+      register: cabling_map_response
+
+    - name: Build list of leaf interface IDs connected to external routers
+      ansible.builtin.set_fact:
+        leaf_interface_ids: >-
+          {%- set ext_ids = external_nodes | map(attribute='id') | list -%}
+          {%- set iface_ids = [] -%}
+          {%- for link in cabling_map_response.json.links | default([]) -%}
+            {%- set eps = link.endpoints | default([]) -%}
+            {%- if eps | length == 2 -%}
+              {%- set ep0_sys = eps[0].system.id | default('') -%}
+              {%- set ep1_sys = eps[1].system.id | default('') -%}
+              {%- if ep0_sys in ext_ids -%}
+                {%- set leaf_ep = eps[1] -%}
+                {%- if leaf_ep.system.role | default('') == 'leaf' -%}
+                  {%- set _ = iface_ids.append(leaf_ep.interface.id) -%}
+                {%- endif -%}
+              {%- elif ep1_sys in ext_ids -%}
+                {%- set leaf_ep = eps[0] -%}
+                {%- if leaf_ep.system.role | default('') == 'leaf' -%}
+                  {%- set _ = iface_ids.append(leaf_ep.interface.id) -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ iface_ids }}
+
+    - name: Show discovered leaf interfaces
+      ansible.builtin.debug:
+        msg: >-
+          Found {{ leaf_interface_ids | length }} leaf interface(s) connected
+          to external routers: {{ leaf_interface_ids }}
+
+    - name: Verify at least one leaf interface found
+      ansible.builtin.assert:
+        that:
+          - leaf_interface_ids | length > 0
+        fail_msg: >-
+          No leaf interfaces connected to external routers found in the
+          cabling map. Ensure external routers are cabled to leaf switches.
+
+    # ==================================================================
+    #  Step 4: Assign CT to leaf interfaces
+    # ==================================================================
+
+    - name: Assign connectivity template to leaf interfaces
+      juniper.apstra.connectivity_template_assignment:
+        blueprint_id: "{{ blueprint_id }}"
+        ct_name: "{{ ct_name }}"
+        application_point_ids: "{{ leaf_interface_ids }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: ct_assign_result
+
+    - name: Show CT assignment result
+      ansible.builtin.debug:
+        msg: >-
+          Assigned '{{ ct_name }}' to {{ leaf_interface_ids | length }}
+          interface(s). Changed: {{ ct_assign_result.changed }}
+
+    # ==================================================================
+    #  Step 5: Assign IP pool to generic system links
+    #  The resource group "to_generic_link_ips" needs an IP pool so that
+    #  numbered IP link subinterfaces get IPv4 addresses assigned.
+    #  Strategy (matching srx_handler.py):
+    #    1. Look for {blueprint_name}_ip_pool
+    #    2. Fallback: first available IP pool
+    # ==================================================================
+
+    - name: Get blueprint name for IP pool lookup
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/api/blueprints/{{ blueprint_id }}"
+        method: GET
+        headers:
+          Authtoken: "{{ auth.token }}"
+        validate_certs: false
+        return_content: true
+      register: bp_info_response
+
+    - name: Find IP pool for generic links (blueprint-named pool or first available)
+      ansible.builtin.set_fact:
+        link_ip_pool_id: >-
+          {%- set bp_name = bp_info_response.json.label | default('') -%}
+          {%- set bp_pool_name = bp_name ~ '_ip_pool' -%}
+          {%- set bp_match = all_ip_pools
+              | selectattr('display_name', 'equalto', bp_pool_name)
+              | list -%}
+          {%- if bp_match -%}
+            {{ bp_match[0].id }}
+          {%- else -%}
+            {%- if all_ip_pools | length > 0 -%}
+              {{ all_ip_pools[0].id }}
+            {%- endif -%}
+          {%- endif -%}
+        link_ip_pool_name_found: >-
+          {%- set bp_name = bp_info_response.json.label | default('') -%}
+          {%- set bp_pool_name = bp_name ~ '_ip_pool' -%}
+          {%- set bp_match = all_ip_pools
+              | selectattr('display_name', 'equalto', bp_pool_name)
+              | list -%}
+          {%- if bp_match -%}
+            {{ bp_pool_name }}
+          {%- else -%}
+            {%- if all_ip_pools | length > 0 -%}
+              {{ all_ip_pools[0].display_name }}
+            {%- else -%}
+              none
+            {%- endif -%}
+          {%- endif -%}
+
+    - name: Show link IP pool status
+      ansible.builtin.debug:
+        msg: >-
+          {% if link_ip_pool_id | trim | length > 0 -%}
+          Using IP pool '{{ link_ip_pool_name_found | trim }}' ({{ link_ip_pool_id | trim }})
+          for generic link IPs
+          {%- else -%}
+          No IP pools available on server - skipping IP pool assignment
+          {%- endif %}
+
+    - name: Assign IP pool to generic links resource group
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "to_generic_link_ips"
+        body:
+          pool_ids:
+            - "{{ link_ip_pool_id | trim }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      when: link_ip_pool_id | trim | length > 0
+      register: ip_pool_assign_result
+
+    - name: Show IP pool assignment result
+      ansible.builtin.debug:
+        msg: >-
+          Assigned IP pool '{{ link_ip_pool_name_found | trim }}' to
+          resource group 'to_generic_link_ips'.
+      when: link_ip_pool_id | trim | length > 0
+
+    # ==================================================================
+    #  Step 6: Commit blueprint
+    # ==================================================================
+
+    - name: Commit blueprint to apply connectivity template configuration
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: committed
+        lock_state: "ignore"
+        commit_timeout: 60
+        auth_token: "{{ auth.token }}"
+      register: commit_result
+
+    - name: Show commit result
+      ansible.builtin.debug:
+        msg: >-
+          Blueprint {{ blueprint_id }} committed successfully.
+          Changed: {{ commit_result.changed }}.
+
+    # ==================================================================
+    #  Summary
+    # ==================================================================
+
+    - name: Show summary
+      ansible.builtin.debug:
+        msg: |
+          === Connectivity Template Configuration Complete ===
+          Blueprint:        {{ blueprint_id }}
+          Routing Policy:   {{ rp_label }} ({{ routing_policy_id }})
+          CT Name:          {{ ct_name }} ({{ ct_result.ct_id }})
+          Interfaces:       {{ leaf_interface_ids | length }} leaf interface(s)
+          Committed:        {{ commit_result.changed }}
+
+    # ==================================================================
+    #  Cleanup
+    # ==================================================================
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
