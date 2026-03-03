@@ -36,6 +36,7 @@ else:
 import os
 import re
 import time
+import yaml
 from datetime import datetime
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60
@@ -1060,6 +1061,23 @@ class ApstraClientFactory:
                     changes[key] = desired_value
                     changed = True
             elif current_value != desired_value:
+                # For YAML-string fields (e.g. values_yaml), the API may
+                # return keys in a different order.  Compare parsed objects
+                # so that semantically identical YAML is not flagged as a
+                # change.
+                if (
+                    key == "values_yaml"
+                    and isinstance(current_value, str)
+                    and isinstance(desired_value, str)
+                ):
+                    try:
+                        if yaml.safe_load(current_value) == yaml.safe_load(
+                            desired_value
+                        ):
+                            continue
+                    except yaml.YAMLError:
+                        pass  # Fall through to normal string comparison
+
                 # Update the current state and track the change
                 current[key] = desired_value
                 changes[key] = desired_value

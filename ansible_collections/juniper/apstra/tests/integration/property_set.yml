@@ -76,21 +76,21 @@
               - global_ps.property_set["values"]["mtu"] == 9100
               - global_ps.property_set["label"] == "test_integration_ps_" ~ test_timestamp
 
-        # - name: Create same property set again (idempotency)
-        #   juniper.apstra.property_set:
-        #     body:
-        #       label: "test_integration_ps_{{ test_timestamp }}"
-        #       values:
-        #         test_key: "test_value"
-        #         mtu: 9100
-        #     auth_token: "{{ auth.token }}"
-        #   register: global_ps_nochange
+        - name: Create same property set again (idempotency)
+          juniper.apstra.property_set:
+            body:
+              label: "test_integration_ps_{{ test_timestamp }}"
+              values:
+                test_key: "test_value"
+                mtu: 9100
+            auth_token: "{{ auth.token }}"
+          register: global_ps_nochange
 
-        # - name: Verify idempotency
-        #   ansible.builtin.assert:
-        #     that:
-        #       - not global_ps_nochange.changed
-        #       - global_ps_nochange.id.property_set == global_ps.id.property_set
+        - name: Verify idempotency
+          ansible.builtin.assert:
+            that:
+              - not global_ps_nochange.changed
+              - global_ps_nochange.id.property_set == global_ps.id.property_set
 
         - name: Update global property set
           juniper.apstra.property_set:
