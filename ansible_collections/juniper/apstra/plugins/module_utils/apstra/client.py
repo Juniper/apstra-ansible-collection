@@ -1002,23 +1002,42 @@ class ApstraClientFactory:
                 sleep(wait)
                 min_delay = min(min_delay * 2, max_delay)
 
-    def compare_and_update(self, current, desired, changes):
+    def compare_and_update(self, current, desired, changes, _depth=0):
         """
         Recursively compare and update the current state to match the desired state.
+
+        At the top level (_depth == 0), keys present in *desired* but absent
+        from *current* are silently skipped.  These typically represent
+        create-only fields (e.g. ``init_type``, ``template_id``) that the
+        API does not return in GET responses.
+
+        At nested levels (_depth > 0), a key present in *desired* but absent
+        from *current* is treated as an **addition** — a genuine change that
+        must be sent to the API.  This is critical for user-data dicts such
+        as ``values`` in property sets, where adding new keys is a valid
+        update operation.
 
         :param current: The current state dictionary.
         :param desired: The desired state dictionary.
         :param changes: A dictionary to track changes.
+        :param _depth: Recursion depth (0 = top-level, internal use only).
         :return: True if any changes were made, False otherwise.
         """
         changed = False
         for key, desired_value in desired.items():
             if key not in current:
-                # Field is missing in the current state, probably only for create
-                self.module.debug(
-                    f"Field '{key}' missing in current state, ignoring it"
-                )
-                continue
+                if _depth == 0:
+                    # Top-level: skip fields not in API response (create-only)
+                    self.module.debug(
+                        f"Field '{key}' missing in current state, ignoring it"
+                    )
+                    continue
+                else:
+                    # Nested: new key is an addition — treat as a change
+                    current[key] = desired_value
+                    changes[key] = desired_value
+                    changed = True
+                    continue
 
             current_value = current[key]
 
@@ -1026,7 +1045,10 @@ class ApstraClientFactory:
                 # Recursively compare nested dictionaries
                 nested_changes = {}
                 nested_changed = self.compare_and_update(
-                    current_value, desired_value, nested_changes
+                    current_value,
+                    desired_value,
+                    nested_changes,
+                    _depth=_depth + 1,
                 )
                 if nested_changed:
                     changes[key] = nested_changes

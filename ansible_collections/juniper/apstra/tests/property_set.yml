@@ -123,6 +123,44 @@
           - global_yaml_ps_update.changed
         fail_msg: "values_yaml property set was not updated"
 
+    # ---- Global property set: add new key detection ----
+
+    - name: Add new key to global property set
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_ps.id.property_set }}"
+        body:
+          values:
+            test_key: "updated_value"
+            mtu: 9200
+            new_key: "added_value"
+        auth_token: "{{ auth.token }}"
+      register: global_ps_add_key
+
+    - name: Verify new key addition was detected
+      ansible.builtin.assert:
+        that:
+          - global_ps_add_key.changed
+        fail_msg: "Adding a new key to values was not detected as a change"
+
+    - name: Add new key again (no change)
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_ps.id.property_set }}"
+        body:
+          values:
+            test_key: "updated_value"
+            mtu: 9200
+            new_key: "added_value"
+        auth_token: "{{ auth.token }}"
+      register: global_ps_add_key_nochange
+
+    - name: Verify new key idempotency
+      ansible.builtin.assert:
+        that:
+          - not global_ps_add_key_nochange.changed
+        fail_msg: "Re-running with same values (including added key) should not report changed"
+
     # ---- Blueprint-scoped property set tests ----
 
     - name: Create blueprint
