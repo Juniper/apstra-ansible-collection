@@ -12,6 +12,8 @@ API endpoints used::
     POST   /api/blueprints/{bp}/delete-switch-system-links    -> delete links
     POST   /api/blueprints/{bp}/external-generic-systems      -> create external GS
     DELETE /api/blueprints/{bp}/external-generic-systems/{id} -> delete external GS
+    POST   /api/blueprints/{bp}/qe                            -> graph queries
+    PATCH  /api/blueprints/{bp}                               -> graph mutations
 
 Usage inside a module::
 
@@ -21,6 +23,10 @@ Usage inside a module::
         delete_switch_system_links,
         create_external_generic_system,
         delete_external_generic_system,
+        get_system_asn,
+        set_system_asn,
+        get_system_loopback,
+        create_or_update_loopback,
     )
 """
 
@@ -52,6 +58,18 @@ def _raw_delete(client_factory, path, ok_codes=(200, 202, 204)):
     resp = base.raw_request(path, "DELETE")
     if resp.status_code not in ok_codes:
         raise Exception(f"DELETE {path} failed: {resp.status_code} {resp.text}")
+
+
+def _raw_patch(client_factory, path, data, ok_codes=(200, 202, 204)):
+    """Issue a PATCH via raw_request.  Internal helper."""
+    base = client_factory.get_base_client()
+    resp = base.raw_request(path, "PATCH", data=data)
+    if resp.status_code in ok_codes:
+        try:
+            return resp.json()
+        except Exception:
+            return {}
+    raise Exception(f"PATCH {path} failed: {resp.status_code} {resp.text}")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -266,3 +284,208 @@ def delete_external_generic_system(client_factory, blueprint_id, sys_id):
         client_factory,
         f"/blueprints/{blueprint_id}/external-generic-systems/{sys_id}",
     )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Graph-mutation helpers (ASN + loopback)
+# ──────────────────────────────────────────────────────────────────
+
+# Import bp_nodes lazily to avoid circular imports.  The functions
+# below are the only callers.
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (  # noqa: E402
+    get_node as _get_node,
+    patch_node as _patch_node,
+)
+
+
+def get_system_asn(client_factory, blueprint_id, sys_id):
+    """Read ASN (domain_id) for a generic system from its domain node.
+
+    Apstra stores the ASN on a separate ``domain`` node (type
+    ``autonomous_system``) connected to the system node, **not** as a
+    property of the system node itself.
+
+    Args:
+        client_factory: An ``ApstraClientFactory`` instance.
+        blueprint_id: The blueprint UUID.
+        sys_id: The system node UUID.
+
+    Returns:
+        str or None: The domain_id string, or ``None`` if not set.
+    """
+    qe = {
+        "query": (
+            f"node('domain', domain_type='autonomous_system', name='d')"
+            f".out().node('system', id='{sys_id}')"
+        )
+    }
+    resp = _raw_post(client_factory, f"/blueprints/{blueprint_id}/qe", qe)
+    items = resp.get("items", []) if resp else []
+    if items:
+        domain = items[0].get("d", {})
+        return domain.get("domain_id")
+    return None
+
+
+def set_system_asn(client_factory, blueprint_id, sys_id, asn):
+    """Set ASN (domain_id) on the system's domain node.
+
+    If the domain node already exists, patches its ``domain_id``.
+    Otherwise creates a new ``domain`` node (type ``autonomous_system``)
+    and a ``composed_of_systems`` relationship via the blueprint
+    graph-mutation PATCH API.
+
+    The value is coerced to a string (the API rejects integers).
+
+    Args:
+        client_factory: An ``ApstraClientFactory`` instance.
+        blueprint_id: The blueprint UUID.
+        sys_id: The system node UUID.
+        asn: The ASN value (int or str).
+    """
+    asn_str = str(asn)
+
+    # Find the domain node via QE
+    qe = {
+        "query": (
+            f"node('domain', domain_type='autonomous_system', name='d')"
+            f".out().node('system', id='{sys_id}')"
+        )
+    }
+    resp = _raw_post(client_factory, f"/blueprints/{blueprint_id}/qe", qe)
+    items = resp.get("items", []) if resp else []
+
+    if items:
+        domain_node_id = items[0].get("d", {}).get("id")
+        if domain_node_id:
+            _patch_node(
+                client_factory, blueprint_id, domain_node_id, {"domain_id": asn_str}
+            )
+            return
+
+    # Domain node doesn't exist — create via graph-mutation PATCH
+    sys_node = _get_node(client_factory, blueprint_id, sys_id)
+    label = sys_node.get("label", sys_id) if sys_node else sys_id
+    domain_node_id = f"{label}_as"
+    rel_id = f"{label}_as_composed"
+
+    body = {
+        "nodes": {
+            domain_node_id: {
+                "type": "domain",
+                "domain_type": "autonomous_system",
+                "domain_id": asn_str,
+            },
+        },
+        "relationships": {
+            rel_id: {
+                "type": "composed_of_systems",
+                "source_id": domain_node_id,
+                "target_id": sys_id,
+            }
+        },
+    }
+    _raw_patch(client_factory, f"/blueprints/{blueprint_id}", body)
+
+
+def get_system_loopback(client_factory, blueprint_id, sys_id):
+    """Query the loopback interface node for a generic system.
+
+    Args:
+        client_factory: An ``ApstraClientFactory`` instance.
+        blueprint_id: The blueprint UUID.
+        sys_id: The system node UUID.
+
+    Returns:
+        dict or None: Dict with ``node_id``, ``ipv4_addr``, ``ipv6_addr``
+        keys, or ``None`` if no loopback exists.
+    """
+    qe = {
+        "query": (
+            f"node('system', id='{sys_id}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_type='loopback', name='lo')"
+        )
+    }
+    resp = _raw_post(client_factory, f"/blueprints/{blueprint_id}/qe", qe)
+    items = resp.get("items", []) if resp else []
+    if items:
+        lo = items[0].get("lo", {})
+        return {
+            "node_id": lo.get("id"),
+            "ipv4_addr": lo.get("ipv4_addr"),
+            "ipv6_addr": lo.get("ipv6_addr"),
+        }
+    return None
+
+
+def create_or_update_loopback(
+    client_factory, blueprint_id, sys_id, ipv4=None, ipv6=None
+):
+    """Create or update a loopback interface on a generic system.
+
+    Uses the blueprint graph-mutation PATCH API to create an interface
+    node (``type=interface``, ``if_type=loopback``) and a
+    ``hosted_interfaces`` relationship.  If a loopback already exists,
+    updates the IP addresses on the existing node.
+
+    Args:
+        client_factory: An ``ApstraClientFactory`` instance.
+        blueprint_id: The blueprint UUID.
+        sys_id: The system node UUID.
+        ipv4: Optional IPv4 CIDR address for the loopback.
+        ipv6: Optional IPv6 CIDR address for the loopback.
+
+    Returns:
+        str: The loopback node ID.
+    """
+    existing = get_system_loopback(client_factory, blueprint_id, sys_id)
+
+    if existing and existing.get("node_id"):
+        # Update existing loopback interface node
+        lo_patch = {}
+        if ipv4 is not None and existing.get("ipv4_addr") != ipv4:
+            lo_patch["ipv4_addr"] = ipv4
+            lo_patch["ipv4_enabled"] = True
+        if ipv6 is not None and existing.get("ipv6_addr") != ipv6:
+            lo_patch["ipv6_addr"] = ipv6
+            lo_patch["ipv6_enabled"] = True
+        if lo_patch:
+            _patch_node(client_factory, blueprint_id, existing["node_id"], lo_patch)
+        return existing["node_id"]
+    else:
+        # Create new loopback via graph-mutation PATCH
+        sys_node = _get_node(client_factory, blueprint_id, sys_id)
+        label = sys_node.get("label", sys_id) if sys_node else sys_id
+        lo_node_id = f"{label}_loopback"
+        rel_id = f"{label}_loopback_hosted"
+
+        node_props = {
+            "type": "interface",
+            "if_type": "loopback",
+            "loopback_id": 0,
+            "ipv4_enabled": False,
+            "ipv6_enabled": False,
+            "operation_state": "up",
+        }
+        if ipv4:
+            node_props["ipv4_addr"] = ipv4
+            node_props["ipv4_enabled"] = True
+        if ipv6:
+            node_props["ipv6_addr"] = ipv6
+            node_props["ipv6_enabled"] = True
+
+        body = {
+            "nodes": {
+                lo_node_id: node_props,
+            },
+            "relationships": {
+                rel_id: {
+                    "type": "hosted_interfaces",
+                    "source_id": sys_id,
+                    "target_id": lo_node_id,
+                }
+            },
+        }
+        _raw_patch(client_factory, f"/blueprints/{blueprint_id}", body)
+        return lo_node_id
