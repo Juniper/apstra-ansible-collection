@@ -1,0 +1,353 @@
+---
+################################################################################
+# Rollback Integration Tests
+#
+# Validates:
+# - Listing blueprint revisions
+# - Rolling back a blueprint to a specific revision
+# - Reverting a blueprint to the latest backup
+# - Error handling for invalid inputs
+#
+# Prerequisites:
+# - A blueprint with at least one committed revision must exist.
+#   Pass its ID via BLUEPRINT_ID variable or the test will auto-discover one.
+#
+# Test Flow:
+# - Test 1: List Revisions
+# - Test 2: Rollback to a Specific Revision
+# - Test 3: Revert uncommitted changes (add PS to blueprint, then revert)
+# - Test 4: Error Handling (missing blueprint, missing revision_id)
+################################################################################
+
+- name: Rollback Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  vars:
+    test_timestamp: "{{ ansible_date_time.epoch }}"
+    test_results: []
+    # Callers can pass -e blueprint_id=<id> to target a specific blueprint.
+    # If omitted the test will auto-discover a blueprint with revisions.
+    blueprint_id: ""
+
+  tasks:
+    - name: Initialize test results tracker
+      ansible.builtin.set_fact:
+        test_results: []
+
+    - name: Authenticate to Apstra server
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    ################################################################################
+    # Setup: Discover or validate blueprint with revisions
+    ################################################################################
+
+    - name: Auto-discover blueprint with revisions
+      when: blueprint_id == ''
+      block:
+        - name: List all blueprints
+          juniper.apstra.apstra_facts:
+            object_type: blueprints
+            auth_token: "{{ auth.token }}"
+          register: all_bps
+
+        - name: Select first blueprint
+          ansible.builtin.set_fact:
+            blueprint_id: "{{ all_bps.objects[0].id }}"
+          when: all_bps.objects | length > 0
+
+    - name: Fail if no blueprint available
+      ansible.builtin.fail:
+        msg: "No blueprint found. Provide one with -e blueprint_id=<id>"
+      when: blueprint_id == ''
+
+    - name: Display target blueprint
+      ansible.builtin.debug:
+        msg: "Testing rollback on blueprint {{ blueprint_id }}"
+
+    ################################################################################
+    # TEST 1: List Revisions
+    ################################################################################
+
+    - name: "TEST 1: List Revisions"
+      block:
+        - name: List revisions for blueprint
+          juniper.apstra.rollback:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            state: listed
+            auth_token: "{{ auth.token }}"
+          register: revisions_result
+
+        - name: Verify revisions listed
+          ansible.builtin.assert:
+            that:
+              - not revisions_result.changed
+              - revisions_result.revisions is defined
+              - revisions_result.revisions | length > 0
+              - revisions_result.revisions[0].revision_id is defined
+              - revisions_result.revisions[0].created_at is defined
+
+        - name: Display available revisions
+          ansible.builtin.debug:
+            msg: "Found {{ revisions_result.revisions | length }} revisions"
+
+        - name: Store first revision ID for rollback test
+          ansible.builtin.set_fact:
+            first_revision_id: "{{ revisions_result.revisions[0].revision_id }}"
+
+        - name: Record TEST 1 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: List Revisions',
+                'status': 'PASSED',
+                'steps': [
+                  'List revisions for blueprint',
+                  'Verify revisions returned with expected fields',
+                  'Store first revision ID for subsequent tests'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 1 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: List Revisions',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error')
+              }] }}
+
+    ################################################################################
+    # TEST 2: Rollback to a Specific Revision
+    ################################################################################
+
+    - name: "TEST 2: Rollback to a Specific Revision"
+      block:
+        - name: Rollback blueprint to first revision
+          juniper.apstra.rollback:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            body:
+              revision_id: "{{ first_revision_id }}"
+            state: rolledback
+            auth_token: "{{ auth.token }}"
+          register: rollback_result
+
+        - name: Verify rollback succeeded
+          ansible.builtin.assert:
+            that:
+              - rollback_result.changed
+              - rollback_result.revision_id == first_revision_id
+              - rollback_result.msg is search("rolled back")
+
+        - name: Record TEST 2 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: Rollback to a Specific Revision',
+                'status': 'PASSED',
+                'steps': [
+                  'Rollback blueprint to first revision',
+                  'Verify rollback: changed=true, revision_id correct'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 2 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: Rollback to a Specific Revision',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error')
+              }] }}
+
+    ################################################################################
+    # TEST 3: Revert to Latest Backup
+    ################################################################################
+
+    - name: "TEST 3: Revert uncommitted changes"
+      block:
+        - name: Create a global property set for blueprint import
+          juniper.apstra.property_set:
+            body:
+              label: "test_rollback_ps_{{ test_timestamp }}"
+              values:
+                rollback_key: "should_be_reverted"
+            auth_token: "{{ auth.token }}"
+          register: revert_ps
+
+        - name: Import property set into blueprint (uncommitted change)
+          juniper.apstra.property_set:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            body:
+              id: "{{ revert_ps.id.property_set }}"
+            auth_token: "{{ auth.token }}"
+          register: ps_import
+
+        - name: Verify import succeeded (change was applied)
+          ansible.builtin.assert:
+            that:
+              - ps_import.changed
+
+        - name: Revert blueprint to undo the uncommitted import
+          juniper.apstra.rollback:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            state: reverted
+            auth_token: "{{ auth.token }}"
+          register: revert_result
+
+        - name: Verify revert succeeded
+          ansible.builtin.assert:
+            that:
+              - revert_result.changed
+              - revert_result.msg is search("reverted")
+
+        - name: Record TEST 3 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: Revert uncommitted changes',
+                'status': 'PASSED',
+                'steps': [
+                  'Create global property set',
+                  'Import property set into blueprint (uncommitted change)',
+                  'Revert blueprint to undo the import',
+                  'Verify revert: changed=true'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 3 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: Revert uncommitted changes',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error')
+              }] }}
+
+      always:
+        - name: Cleanup global property set
+          juniper.apstra.property_set:
+            id:
+              property_set: "{{ revert_ps.id.property_set }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          ignore_errors: true
+          when: revert_ps.id.property_set is defined
+
+    ################################################################################
+    # TEST 4: Error Handling
+    ################################################################################
+
+    - name: "TEST 4: Error Handling"
+      block:
+        - name: Rollback without revision_id (should fail)
+          juniper.apstra.rollback:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            state: rolledback
+            auth_token: "{{ auth.token }}"
+          register: no_revision_result
+          ignore_errors: true
+
+        - name: Verify missing revision_id error
+          ansible.builtin.assert:
+            that:
+              - no_revision_result.failed
+              - no_revision_result.msg is search("revision_id")
+
+        - name: Rollback with invalid revision_id (should fail)
+          juniper.apstra.rollback:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            body:
+              revision_id: "invalid-nonexistent-revision"
+            state: rolledback
+            auth_token: "{{ auth.token }}"
+          register: invalid_revision_result
+          ignore_errors: true
+
+        - name: Verify invalid revision_id error
+          ansible.builtin.assert:
+            that:
+              - invalid_revision_result.failed
+
+        - name: Rollback with non-existent blueprint (should fail)
+          juniper.apstra.rollback:
+            id:
+              blueprint: "non-existent-blueprint-{{ test_timestamp }}"
+            state: listed
+            auth_token: "{{ auth.token }}"
+          register: bad_bp_result
+          ignore_errors: true
+
+        - name: Verify non-existent blueprint error
+          ansible.builtin.assert:
+            that:
+              - bad_bp_result.failed
+
+        - name: Record TEST 4 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: Error Handling',
+                'status': 'PASSED',
+                'steps': [
+                  'Rollback without revision_id (fails as expected)',
+                  'Rollback with invalid revision_id (fails as expected)',
+                  'Rollback with non-existent blueprint (fails as expected)'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 4 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: Error Handling',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error')
+              }] }}
+
+    ################################################################################
+    # Summary
+    ################################################################################
+
+    - name: Logout from Apstra server
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+
+    - name: Calculate test statistics
+      ansible.builtin.set_fact:
+        tests_passed: "{{ test_results | selectattr('status', 'equalto', 'PASSED') | list | length }}"
+        tests_failed: "{{ test_results | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        tests_total: "{{ test_results | length }}"
+
+    - name: Display each test result
+      ansible.builtin.debug:
+        msg: |
+          {{ '✅' if item.status == 'PASSED' else '❌' }} {{ item.test }}: {{ item.status }}{{ ' - ' + item.error if item.error is defined else '' }}
+          {% for step in item.steps | default([]) %}
+              • {{ step }}
+          {% endfor %}
+      loop: "{{ test_results }}"
+      loop_control:
+        label: "{{ item.test }}"
+
+    - name: Display Test Summary
+      ansible.builtin.debug:
+        msg: "Tests: {{ tests_total }} | Passed: {{ tests_passed }} | Failed: {{ tests_failed }}"
+
+    - name: Fail playbook if any tests failed
+      ansible.builtin.fail:
+        msg: "{{ tests_failed }} of {{ tests_total }} tests failed. See summary above for details."
+      when: tests_failed | int > 0
