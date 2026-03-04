@@ -257,19 +257,21 @@
 
     - name: "TEST 1 - Create generic system with a single link"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-gs-leaf-01"
-        hostname: "cust-gs-leaf-01"
-        tags:
-          - "server"
-          - "test"
-        deploy_mode: "deploy"
-        links:
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_1 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-gs-leaf-01"
+          hostname: "cust-gs-leaf-01"
+          tags:
+            - "server"
+            - "test"
+          deploy_mode: "deploy"
+          links:
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_1 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_create
@@ -299,19 +301,21 @@
 
     - name: "TEST 2 - Create same generic system again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-gs-leaf-01"
-        hostname: "cust-gs-leaf-01"
-        tags:
-          - "server"
-          - "test"
-        deploy_mode: "deploy"
-        links:
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_1 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-gs-leaf-01"
+          hostname: "cust-gs-leaf-01"
+          tags:
+            - "server"
+            - "test"
+          deploy_mode: "deploy"
+          links:
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_1 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_create_idem
@@ -329,13 +333,15 @@
 
     - name: "TEST 3 - Update generic system hostname and name"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        name: "cust-gs-leaf-01-updated"
-        hostname: "cust-gs-leaf-01-updated"
-        tags:
-          - "server"
-          - "test"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          name: "cust-gs-leaf-01-updated"
+          hostname: "cust-gs-leaf-01-updated"
+          tags:
+            - "server"
+            - "test"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_update
@@ -360,13 +366,15 @@
 
     - name: "TEST 4 - Update with same values (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        name: "cust-gs-leaf-01-updated"
-        hostname: "cust-gs-leaf-01-updated"
-        tags:
-          - "server"
-          - "test"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          name: "cust-gs-leaf-01-updated"
+          hostname: "cust-gs-leaf-01-updated"
+          tags:
+            - "server"
+            - "test"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_update_idem
@@ -384,9 +392,11 @@
 
     - name: "TEST 5 - Change deploy mode to ready"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        deploy_mode: "ready"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          deploy_mode: "ready"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_deploy_mode
@@ -405,12 +415,14 @@
 
     - name: "TEST 6 - Update tags"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        tags:
-          - "server"
-          - "test"
-          - "updated"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          tags:
+            - "server"
+            - "test"
+            - "updated"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_tags_update
@@ -429,8 +441,9 @@
 
     - name: "TEST 7 - Delete generic system"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: gs_delete
@@ -448,8 +461,9 @@
 
     - name: "TEST 8 - Delete same system again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: gs_delete_idem
@@ -467,25 +481,27 @@
 
     - name: "TEST 9 - Create generic system with dual LAG links"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-lag-server"
-        hostname: "cust-lag-server"
-        tags:
-          - "server"
-          - "lag"
-        links:
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_2 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_3 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-lag-server"
+          hostname: "cust-lag-server"
+          tags:
+            - "server"
+            - "lag"
+          links:
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_2 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_3 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
         state: present
         auth_token: "{{ auth.token }}"
       register: lag_gs_create
@@ -509,25 +525,27 @@
 
     - name: "TEST 10 - Create same LAG system again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-lag-server"
-        hostname: "cust-lag-server"
-        tags:
-          - "server"
-          - "lag"
-        links:
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_2 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_3 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-lag-server"
+          hostname: "cust-lag-server"
+          tags:
+            - "server"
+            - "lag"
+          links:
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_2 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_3 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
         state: present
         auth_token: "{{ auth.token }}"
       register: lag_gs_idem
@@ -545,8 +563,9 @@
 
     - name: "TEST 11 - Delete LAG generic system"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ lag_system_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ lag_system_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: lag_gs_delete
@@ -564,16 +583,18 @@
 
     - name: "TEST 12 - Create external generic system linked to spine"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-ext-gs-01"
-        hostname: "cust-ext-gs-01"
-        external: true
-        links:
-          - target_switch_id: "{{ target_spine_id }}"
-            target_switch_if_name: "{{ test_spine_if_1 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-ext-gs-01"
+          hostname: "cust-ext-gs-01"
+          external: true
+          links:
+            - target_switch_id: "{{ target_spine_id }}"
+              target_switch_if_name: "{{ test_spine_if_1 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_create
@@ -601,16 +622,18 @@
 
     - name: "TEST 13 - Create same external GS again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-ext-gs-01"
-        hostname: "cust-ext-gs-01"
-        external: true
-        links:
-          - target_switch_id: "{{ target_spine_id }}"
-            target_switch_if_name: "{{ test_spine_if_1 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-ext-gs-01"
+          hostname: "cust-ext-gs-01"
+          external: true
+          links:
+            - target_switch_id: "{{ target_spine_id }}"
+              target_switch_if_name: "{{ test_spine_if_1 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_idem
@@ -628,10 +651,12 @@
 
     - name: "TEST 14 - Update external GS hostname"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        name: "cust-ext-gs-01-updated"
-        hostname: "cust-ext-gs-01-updated"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          name: "cust-ext-gs-01-updated"
+          hostname: "cust-ext-gs-01-updated"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_update
@@ -650,10 +675,12 @@
 
     - name: "TEST 15 - Update external GS with same values (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        name: "cust-ext-gs-01-updated"
-        hostname: "cust-ext-gs-01-updated"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          name: "cust-ext-gs-01-updated"
+          hostname: "cust-ext-gs-01-updated"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_update_idem
@@ -671,9 +698,11 @@
 
     - name: "TEST 16 - Delete external GS"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        external: true
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          external: true
         state: absent
         auth_token: "{{ auth.token }}"
       register: ext_gs_delete
@@ -691,9 +720,11 @@
 
     - name: "TEST 17 - Delete same external GS again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        external: true
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          external: true
         state: absent
         auth_token: "{{ auth.token }}"
       register: ext_gs_delete_idem
@@ -711,21 +742,25 @@
 
     - name: Create generic system for name-based deletion test
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-gs-delete-by-name"
-        hostname: "cust-gs-delete-by-name"
-        links:
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_4 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-gs-delete-by-name"
+          hostname: "cust-gs-delete-by-name"
+          links:
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_4 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_for_name_delete
 
     - name: "TEST 18 - Delete generic system by name"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "cust-gs-delete-by-name"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "cust-gs-delete-by-name"
         state: absent
         auth_token: "{{ auth.token }}"
       register: gs_name_delete
@@ -743,9 +778,11 @@
 
     - name: "TEST 19 - Create without links or external (should fail)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "should-fail-no-links"
-        hostname: "should-fail-no-links"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "should-fail-no-links"
+          hostname: "should-fail-no-links"
         state: present
         auth_token: "{{ auth.token }}"
       register: no_links_result
@@ -760,16 +797,18 @@
 
     - name: "TEST 20 - Duplicate link endpoints (should fail)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "should-fail-dup-links"
-        hostname: "should-fail-dup-links"
-        links:
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_1 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
-          - target_switch_id: "{{ target_leaf_id }}"
-            target_switch_if_name: "{{ test_leaf_if_1 }}"
-            target_switch_if_transform_id: "{{ if_transform_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "should-fail-dup-links"
+          hostname: "should-fail-dup-links"
+          links:
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_1 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
+            - target_switch_id: "{{ target_leaf_id }}"
+              target_switch_if_name: "{{ test_leaf_if_1 }}"
+              target_switch_if_transform_id: "{{ if_transform_id }}"
         state: present
         auth_token: "{{ auth.token }}"
       register: dup_links_result

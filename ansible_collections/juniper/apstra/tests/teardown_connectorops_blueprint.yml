@@ -1,0 +1,353 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# Teardown ConnectorOps Blueprint
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Deletes all resources created by create_connectorops_blueprint.yml:
+#   1. Blueprint (releases all device assignments)
+#   2. System agents (releases managed devices)
+#   3. Resource pools (ASN + IP)
+#   4. Design elements (template → rack type → logical device)
+#
+# Usage:
+#   make teardown-connectorops-blueprint TESTBED_FILE=/path/to/testbed.yaml
+#   # or directly:
+#   ansible-playbook tests/teardown_connectorops_blueprint.yml \
+#     -e testbed_file=/path/to/testbed.yaml
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+- name: Teardown ConnectorOps Blueprint
+  hosts: localhost
+  gather_facts: false
+  vars:
+    verify_certs: false
+
+  tasks:
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 0: Load Testbed & Derive Variables
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 0a — Load testbed configuration"
+      ansible.builtin.include_vars:
+        file: "{{ testbed_file }}"
+        name: testbed_raw
+
+    - name: "Phase 0b — Set testbed shorthand"
+      ansible.builtin.set_fact:
+        tb: "{{ testbed_raw.testbeds.apstra.testbed1 }}"
+
+    - name: "Phase 0c — Derive AOS credentials and topology from testbed"
+      ansible.builtin.set_fact:
+        api_url: "https://{{ tb.aos.ip }}/api"
+        aos_username: "{{ tb.aos.username }}"
+        aos_password: "{{ tb.aos.password }}"
+        topo_name: "{{ (tb.topologies | dict2items | first).key }}"
+        topo: "{{ (tb.topologies | dict2items | first).value }}"
+
+    - name: "Phase 0d — Set blueprint label"
+      ansible.builtin.set_fact:
+        blueprint_label: "{{ topo_name }}"
+
+    - name: "Phase 0e — Load design model definitions"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/design_models.yml"
+
+    - name: Display teardown target
+      ansible.builtin.debug:
+        msg: >-
+          Tearing down blueprint '{{ blueprint_label }}' on {{ api_url }}
+          (template: {{ (design_templates | dict2items | first).key }},
+           rack: {{ (rack_types | dict2items | first).key }},
+           logical_device: {{ (logical_devices | dict2items | first).key }})
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 1: Authentication
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 1 — Authenticate to Apstra"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: "Phase 1 — Store auth token"
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 2: Find the blueprint
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 2 — Discover blueprints"
+      juniper.apstra.apstra_facts:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+      register: facts_result
+
+    - name: "Phase 2 — Find target blueprint"
+      ansible.builtin.set_fact:
+        target_bp: >-
+          {{ facts_result.ansible_facts.apstra_facts.blueprints
+             | dict2items
+             | selectattr('value.label', 'equalto', blueprint_label)
+             | list
+             | first
+             | default(None) }}
+      ignore_errors: true
+
+    - name: "Phase 2 — Extract blueprint ID"
+      ansible.builtin.set_fact:
+        bp_id: "{{ target_bp.key | default('') }}"
+      when: target_bp is defined and target_bp is not none and target_bp != 'None'
+
+    - name: "Phase 2 — Blueprint not found, skip blueprint deletion"
+      ansible.builtin.debug:
+        msg: "Blueprint '{{ blueprint_label }}' not found, skipping blueprint deletion."
+      when: bp_id is not defined or bp_id == ''
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 3: Delete Blueprint
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 3 — Delete blueprint '{{ blueprint_label }}'"
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ bp_id }}"
+        state: absent
+      register: bp_delete_result
+      when: bp_id is defined and bp_id != ''
+
+    - name: "Phase 3 — Blueprint deletion result"
+      ansible.builtin.debug:
+        msg: "{{ bp_delete_result.msg | default('Blueprint deleted') }}"
+      when: bp_delete_result is defined and bp_delete_result is not skipped
+
+    # Wait for blueprint deletion to propagate
+    - name: "Phase 3 — Wait for deletion to propagate"
+      ansible.builtin.pause:
+        seconds: 10
+      when: bp_id is defined and bp_id != ''
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 3.5: Uninstall Agents (before deletion)
+    # ═════════════════════════════════════════════════════════════════════════
+    # Agents must be uninstalled before they can be cleanly deleted.
+    # POST /api/system-agents/{id}/uninstall-agent — 409 if already stopped.
+
+    - name: "Phase 3.5 — Gather agents for uninstall"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/system-agents"
+        method: GET
+        headers:
+          AuthToken: "{{ token }}"
+        validate_certs: "{{ verify_certs }}"
+        return_content: true
+      register: _agents_raw
+
+    - name: "Phase 3.5 — Build agent ID list"
+      ansible.builtin.set_fact:
+        _agent_ids: >-
+          {{ _agents_raw.json['items']
+             | default([])
+             | map(attribute='id')
+             | list }}
+
+    - name: "Phase 3.5 — Uninstall agents ({{ _agent_ids | length }} found)"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/system-agents/{{ item }}/uninstall-agent"
+        method: POST
+        headers:
+          AuthToken: "{{ token }}"
+        validate_certs: "{{ verify_certs }}"
+        status_code: [200, 202, 409]
+      loop: "{{ _agent_ids }}"
+      loop_control:
+        label: "agent {{ item }}"
+      ignore_errors: true
+      when: _agent_ids | length > 0
+
+    - name: "Phase 3.5 — Wait for agents to fully stop"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/system-agents"
+        method: GET
+        headers:
+          AuthToken: "{{ token }}"
+        validate_certs: "{{ verify_certs }}"
+        return_content: true
+      register: _agents_poll
+      until: >-
+        (_agents_poll.json['items'] | default([])
+         | selectattr('connection_state', 'defined')
+         | selectattr('connection_state', 'equalto', 'connected')
+         | list | length) == 0
+      retries: 12
+      delay: 10
+      when: _agent_ids | length > 0
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 4: Delete System Agents
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 4 — Gather all system agents"
+      juniper.apstra.system_agents:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        state: gathered
+      register: all_agents
+
+    - name: "Phase 4 — Delete system agents"
+      juniper.apstra.system_agents:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          agent_id: "{{ item.agent_id }}"
+        state: absent
+      loop: "{{ all_agents.agents | default([]) }}"
+      loop_control:
+        label: "{{ item.management_ip | default(item.agent_id) }}"
+      register: agent_delete_results
+      ignore_errors: true
+      when: all_agents.agents | default([]) | length > 0
+
+    - name: "Phase 4 — Agent deletion summary"
+      ansible.builtin.debug:
+        msg: "Deleted {{ all_agents.agents | default([]) | length }} system agents"
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 5: Delete Resource Pools
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 5a — Delete ASN pool"
+      juniper.apstra.resource_pools:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        type: asn
+        id: {}
+        body:
+          display_name: "{{ blueprint_label }}_asn_pool"
+        state: absent
+      register: asn_delete
+      ignore_errors: true
+
+    - name: "Phase 5b — Delete IP pool"
+      juniper.apstra.resource_pools:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        type: ip
+        id: {}
+        body:
+          display_name: "{{ blueprint_label }}_ip_pool"
+        state: absent
+      register: ip_delete
+      ignore_errors: true
+
+    - name: "Phase 5 — Resource pool deletion summary"
+      ansible.builtin.debug:
+        msg: >-
+          ASN pool: {{ asn_delete.msg | default('deleted') }} |
+          IP pool: {{ ip_delete.msg | default('deleted') }}
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 6: Delete Design Elements (reverse order)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 6a — Delete design templates"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: template
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ design_templates | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: template_delete
+      ignore_errors: true
+
+    - name: "Phase 6b — Delete rack types"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: rack_type
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ rack_types | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: rack_delete
+      ignore_errors: true
+
+    - name: "Phase 6c — Delete interface maps"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/design/interface-maps/simple_dc_vjunos_ifmap"
+        method: DELETE
+        headers:
+          AuthToken: "{{ token }}"
+        validate_certs: "{{ verify_certs }}"
+        status_code: [200, 202, 204, 404]
+      register: ifmap_delete
+      ignore_errors: true
+
+    - name: "Phase 6d — Delete logical devices"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: logical_device
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ logical_devices | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: ld_delete
+      ignore_errors: true
+
+    - name: "Phase 6 — Design element deletion summary"
+      ansible.builtin.debug:
+        msg: >-
+          Templates: {{ template_delete.results | map(attribute='changed') | list }} |
+          Rack Types: {{ rack_delete.results | map(attribute='changed') | list }} |
+          Interface Map: {{ ifmap_delete.status | default('skipped') }} |
+          Logical Devices: {{ ld_delete.results | map(attribute='changed') | list }}
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Phase 7: Logout
+    # ═════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 7 — Logout from Apstra"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        logout: true
+      register: logout_result
+      ignore_errors: true
+
+    - name: "Teardown Complete"
+      ansible.builtin.debug:
+        msg: >-
+          ═══════════════════════════════════════════════════════════════
+          TEARDOWN COMPLETE: '{{ blueprint_label }}'
+          - Blueprint: DELETED
+          - System Agents: {{ _agent_ids | default([]) | length }} uninstalled,
+            {{ all_agents.agents | default([]) | length }} deleted
+          - Resource Pools: ASN + IP deleted
+          - Design Elements: template + rack type + interface map + logical device deleted
+          ═══════════════════════════════════════════════════════════════
