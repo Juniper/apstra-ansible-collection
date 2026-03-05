@@ -179,9 +179,15 @@ options:
       - C(gathered) lists all agents and returns their details
         including system_id (device serial number). Useful for
         building device-to-serial mappings without raw API calls.
+      - C(installed) triggers install-agent on agents whose containers
+        are not yet running. Accepts C(body.wait_for_connection) and
+        C(body.wait_timeout) to poll until all agents reach connected.
+      - C(acknowledged) discovers unacknowledged (OOS-QUARANTINED)
+        systems and approves them (sets admin_state=normal) so they
+        become OOS-READY for blueprint assignment.
     type: str
     required: false
-    choices: ["present", "absent", "gathered"]
+    choices: ["present", "absent", "gathered", "installed", "acknowledged"]
     default: "present"
 """
 
@@ -271,7 +277,22 @@ EXAMPLES = """
                | selectattr('system_id')
                | map(attribute='system_id'))
          | list) }}
-"""
+# ── Trigger install-agent + wait for all agents to connect ────
+
+- name: Install agents and wait for connection
+  juniper.apstra.system_agents:
+    body:
+      wait_for_connection: true
+      wait_timeout: 180
+    state: installed
+  register: install_result
+
+# ── Acknowledge unacknowledged devices ────────────────────────
+
+- name: Acknowledge all quarantined devices
+  juniper.apstra.system_agents:
+    state: acknowledged
+  register: ack_result"""
 
 RETURN = """
 changed:
@@ -318,6 +339,20 @@ msg:
   description: The output message that the module generates.
   type: str
   returned: always
+installed_agents:
+  description:
+    - List of agent IDs that had install-agent triggered.
+    - Only returned when C(state=installed).
+  type: list
+  elements: str
+  returned: when state=installed
+acknowledged_systems:
+  description:
+    - List of device_key values that were acknowledged.
+    - Only returned when C(state=acknowledged).
+  type: list
+  elements: str
+  returned: when state=acknowledged
 """
 
 
@@ -651,6 +686,154 @@ def _handle_gathered(module, client_factory):
     )
 
 
+def _handle_installed(module, client_factory):
+    """Handle state=installed — trigger install-agent for non-running agents.
+
+    1. Lists all agents via the SDK.
+    2. For each agent whose container_status.status != 'running',
+       POST /api/system-agents/{id}/install-agent (409 = already running, OK).
+    3. If body.wait_for_connection is true, polls until all agents are connected.
+
+    Returns the list of agent IDs that had install triggered.
+    """
+    body = module.params.get("body") or {}
+    wait = body.get("wait_for_connection", False)
+    wait_timeout = body.get("wait_timeout", 180)
+
+    base = _get_base_client(client_factory)
+    agents = _list_agents(client_factory)
+
+    # Find agents that need install
+    need_install = []
+    for agent in agents:
+        container = agent.get("container_status", {})
+        if container.get("status") != "running":
+            need_install.append(agent.get("id"))
+
+    # Trigger install-agent for each
+    installed = []
+    for agent_id in need_install:
+        try:
+            base.raw_request(
+                f"/api/system-agents/{agent_id}/install-agent",
+                "POST",
+                data={},
+            )
+            installed.append(agent_id)
+        except Exception as exc:
+            # 409 = already running an install job — that's fine
+            if "409" in str(exc):
+                installed.append(agent_id)
+            else:
+                raise
+
+    changed = len(installed) > 0
+
+    # Optionally wait for all agents to connect
+    if wait:
+        deadline = time.time() + wait_timeout
+        while time.time() < deadline:
+            current = _list_agents(client_factory)
+            not_connected = [
+                a.get("id")
+                for a in current
+                if a.get("status", {}).get("connection_state") != "connected"
+            ]
+            if not not_connected:
+                break
+            time.sleep(15)
+        else:
+            # Timed out — gather final state for reporting
+            current = _list_agents(client_factory)
+            not_connected = [
+                a.get("config", {}).get("label", a.get("id"))
+                for a in current
+                if a.get("status", {}).get("connection_state") != "connected"
+            ]
+            if not_connected:
+                raise TimeoutError(
+                    f"Agents not connected after {wait_timeout}s: " f"{not_connected}"
+                )
+
+    # Gather final agent summary
+    final_agents = _list_agents(client_factory)
+    result_agents = []
+    for agent in final_agents:
+        config = agent.get("config", {})
+        status = agent.get("status", {})
+        result_agents.append(
+            {
+                "agent_id": agent.get("id", ""),
+                "label": config.get("label", ""),
+                "management_ip": config.get("management_ip", ""),
+                "system_id": status.get("system_id", ""),
+                "connection_state": status.get("connection_state", ""),
+            }
+        )
+
+    return dict(
+        changed=changed,
+        installed_agents=installed,
+        agents=result_agents,
+        msg=(
+            f"install-agent triggered for {len(installed)} agent(s), "
+            f"{len(result_agents)} total"
+        ),
+    )
+
+
+def _handle_acknowledged(module, client_factory):
+    """Handle state=acknowledged — acknowledge unacknowledged devices.
+
+    1. GET /api/systems — list all systems.
+    2. Find systems where status.is_acknowledged == false.
+    3. PUT /api/systems/{device_key} with admin_state=normal.
+
+    Returns the list of device_keys that were acknowledged.
+    """
+    base = _get_base_client(client_factory)
+
+    # List all systems
+    resp = base.raw_request("/api/systems")
+    if resp.status_code != 200:
+        raise Exception(f"GET /api/systems failed: {resp.status_code} {resp.text}")
+    try:
+        systems_data = resp.json()
+    except Exception:
+        systems_data = {}
+    all_systems = systems_data.get("items", [])
+
+    # Find unacknowledged
+    need_ack = [
+        s for s in all_systems if not s.get("status", {}).get("is_acknowledged", True)
+    ]
+
+    acknowledged = []
+    for system in need_ack:
+        device_key = system.get("device_key")
+        if not device_key:
+            continue
+        facts = system.get("facts", {})
+        ack_body = {
+            "user_config": {
+                "admin_state": "normal",
+                "aos_hcl_model": facts.get("aos_hcl_model", ""),
+            }
+        }
+        resp = base.raw_request(f"/api/systems/{device_key}", "PUT", data=ack_body)
+        if resp.status_code == 200:
+            acknowledged.append(device_key)
+
+    return dict(
+        changed=len(acknowledged) > 0,
+        acknowledged_systems=acknowledged,
+        msg=(
+            f"{len(acknowledged)} device(s) acknowledged out of "
+            f"{len(need_ack)} unacknowledged"
+        ),
+    )
+
+
 def _handle_absent(module, client_factory):
     """Handle state=absent — delete."""
     id_param = module.params.get("id") or {}
@@ -690,7 +873,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent", "gathered"],
+            choices=["present", "absent", "gathered", "installed", "acknowledged"],
             default="present",
         ),
     )
@@ -711,6 +894,10 @@ def main():
             result = _handle_absent(module, client_factory)
         elif state == "gathered":
             result = _handle_gathered(module, client_factory)
+        elif state == "installed":
+            result = _handle_installed(module, client_factory)
+        elif state == "acknowledged":
+            result = _handle_acknowledged(module, client_factory)
 
     except Exception as e:
         tb = traceback.format_exc()
