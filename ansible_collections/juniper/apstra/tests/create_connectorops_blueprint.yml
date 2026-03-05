@@ -23,16 +23,13 @@
 #   0.  Load Testbed & Derive Variables
 #   1.  Authentication
 #   2.  Device Onboarding (system_agents)
-#   2a. Agent Install Trigger (install-agent API)
-#   2b. Wait for Agent Connection (poll until connected)
-#   2c. Acknowledge / Approve Devices (OOS-QUARANTINED → OOS-READY)
 #   2.5 Design Elements (logical devices, rack types, templates)
 #   3.  Blueprint Creation
 #   4.  Interface Map Assignment (interface_map)
 #   5.  System ID Assignment (blueprint node_updated)
 #   6.  Resource Pool Creation & Assignment
-#   7.  (merged into 8) — SRX setup includes first deploy
-#   8.  SRX External Router Setup + First Deploy (generic_systems)
+#   7.  First Deploy
+#   8.  SRX External Router Setup (generic_systems)
 #   9.  Remote Gateways (external_gateway)
 #   10. Routing Policy
 #   11. Fabric Settings (fabric_settings)
@@ -64,15 +61,18 @@
     # ═══════════════════════════════════════════════════════════════════════════
 
     - name: "Phase 0a — Load testbed configuration"
+      tags: [always]
       ansible.builtin.include_vars:
         file: "{{ testbed_file }}"
         name: testbed_raw
 
     - name: "Phase 0b — Set testbed shorthand"
+      tags: [always]
       ansible.builtin.set_fact:
         tb: "{{ testbed_raw.testbeds.apstra.testbed1 }}"
 
     - name: "Phase 0c — Derive AOS credentials and topology from testbed"
+      tags: [always]
       ansible.builtin.set_fact:
         aos_server: "{{ tb.aos.ip }}"
         aos_username: "{{ tb.aos.username }}"
@@ -85,6 +85,7 @@
         topo: "{{ tb.topologies[topology_name] }}"
 
     - name: "Phase 0d — Build devices dict from testbed nodes"
+      tags: [always]
       ansible.builtin.set_fact:
         devices: >-
           {{
@@ -100,6 +101,7 @@
         label: "{{ item.key }}"
 
     - name: "Phase 0e — Build bp_hosts dict from testbed wiring + VN config"
+      tags: [always]
       ansible.builtin.set_fact:
         bp_hosts: >-
           {{
@@ -117,6 +119,7 @@
         _suffix: "{{ item.key | regex_replace('^' ~ topology_name ~ '-', '') }}"
 
     - name: "Phase 0f — Build SRX nodes dict from testbed + app config"
+      tags: [always]
       ansible.builtin.set_fact:
         srx_nodes: >-
           {{
@@ -133,6 +136,7 @@
         _suffix: "{{ item.key | regex_replace('^' ~ topology_name ~ '-', '') }}"
 
     - name: Display derived configuration
+      tags: [always]
       ansible.builtin.debug:
         msg: >-
           Testbed: {{ aos_server }} |
@@ -146,6 +150,7 @@
     # Phase 1: Authentication
     # ═══════════════════════════════════════════════════════════════════════════
     - name: "Phase 1 — Authenticate to Apstra"
+      tags: [phase1_auth]
       juniper.apstra.authenticate:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -155,13 +160,18 @@
       register: auth
 
     - name: Set auth token fact
+      tags: [phase1_auth]
       ansible.builtin.set_fact:
         token: "{{ auth.token }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 2: Device Onboarding
+    # Onboards each device as an offbox agent, triggers agent installation
+    # (job_on_create: install), and waits up to 15 min for the agent container
+    # to reach "connected" state before proceeding.
     # ═══════════════════════════════════════════════════════════════════════════
-    - name: "Phase 2 — Onboard devices"
+    - name: "Phase 2 — Onboard devices and install agent"
+      tags: [phase2_onboard]
       juniper.apstra.system_agents:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -175,18 +185,17 @@
           device_username: "{{ device_username }}"
           device_password: "{{ device_password }}"
           job_on_create: "install"
+          wait_for_connection: true
+          wait_timeout: 900
         state: present
       loop: "{{ devices | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
       register: onboard_results
 
-    - name: Wait for devices to be acknowledged (30s)
-      ansible.builtin.wait_for:
-        timeout: 30
-
     # Collect agent info for system_id resolution later
     - name: Build agent ID map
+      tags: [phase2_onboard]
       ansible.builtin.set_fact:
         agent_map: >-
           {{
@@ -202,139 +211,38 @@
         label: "{{ item.item.key }}"
       when: item.agent_id is defined
 
-    # ───────────────────────────────────────────────────────────────────────────
-    # Phase 2a: Ensure all agents have install jobs running
-    # ───────────────────────────────────────────────────────────────────────────
-    # job_on_create only fires on the first POST.  On idempotent re-runs the
-    # agent already exists, so no install job is triggered.  We explicitly call
-    # POST /api/system-agents/{id}/install-agent for every agent whose
-    # container is not yet running.  A 409 ("already running a job") is fine.
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 2a: Acknowledge / Approve Devices
+    # After agent installation the devices appear in /api/systems as
+    # OOS-QUARANTINED.  Approve each unacknowledged system so it becomes
+    # OOS-READY and is available for blueprint assignment and deploy.
+    # ═══════════════════════════════════════════════════════════════════════════
 
-    - name: "Phase 2a — Gather current agent status"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/system-agents"
-        method: GET
-        headers:
-          AuthToken: "{{ token }}"
-        validate_certs: "{{ verify_certs }}"
-        return_content: true
-      register: _all_agents_raw
+    - name: "Phase 2a — Acknowledge quarantined devices"
+      tags: [phase2_onboard]
+      juniper.apstra.system_agents:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        state: acknowledged
+      register: ack_result
 
-    - name: "Phase 2a — Identify agents that need install"
-      ansible.builtin.set_fact:
-        _agents_need_install: >-
-          {{
-            _all_agents_raw.json["items"]
-            | selectattr('container_status.status', 'ne', 'running')
-            | map(attribute='id')
-            | list
-          }}
-
-    - name: "Phase 2a — Trigger install-agent for non-running agents"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/system-agents/{{ item }}/install-agent"
-        method: POST
-        headers:
-          AuthToken: "{{ token }}"
-        body_format: json
-        body: {}
-        validate_certs: "{{ verify_certs }}"
-        status_code: [200, 202, 409]
-      loop: "{{ _agents_need_install }}"
-      loop_control:
-        label: "{{ item[:12] }}"
-      when: _agents_need_install | length > 0
-
-    # ───────────────────────────────────────────────────────────────────────────
-    # Phase 2b: Wait for all agents to reach 'connected' state
-    # ───────────────────────────────────────────────────────────────────────────
-    # Poll every 15 seconds for up to 3 minutes until every agent's
-    # connection_state is 'connected'.  This ensures system_id (device serial)
-    # is populated before Phase 5 tries to assign it to blueprint nodes.
-
-    - name: "Phase 2b — Wait for all agents to connect (up to 180s)"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/system-agents"
-        method: GET
-        headers:
-          AuthToken: "{{ token }}"
-        validate_certs: "{{ verify_certs }}"
-        return_content: true
-      register: _agent_poll
-      until: >-
-        (_agent_poll.json["items"]
-         | selectattr('status.connection_state', 'ne', 'connected')
-         | list | length) == 0
-      retries: 12
-      delay: 15
-
-    - name: "Phase 2b — Display agent connection summary"
+    - name: "Phase 2a — Display acknowledgement summary"
+      tags: [phase2_onboard]
       ansible.builtin.debug:
-        msg: >-
-          All {{ _agent_poll.json["items"] | length }} agents connected.
-          System IDs:
-          {% for a in _agent_poll.json["items"] %}
-          {{ a.config.label }}: {{ a.status.system_id }}
-          {% endfor %}
-
-    # ───────────────────────────────────────────────────────────────────────────
-    # Phase 2c: Acknowledge / Approve Devices
-    # ───────────────────────────────────────────────────────────────────────────
-    # Newly onboarded devices start in OOS-QUARANTINED state.  Approve each
-    # unacknowledged system so it becomes OOS-READY and is available for
-    # blueprint assignment and deploy.  Uses PUT /api/systems/{device_key}
-    # with admin_state=normal.
-
-    - name: "Phase 2c — Gather all systems"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/systems"
-        method: GET
-        headers:
-          AuthToken: "{{ token }}"
-        validate_certs: "{{ verify_certs }}"
-        return_content: true
-      register: _all_systems_raw
-
-    - name: "Phase 2c — Identify unacknowledged systems"
-      ansible.builtin.set_fact:
-        _systems_need_ack: >-
-          {{ _all_systems_raw.json["items"]
-             | selectattr('status.is_acknowledged', 'equalto', false)
-             | list }}
-
-    - name: "Phase 2c — Acknowledge devices ({{ _systems_need_ack | length }} found)"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/systems/{{ item.device_key }}"
-        method: PUT
-        headers:
-          AuthToken: "{{ token }}"
-        validate_certs: "{{ verify_certs }}"
-        body_format: json
-        body:
-          user_config:
-            admin_state: "normal"
-            aos_hcl_model: "{{ item.facts.aos_hcl_model }}"
-        status_code: [200]
-      loop: "{{ _systems_need_ack }}"
-      loop_control:
-        label: "{{ item.device_key }} ({{ item.facts.aos_hcl_model }})"
-      when: _systems_need_ack | length > 0
-
-    - name: "Phase 2c — Verify all systems acknowledged"
-      ansible.builtin.debug:
-        msg: >-
-          {{ _systems_need_ack | length }} device(s) acknowledged.
-          All systems should now be OOS-READY.
+        msg: "{{ ack_result.msg }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 2.5: Design Elements (Logical Devices, Rack Types, Templates)
     # ═══════════════════════════════════════════════════════════════════════════
 
     - name: "Phase 2.5a — Load design model definitions"
+      tags: [phase3_design]
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/vars/design_models.yml"
 
     - name: "Phase 2.5b — Create logical devices"
+      tags: [phase3_design]
       juniper.apstra.design:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -350,6 +258,7 @@
       register: ld_results
 
     - name: "Phase 2.5c — Create rack types"
+      tags: [phase3_design]
       juniper.apstra.design:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -365,6 +274,7 @@
       register: rt_results
 
     - name: "Phase 2.5d — Create design templates"
+      tags: [phase3_design]
       juniper.apstra.design:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -380,85 +290,66 @@
       register: tm_results
 
     - name: Display design element results
+      tags: [phase3_design]
       ansible.builtin.debug:
         msg: >-
           Logical Devices: {{ ld_results.results | map(attribute='id') | list }} |
           Rack Types: {{ rt_results.results | map(attribute='id') | list }} |
           Templates: {{ tm_results.results | map(attribute='id') | list }}
 
-    - name: "Phase 2.5e — Check if interface map exists"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/design/interface-maps/simple_dc_vjunos_ifmap"
-        method: GET
-        headers:
-          AuthToken: "{{ token }}"
-        validate_certs: false
-        status_code: [200, 404]
-      register: ifmap_check
-
-    - name: "Phase 2.5e — Get device profile ports for interface map"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/device-profiles/vJunos-switch"
-        method: GET
-        headers:
-          AuthToken: "{{ token }}"
-        validate_certs: false
-      register: dp_result
-      when: ifmap_check.status == 404
-
-    - name: "Phase 2.5e — Build interface map port mappings"
-      ansible.builtin.set_fact:
-        _ifmap_interfaces: >-
-          {{ _ifmap_interfaces | default([]) + [{
-            'name': 'ge-0/0/' ~ idx,
-            'roles': ['superspine','unused','leaf','generic','peer','access','spine'],
-            'position': idx + 1,
-            'state': 'active',
-            'mapping': [port.port_id, port.transformations[0].transformation_id, 1, 1, idx + 1],
-            'speed': {'value': 1, 'unit': 'G'},
-            'setting': {'param': '{"global": {"speed": ""}, "interface": {"speed": ""}}'}
-          }] }}
-      loop: "{{ dp_result.json.ports }}"
-      loop_control:
-        index_var: idx
-        loop_var: port
-        label: "ge-0/0/{{ idx }}"
-      when: ifmap_check.status == 404
-      no_log: true
-
-    - name: "Phase 2.5e — Create interface map via API"
-      ansible.builtin.uri:
-        url: "{{ api_url }}/design/interface-maps"
-        method: POST
-        headers:
-          AuthToken: "{{ token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          id: "simple_dc_vjunos_ifmap"
-          label: "simple_dc_vjunos_ifmap"
-          logical_device_id: "simple_dc_vjunos_switch_96x1"
-          device_profile_id: "vJunos-switch"
-          interfaces: "{{ _ifmap_interfaces }}"
-        validate_certs: false
-        status_code: [200, 201]
-      register: ifmap_result
-      when: ifmap_check.status == 404
-
-    - name: Display interface map result
-      ansible.builtin.debug:
-        msg: "Interface Map: {{ (ifmap_check.status == 404) | ternary('created', 'already exists') }}"
-
     # Override template_id to the actual Apstra template name we just created.
     # The testbed blueprint_template is the blueprint label, not the template name.
-    - name: "Phase 2.5f — Set template_id to the first design template created"
+    - name: "Phase 2.5e — Set template_id to the first design template created"
+      tags: [phase3_design]
       ansible.builtin.set_fact:
         template_id: "{{ (design_templates | dict2items | first).key }}"
+
+    - name: "Phase 2.5f — Create interface maps"
+      tags: [phase4_interface_maps]
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: interface_map
+          name: "{{ item.key }}"
+        body: "{{ item.value }}"
+        state: present
+      loop: "{{ interface_maps | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: im_results
+
+    - name: "Phase 2.5g — Build interface map label-to-UUID lookup dict"
+      tags: [phase4_interface_maps]
+      ansible.builtin.set_fact:
+        _im_label_to_uuid: >-
+          {{ _im_label_to_uuid | default({}) | combine({item['id']['name']: item['data']['id']}) }}
+      loop: "{{ im_results.results }}"
+      loop_control:
+        label: "{{ item['id']['name'] }}"
+
+    - name: "Phase 2.5g — Debug interface map UUID lookup"
+      tags: [phase4_interface_maps]
+      ansible.builtin.debug:
+        msg: "Interface map UUID lookup: {{ _im_label_to_uuid }}"
+
+    - name: "Phase 2.5h — Set resolved interface map UUIDs (new vars to avoid extra-var precedence)"
+      tags: [phase4_interface_maps]
+      ansible.builtin.set_fact:
+        _spine_im_uuid: "{{ _im_label_to_uuid[spine_interface_map] }}"
+        _leaf_im_uuid: "{{ _im_label_to_uuid[leaf_interface_map] }}"
+
+    - name: "Phase 2.5h — Debug resolved interface map UUIDs"
+      tags: [phase4_interface_maps]
+      ansible.builtin.debug:
+        msg: "spine_im_uuid={{ _spine_im_uuid }} | leaf_im_uuid={{ _leaf_im_uuid }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 3: Blueprint Creation
     # ═══════════════════════════════════════════════════════════════════════════
     - name: "Phase 3 — Create blueprint: {{ blueprint_label }}"
+      tags: [phase5_blueprint]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -473,12 +364,30 @@
       register: bp_result
 
     - name: Set blueprint_id fact
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         blueprint_id: "{{ bp_result.id.blueprint }}"
 
     - name: Display blueprint ID
+      tags: [phase5_blueprint]
       ansible.builtin.debug:
         msg: "Blueprint created: {{ blueprint_id }}"
+
+    # -- Token refresh (design + blueprint creation can be slow) ---------------
+    - name: "Refresh auth token (before Phase 4)"
+      tags: [phase5_blueprint]
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: Update token fact
+      tags: [phase5_blueprint]
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 4: Interface Map Assignment
@@ -486,6 +395,7 @@
 
     # Discover system nodes in the blueprint
     - name: "Phase 4 — Query system nodes (spine & leaf)"
+      tags: [phase5_blueprint]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -500,15 +410,17 @@
       register: system_nodes_qe
 
     - name: Build node facts (label → id, role)
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         node_by_label: "{{ system_nodes_qe.nodes }}"
 
     - name: Build interface map assignments dict
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         im_assignments: >-
           {{
             im_assignments | default({}) | combine({
-              item.value.id: (item.value.role == 'spine') | ternary(spine_interface_map, leaf_interface_map)
+              item.value.id: (item.value.role == 'spine') | ternary(_spine_im_uuid, _leaf_im_uuid)
             })
           }}
       loop: "{{ node_by_label | dict2items }}"
@@ -516,6 +428,7 @@
         label: "{{ item.key }}"
 
     - name: Assign interface maps to all switch nodes
+      tags: [phase5_blueprint]
       juniper.apstra.interface_map:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -528,6 +441,7 @@
       register: imap_result
 
     - name: Display interface map result
+      tags: [phase5_blueprint]
       ansible.builtin.debug:
         msg: "Interface maps assigned. Changed: {{ imap_result.changed }}"
 
@@ -536,20 +450,23 @@
     # uses "vg-am-cops-tb-0-leaf3border".  We build a new node_by_label dict
     # keyed by full testbed device names so all subsequent phases work naturally.
 
-    - name: "Phase 4.5a — Check if node labels are already testbed-style"
+    - name: "Phase 4.5a — Check if nodes are already testbed-named"
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
-        _nodes_already_remapped: >-
-          {{ (node_by_label.keys() | select('match', '^' ~ topology_name ~ '-') | list | length) > 0 }}
-
-    - name: "Phase 4.5a2 — Discover rack prefix from blueprint labels"
-      ansible.builtin.set_fact:
+        _nodes_already_named: >-
+          {{ (topology_name ~ '-' ~ leaf_device_order[0]) in node_by_label }}
         _bp_nodes: "{{ node_by_label }}"
+
+    - name: "Phase 4.5a — Discover rack prefix from blueprint labels (fresh blueprint)"
+      tags: [phase5_blueprint]
+      ansible.builtin.set_fact:
         _rack_prefix: >-
           {{ (node_by_label.keys() | select('match', '.*_leaf1$') | first)
              | regex_replace('_leaf1$', '') }}
-      when: not _nodes_already_remapped | bool
+      when: not _nodes_already_named
 
     - name: "Phase 4.5b — Remap leaf nodes to testbed names"
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         _testbed_nodes: >-
           {{
@@ -560,10 +477,11 @@
       loop: "{{ leaf_device_order }}"
       loop_control:
         index_var: idx
-        label: "{{ item }} → {{ _rack_prefix | default('skipped') }}_leaf{{ idx + 1 }}"
-      when: not _nodes_already_remapped | bool
+        label: "{{ item }}"
+      when: not _nodes_already_named
 
     - name: "Phase 4.5c — Add spine mappings"
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         _testbed_nodes: >-
           {{
@@ -574,26 +492,18 @@
       loop:
         - spine1
         - spine2
-      when: not _nodes_already_remapped | bool
+      when: not _nodes_already_named
 
     - name: "Phase 4.5d — Apply testbed-keyed node map"
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         node_by_label: "{{ _testbed_nodes }}"
-      when: not _nodes_already_remapped | bool
-
-    - name: "Phase 4.5d2 — Labels already match testbed names, skip remap"
-      ansible.builtin.set_fact:
-        _rack_prefix: "{{ topology_name }}"
-      when: _nodes_already_remapped | bool
-
-    - name: "Phase 4.5d3 — Display remap skip notice"
-      ansible.builtin.debug:
-        msg: "Node labels already use testbed naming ({{ node_by_label.keys() | list }}), skipping remap."
-      when: _nodes_already_remapped | bool
+      when: not _nodes_already_named
 
     - name: Display node label mapping
+      tags: [phase5_blueprint]
       ansible.builtin.debug:
-        msg: "node_by_label keys: {{ node_by_label.keys() | list }}"
+        msg: "node_by_label keys: {{ node_by_label.keys() | list }} | already_named: {{ _nodes_already_named }}"
 
     # ─── Rename leaf & spine nodes in the blueprint graph ─────────────────────
     # The FT's GetBorderleafLoopbacks() searches for "border" in the
@@ -602,6 +512,7 @@
     # to match the testbed names (e.g. "vg-am-cops-tb-0-leaf3border").
 
     - name: "Phase 4.5e — Rename leaf/spine nodes in blueprint"
+      tags: [phase5_blueprint]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -616,6 +527,7 @@
       loop: "{{ node_by_label | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
+      when: not _nodes_already_named
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 5: System ID Assignment
@@ -623,6 +535,7 @@
 
     # Get system agents to retrieve system_id (serial numbers)
     - name: "Phase 5 — Gather all system agents"
+      tags: [phase5_blueprint]
       juniper.apstra.system_agents:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -633,6 +546,7 @@
     # Build a reverse mapping: management_ip → device_name from the devices dict.
     # Agents may have empty labels, so we match by management_ip instead.
     - name: Build IP-to-device name mapping
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         _ip_to_device: >-
           {{
@@ -645,10 +559,12 @@
         label: "{{ item.key }}"
 
     - name: Initialize device serial map
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         device_serial_map: {}
 
     - name: Build device serial map from agents (match by management_ip)
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         device_serial_map: >-
           {{
@@ -666,12 +582,14 @@
         - item.system_id | length > 0
 
     - name: Display device serial map
+      tags: [phase5_blueprint]
       ansible.builtin.debug:
         var: device_serial_map
 
     # Build system_id assignments: map blueprint node_id → serial
     # Match by comparing the device label in the vars to the blueprint node label
     - name: "Phase 5 — Assign system_id + deploy_mode to blueprint nodes"
+      tags: [phase5_blueprint]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -694,6 +612,7 @@
     # ═══════════════════════════════════════════════════════════════════════════
 
     - name: "Phase 6a — Create ASN pool"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_pools:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -708,6 +627,7 @@
       register: asn_pool
 
     - name: "Phase 6b — Create IP pool (spine-leaf links)"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_pools:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -721,6 +641,7 @@
       register: ip_pool
 
     - name: "Phase 6c — Assign ASN pool to spine ASNs"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -735,6 +656,7 @@
         state: present
 
     - name: "Phase 6d — Assign ASN pool to leaf ASNs"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -749,6 +671,7 @@
         state: present
 
     - name: "Phase 6e — Assign IP pool to spine-leaf links"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -764,6 +687,7 @@
 
     # Loopback IPs use the built-in Private-172 pool
     - name: "Phase 6f — Get all IP pools to find Private-172"
+      tags: [phase5_blueprint]
       juniper.apstra.apstra_facts:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -773,6 +697,7 @@
       register: all_pools
 
     - name: Resolve Private-172 pool ID
+      tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         private_172_pool_id: >-
           {{
@@ -782,6 +707,7 @@
           }}
 
     - name: "Phase 6g — Assign loopback IPs to spines"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -796,6 +722,7 @@
         state: present
 
     - name: "Phase 6h — Assign loopback IPs to leafs"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -810,6 +737,7 @@
         state: present
 
     - name: "Phase 6i — Create Loopback IPs - Generics resource group"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -822,7 +750,8 @@
           pool_ids: []
         state: present
 
-    - name: "Phase 6j — Assign ASN pool to Generic ASNs resource group"
+    - name: "Phase 6j — Create Generic ASNs resource group"
+      tags: [phase5_blueprint]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -832,12 +761,27 @@
           group_type: "asn"
           group_name: "generic_asns"
         body:
-          pool_ids:
-            - "{{ asn_pool.asn_pool.id }}"
+          pool_ids: []
         state: present
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 7: First Deploy
+    # ═══════════════════════════════════════════════════════════════════════════
+    - name: "Phase 7 — Deploy blueprint (first commit)"
+      tags: [phase5_blueprint]
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+      register: deploy_1
+
     # -- Token refresh (Apstra tokens expire; re-auth before heavy phases) --
-    - name: "Refresh auth token (before Phase 7 — SRX setup)"
+    - name: "Refresh auth token (before Phase 8)"
+      tags: [phase6_external_gateway]
       juniper.apstra.authenticate:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -847,6 +791,7 @@
       register: auth
 
     - name: Update token fact
+      tags: [phase6_external_gateway]
       ansible.builtin.set_fact:
         token: "{{ auth.token }}"
 
@@ -860,6 +805,7 @@
 
     # Query existing generic (server) systems in the blueprint
     - name: "Phase 8 prereq — Query generic systems"
+      tags: [phase6_external_gateway]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -871,7 +817,21 @@
         system_type: server
       register: generic_nodes_qe
 
+    - name: "Phase 8 prereq — Derive rack prefix from generic system labels"
+      tags: [phase6_external_gateway]
+      ansible.builtin.set_fact:
+        _rack_prefix: >-
+          {%- set _matches = generic_nodes_qe.nodes.keys()
+              | select('search', '_sys[0-9]{3}$') | list -%}
+          {%- if _matches -%}
+            {{ _matches[0] | regex_replace('_sys[0-9]+$', '') }}
+          {%- else -%}
+            _no_sys_match
+          {%- endif -%}
+      when: _rack_prefix is not defined or _rack_prefix == ''
+
     - name: "Phase 8 prereq — Build SRX system ID mapping"
+      tags: [phase6_external_gateway]
       ansible.builtin.set_fact:
         _srx_system_id_map: >-
           {{
@@ -889,6 +849,7 @@
         _full_name: "{{ topology_name ~ '-' ~ item.key }}"
 
     - name: "Phase 8 prereq — Build host system ID mapping"
+      tags: [phase6_external_gateway]
       ansible.builtin.set_fact:
         _host_system_id_map: >-
           {{
@@ -906,11 +867,13 @@
         _full_name: "{{ topology_name ~ '-' ~ item.key }}"
 
     - name: Display generic system mappings
+      tags: [phase6_external_gateway]
       ansible.builtin.debug:
         msg: "SRX: {{ _srx_system_id_map }} | Hosts: {{ _host_system_id_map }}"
 
     # Discover border leaf node IDs dynamically from SRX connections
     - name: "Phase 8a — Resolve border leaf names from SRX connections"
+      tags: [phase6_external_gateway]
       ansible.builtin.set_fact:
         border_leaf_names: >-
           {{
@@ -923,6 +886,7 @@
           }}
 
     - name: "Phase 8a — Build border leaf ID list"
+      tags: [phase6_external_gateway]
       ansible.builtin.set_fact:
         border_leaf_ids: >-
           {{
@@ -932,6 +896,7 @@
           }}
 
     - name: "Phase 8b — Update SRX generic systems"
+      tags: [phase6_external_gateway]
       juniper.apstra.generic_systems:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -955,6 +920,7 @@
       register: srx_create_results
 
     - name: Build SRX system ID map
+      tags: [phase6_external_gateway]
       ansible.builtin.set_fact:
         srx_system_ids: >-
           {{
@@ -969,6 +935,7 @@
 
     # -- Phase 8b.2: Query SRX interfaces and set if_name on each -----------
     - name: "Phase 8b.2 — Query SRX interfaces + links"
+      tags: [phase6_external_gateway]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -983,6 +950,7 @@
       register: _srx_intf_qe
 
     - name: "Phase 8b.2 — Set interface names on SRX generics"
+      tags: [phase6_external_gateway]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1003,6 +971,7 @@
 
     # -- Phase 8d: Rename host generic systems to testbed names ---------------
     - name: "Phase 8d — Rename host generic systems"
+      tags: [phase6_external_gateway]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1018,7 +987,8 @@
       loop_control:
         label: "{{ item.key }}"
 
-    - name: "Phase 8c — First deploy (system IDs + resources + SRX + hosts)"
+    - name: "Phase 8c — Deploy after SRX + host setup"
+      tags: [phase6_external_gateway]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1034,6 +1004,7 @@
 
     # Determine border leaf system IDs for local_gw_nodes
     - name: "Phase 9 — Create remote gateways"
+      tags: [phase6_external_gateway]
       juniper.apstra.external_gateway:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1054,10 +1025,22 @@
       loop_control:
         label: "{{ item.key }}"
 
+    - name: "Phase 9a — Deploy after remote gateway setup"
+      tags: [phase6_external_gateway]
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 10: Routing Policy
     # ═══════════════════════════════════════════════════════════════════════════
     - name: "Phase 10 — Create external router routing policy"
+      tags: [phase7_connectivity_template]
       juniper.apstra.routing_policy:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1098,6 +1081,7 @@
     # Phase 11: Fabric Settings
     # ═══════════════════════════════════════════════════════════════════════════
     - name: "Phase 11 — Set external router MTU"
+      tags: [phase7_connectivity_template]
       juniper.apstra.fabric_settings:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1109,6 +1093,7 @@
       register: fabric_result
 
     - name: "Phase 11b — Deploy after fabric settings"
+      tags: [phase7_connectivity_template]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1120,6 +1105,7 @@
 
     # -- Token refresh before Phase 12 -----------------------------------------
     - name: "Refresh auth token (before Phase 12)"
+      tags: [phase7_connectivity_template]
       juniper.apstra.authenticate:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1129,6 +1115,7 @@
       register: auth
 
     - name: Update token fact
+      tags: [phase7_connectivity_template]
       ansible.builtin.set_fact:
         token: "{{ auth.token }}"
 
@@ -1138,6 +1125,7 @@
 
     # First, discover the default routing zone ID for the CT
     - name: "Phase 12a — Query routing zones"
+      tags: [phase7_connectivity_template]
       juniper.apstra.apstra_facts:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1149,6 +1137,7 @@
       register: sz_facts
 
     - name: Find default routing zone ID
+      tags: [phase7_connectivity_template]
       ansible.builtin.set_fact:
         default_rz_id: >-
           {{
@@ -1158,6 +1147,7 @@
           }}
 
     - name: "Phase 12b — Create BGP-2-SRX connectivity template"
+      tags: [phase7_connectivity_template]
       juniper.apstra.connectivity_template:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1196,6 +1186,7 @@
 
     # Discover SRX-facing interfaces on border leafs for CT assignment
     - name: "Phase 12c — Query SRX link interfaces"
+      tags: [phase7_connectivity_template]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1211,14 +1202,17 @@
       register: srx_links_qe
 
     - name: Build SRX interface IDs list
+      tags: [phase7_connectivity_template]
       ansible.builtin.set_fact:
         srx_interface_ids: "{{ srx_links_qe.interface_ids }}"
 
     - name: Display SRX interface IDs for CT assignment
+      tags: [phase7_connectivity_template]
       ansible.builtin.debug:
         msg: "Found {{ srx_interface_ids | length }} SRX-facing interfaces"
 
     - name: "Phase 12d — Assign BGP-2-SRX CT to SRX interfaces"
+      tags: [phase7_connectivity_template]
       juniper.apstra.connectivity_template_assignment:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1235,6 +1229,7 @@
     # Phase 13: Assign IP Pool to Generic Links + Deploy
     # ═══════════════════════════════════════════════════════════════════════════
     - name: "Phase 13a — Assign IP pool to generic link IPs"
+      tags: [phase7_connectivity_template]
       juniper.apstra.resource_group:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1249,6 +1244,7 @@
         state: present
 
     - name: "Phase 13b — Deploy after CT + resource assignment"
+      tags: [phase7_connectivity_template]
       juniper.apstra.blueprint:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
@@ -1424,6 +1420,7 @@
           {{ virtual_networks | length }} virtual networks.
 
     - name: Logout
+      tags: [always]
       juniper.apstra.authenticate:
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"

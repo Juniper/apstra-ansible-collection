@@ -135,3 +135,10 @@ design_templates:
       connectorops_vjunos-rack: 1
     overlay_control_protocol: evpn
     asn_allocation_policy: distinct
+
+# ── Interface Maps ────────────────────────────────────────────────────────────
+# dp_usage omitted → auto-generated from device profile default transformations
+interface_maps:
+  simple_dc_vjunos_ifmap:
+    logical_device: simple_dc_vjunos_switch_96x1
+    device_profile: vJunos-switch

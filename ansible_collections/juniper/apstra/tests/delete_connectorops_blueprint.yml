@@ -1,0 +1,387 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# Delete ConnectorOps Blueprint — Full Teardown via Ansible Modules
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Deletes all objects created by create_connectorops_blueprint.yml, in
+# reverse dependency order:
+#
+#   1.  Blueprint (cascades all blueprint-scoped objects)
+#   2.  Resource Pools (ASN + IP)
+#   3.  Design Elements — template → rack_type → logical_device
+#   4.  System Agents (device onboarding entries)
+#
+# Blueprint deletion automatically removes:
+#   connectivity templates & assignments, external gateways, routing policies,
+#   security zones, virtual networks, resource group assignments, configlets,
+#   interface maps, generic systems, fabric settings.
+#
+# Usage:
+#   ansible-playbook tests/delete_connectorops_blueprint.yml \
+#       -e @tests/vars/connectorops_blueprint.yml \
+#       -e testbed_file=/path/to/testbed.yaml
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+- name: Delete ConnectorOps Blueprint
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    verify_certs: false
+
+  tasks:
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 0: Load Testbed & Derive Variables (identical to create)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 0a — Load testbed configuration"
+      ansible.builtin.include_vars:
+        file: "{{ testbed_file }}"
+        name: testbed_raw
+
+    - name: "Phase 0b — Set testbed shorthand"
+      ansible.builtin.set_fact:
+        tb: "{{ testbed_raw.testbeds.apstra.testbed1 }}"
+
+    - name: "Phase 0c — Derive AOS credentials and topology from testbed"
+      ansible.builtin.set_fact:
+        aos_server: "{{ tb.aos.ip }}"
+        aos_username: "{{ tb.aos.username }}"
+        aos_password: "{{ tb.aos.password }}"
+        api_url: "https://{{ tb.aos.ip }}/api"
+        blueprint_label: "{{ topology_name }}"
+        device_username: "{{ tb.devices.username }}"
+        device_password: "{{ tb.devices.password }}"
+        topo: "{{ tb.topologies[topology_name] }}"
+
+    - name: "Phase 0d — Build devices dict from testbed nodes"
+      ansible.builtin.set_fact:
+        devices: >-
+          {{
+            devices | default({}) | combine({
+              item.key: {
+                'mgmt_ip': tb.devices.devices_list[item.key].ip,
+                'role': item.value.role
+              }
+            })
+          }}
+      loop: "{{ topo.nodes | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Display teardown target
+      ansible.builtin.debug:
+        msg: >-
+          Teardown target — Server: {{ aos_server }} |
+          Blueprint: {{ blueprint_label }} |
+          Devices: {{ devices.keys() | list }}
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 1: Authentication
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 1 — Authenticate to Apstra"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ aos_username }}"
+        password: "{{ aos_password }}"
+        logout: false
+      register: auth
+
+    - name: Set auth token fact
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 2: Resolve Blueprint ID by Label
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 2 — Gather all blueprints"
+      juniper.apstra.apstra_facts:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        gather_network_facts:
+          - blueprints
+      register: bp_facts
+
+    - name: "Phase 2 — Resolve blueprint ID from label"
+      ansible.builtin.set_fact:
+        blueprint_id: >-
+          {{
+            (bp_facts.ansible_facts.apstra_facts.blueprints | dict2items
+             | selectattr('value.label', 'equalto', blueprint_label)
+             | map(attribute='key') | list | first | default(''))
+          }}
+
+    - name: "Phase 2 — Skip teardown if blueprint not found"
+      ansible.builtin.debug:
+        msg: "Blueprint '{{ blueprint_label }}' not found — skipping blueprint teardown."
+      when: blueprint_id == ''
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 3: Delete Blueprint (cascades all blueprint-scoped objects)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 3 — Delete blueprint '{{ blueprint_label }}'"
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: absent
+      when: blueprint_id != ''
+      register: bp_delete
+
+    - name: Display blueprint deletion result
+      ansible.builtin.debug:
+        msg: "{{ bp_delete.msg | default('Blueprint deletion skipped') }}"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 4: Delete Resource Pools
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 4 — Gather all ASN and IP pools"
+      juniper.apstra.apstra_facts:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        gather_network_facts:
+          - asn_pools
+          - ip_pools
+      register: pool_facts
+
+    # Resolve ASN pool ID by display_name
+    - name: "Phase 4a — Resolve ASN pool ID"
+      ansible.builtin.set_fact:
+        asn_pool_id: >-
+          {{
+            (pool_facts.ansible_facts.apstra_facts.asn_pools | dict2items
+             | selectattr('value.display_name', 'equalto', asn_pool_name)
+             | map(attribute='key') | list | first | default(''))
+          }}
+
+    - name: "Phase 4a — Delete ASN pool '{{ asn_pool_name }}'"
+      juniper.apstra.resource_pools:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        type: asn
+        id:
+          asn_pool: "{{ asn_pool_id }}"
+        state: absent
+      when: asn_pool_id != ''
+
+    - name: "Phase 4a — ASN pool not found (already deleted)"
+      ansible.builtin.debug:
+        msg: "ASN pool '{{ asn_pool_name }}' not found — skipping."
+      when: asn_pool_id == ''
+
+    # Resolve IP pool ID by display_name
+    - name: "Phase 4b — Resolve IP pool ID"
+      ansible.builtin.set_fact:
+        ip_pool_id: >-
+          {{
+            (pool_facts.ansible_facts.apstra_facts.ip_pools | dict2items
+             | selectattr('value.display_name', 'equalto', ip_pool_name)
+             | map(attribute='key') | list | first | default(''))
+          }}
+
+    - name: "Phase 4b — Delete IP pool '{{ ip_pool_name }}'"
+      juniper.apstra.resource_pools:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        type: ip
+        id:
+          ip_pool: "{{ ip_pool_id }}"
+        state: absent
+      when: ip_pool_id != ''
+
+    - name: "Phase 4b — IP pool not found (already deleted)"
+      ansible.builtin.debug:
+        msg: "IP pool '{{ ip_pool_name }}' not found — skipping."
+      when: ip_pool_id == ''
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 5: Delete Design Elements
+    # Deletion order is reverse of creation: template → rack_type → logical_device
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 5a — Load design model definitions"
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/design_models.yml"
+
+    - name: "Phase 5b — Delete design templates"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: template
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ design_templates | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: "Phase 5c — Delete rack types"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: rack_type
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ rack_types | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: "Phase 5d — Delete logical devices"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: logical_device
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ logical_devices | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: "Phase 5e — Delete interface maps"
+      juniper.apstra.design:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          design_type: interface_map
+          name: "{{ item.key }}"
+        state: absent
+      loop: "{{ interface_maps | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 6: Delete System Agents (mirrors Phase 2 of create)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 6 — Delete system agents by management IP"
+      juniper.apstra.system_agents:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        body:
+          management_ip: "{{ item.value.mgmt_ip }}"
+        state: absent
+      loop: "{{ devices | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 7: Delete Managed Systems (/api/systems)
+    # After agents are deleted the device entries at /api/systems persist.
+    # Filter by management IP from testbed and delete each matching record.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: "Phase 7a — Fetch all managed systems"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/systems"
+        method: GET
+        headers:
+          AuthToken: "{{ token }}"
+        validate_certs: "{{ verify_certs }}"
+        return_content: true
+      register: _all_systems_raw
+
+    - name: "Phase 7a — Build target IP set"
+      ansible.builtin.set_fact:
+        _target_ips: "{{ devices | dict2items | map(attribute='value.mgmt_ip') | list }}"
+
+    - name: "Phase 7a — Build list of managed systems to delete"
+      ansible.builtin.set_fact:
+        _systems_to_delete_full: >-
+          {{
+            (_all_systems_raw.json if (_all_systems_raw.json is sequence and _all_systems_raw.json is not mapping)
+             else _all_systems_raw.json.get('items', []))
+            | selectattr('facts', 'defined')
+            | selectattr('facts.mgmt_ipaddr', 'defined')
+            | selectattr('facts.mgmt_ipaddr', 'in', _target_ips)
+            | list
+          }}
+
+    - name: "Phase 7a — Extract system IDs list"
+      ansible.builtin.set_fact:
+        _systems_to_delete: "{{ _systems_to_delete_full | map(attribute='id') | list }}"
+
+    - name: "Phase 7b — Build HCL model lookup"
+      ansible.builtin.set_fact:
+        _systems_hcl_model: >-
+          {{
+            _systems_hcl_model | default({}) | combine({
+              item.id: item.facts.aos_hcl_model | default('Unknown')
+            })
+          }}
+      loop: "{{ _systems_to_delete_full }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: "Phase 7b — Decommission managed systems (admin_state → decomm)"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/systems/{{ item }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          user_config:
+            admin_state: "decomm"
+            aos_hcl_model: "{{ _systems_hcl_model[item] | default('Unknown') }}"
+        validate_certs: "{{ verify_certs }}"
+        status_code: [200]
+      loop: "{{ _systems_to_delete }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: "Phase 7c — Wait for devices to reach DECOMM state"
+      ansible.builtin.pause:
+        seconds: 5
+      when: _systems_to_delete | length > 0
+
+    - name: "Phase 7 — Delete managed systems"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/systems/{{ item }}"
+        method: DELETE
+        headers:
+          AuthToken: "{{ token }}"
+        validate_certs: "{{ verify_certs }}"
+        status_code: [200, 204]
+      loop: "{{ _systems_to_delete }}"
+      loop_control:
+        label: "{{ item }}"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Summary & Logout
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    - name: Teardown complete
+      ansible.builtin.debug:
+        msg: >-
+          Teardown of '{{ blueprint_label }}' complete.
+          Blueprint, resource pools, design elements, system agents,
+          and managed devices deleted.
+
+    - name: Logout
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        logout: true
