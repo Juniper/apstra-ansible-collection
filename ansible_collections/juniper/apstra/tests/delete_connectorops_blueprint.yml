@@ -305,18 +305,56 @@
       ansible.builtin.set_fact:
         _target_ips: "{{ devices | dict2items | map(attribute='value.mgmt_ip') | list }}"
 
-    - name: "Phase 7a — Build list of managed system IDs to delete"
+    - name: "Phase 7a — Build list of managed systems to delete"
       ansible.builtin.set_fact:
-        _systems_to_delete: >-
+        _systems_to_delete_full: >-
           {{
             (_all_systems_raw.json if (_all_systems_raw.json is sequence and _all_systems_raw.json is not mapping)
              else _all_systems_raw.json.get('items', []))
             | selectattr('facts', 'defined')
             | selectattr('facts.mgmt_ipaddr', 'defined')
             | selectattr('facts.mgmt_ipaddr', 'in', _target_ips)
-            | map(attribute='id')
             | list
           }}
+
+    - name: "Phase 7a — Extract system IDs list"
+      ansible.builtin.set_fact:
+        _systems_to_delete: "{{ _systems_to_delete_full | map(attribute='id') | list }}"
+
+    - name: "Phase 7b — Build HCL model lookup"
+      ansible.builtin.set_fact:
+        _systems_hcl_model: >-
+          {{
+            _systems_hcl_model | default({}) | combine({
+              item.id: item.facts.aos_hcl_model | default('Unknown')
+            })
+          }}
+      loop: "{{ _systems_to_delete_full }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: "Phase 7b — Decommission managed systems (admin_state → decomm)"
+      ansible.builtin.uri:
+        url: "{{ api_url }}/systems/{{ item }}"
+        method: PUT
+        headers:
+          AuthToken: "{{ token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          user_config:
+            admin_state: "decomm"
+            aos_hcl_model: "{{ _systems_hcl_model[item] | default('Unknown') }}"
+        validate_certs: "{{ verify_certs }}"
+        status_code: [200]
+      loop: "{{ _systems_to_delete }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: "Phase 7c — Wait for devices to reach DECOMM state"
+      ansible.builtin.pause:
+        seconds: 5
+      when: _systems_to_delete | length > 0
 
     - name: "Phase 7 — Delete managed systems"
       ansible.builtin.uri:

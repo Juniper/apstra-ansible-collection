@@ -758,7 +758,7 @@ def _handle_installed(module, client_factory):
     for agent_id in need_install:
         try:
             base.raw_request(
-                f"/api/system-agents/{agent_id}/install-agent",
+                f"/system-agents/{agent_id}/install-agent",
                 "POST",
                 data={},
             )
@@ -837,9 +837,9 @@ def _handle_acknowledged(module, client_factory):
     base = _get_base_client(client_factory)
 
     # List all systems
-    resp = base.raw_request("/api/systems")
+    resp = base.raw_request("/systems")
     if resp.status_code != 200:
-        raise Exception(f"GET /api/systems failed: {resp.status_code} {resp.text}")
+        raise Exception(f"GET /systems failed: {resp.status_code} {resp.text}")
     try:
         systems_data = resp.json()
     except Exception:
@@ -863,7 +863,7 @@ def _handle_acknowledged(module, client_factory):
                 "aos_hcl_model": facts.get("aos_hcl_model", ""),
             }
         }
-        resp = base.raw_request(f"/api/systems/{device_key}", "PUT", data=ack_body)
+        resp = base.raw_request(f"/systems/{device_key}", "PUT", data=ack_body)
         if resp.status_code == 200:
             acknowledged.append(device_key)
 
