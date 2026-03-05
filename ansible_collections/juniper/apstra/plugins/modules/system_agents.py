@@ -175,7 +175,10 @@ options:
     description:
       - Desired state of the system agent.
       - C(present) will create or update the agent.
-      - C(absent) will delete the agent.
+      - C(absent) will uninstall the agent container (if running) and then
+        delete the agent. The uninstall job runs asynchronously; the module
+        waits up to C(uninstall_timeout) seconds for it to complete before
+        issuing the delete.
       - C(gathered) lists all agents and returns their details
         including system_id (device serial number). Useful for
         building device-to-serial mappings without raw API calls.
@@ -183,6 +186,14 @@ options:
     required: false
     choices: ["present", "absent", "gathered"]
     default: "present"
+  uninstall_timeout:
+    description:
+      - Maximum time in seconds to wait for the uninstall job to finish
+        before attempting to delete the agent.
+      - Only used when C(state=absent) and the agent container is running.
+    type: int
+    required: false
+    default: 120
 """
 
 EXAMPLES = """
@@ -371,6 +382,38 @@ def _delete_agent(client_factory, agent_id):
     """DELETE /api/system-agents/{id} — delete an agent."""
     client = _get_base_client(client_factory)
     return client.system_agents[agent_id].delete()
+
+
+def _uninstall_agent(client_factory, agent_id):
+    """POST /api/system-agents/{id}/uninstall-agent — stop the agent container."""
+    client = _get_base_client(client_factory)
+    return client.system_agents[agent_id].uninstall()
+
+
+def _is_container_running(agent):
+    """Return True if the agent's offbox container is currently running."""
+    container_status = agent.get("container_status", {})
+    return container_status.get("status", "") == "running"
+
+
+def _wait_for_uninstall(client_factory, agent_id, timeout):
+    """Wait until the agent container stops running (uninstall complete)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        agent = _get_agent(client_factory, agent_id)
+        if agent is None:
+            # Agent already gone — nothing to wait for
+            return
+        if not _is_container_running(agent):
+            # Container stopped — check if uninstall job completed
+            last_job = agent.get("last_job_status", {})
+            job_state = last_job.get("state", "")
+            if job_state in ("success", "error", ""):
+                return
+        time.sleep(10)
+    raise TimeoutError(
+        f"Agent {agent_id} container did not stop within {timeout}s after uninstall"
+    )
 
 
 def _find_agent_by_ip(client_factory, management_ip):
@@ -652,13 +695,15 @@ def _handle_gathered(module, client_factory):
 
 
 def _handle_absent(module, client_factory):
-    """Handle state=absent — delete."""
+    """Handle state=absent — uninstall container if running, then delete."""
     id_param = module.params.get("id") or {}
     body = module.params.get("body") or {}
     agent_id = id_param.get("agent_id")
     management_ip = body.get("management_ip")
+    uninstall_timeout = module.params.get("uninstall_timeout") or 120
 
     # Find the agent
+    existing = None
     if not agent_id and management_ip:
         existing = _find_agent_by_ip(client_factory, management_ip)
         if existing:
@@ -667,10 +712,16 @@ def _handle_absent(module, client_factory):
     if not agent_id:
         return dict(changed=False, msg="system agent not found (nothing to delete)")
 
-    # Check if it exists
-    existing = _get_agent(client_factory, agent_id)
+    # Refresh agent info if not already fetched
+    if existing is None:
+        existing = _get_agent(client_factory, agent_id)
     if not existing:
         return dict(changed=False, msg="system agent not found (nothing to delete)")
+
+    # Uninstall the container first if it is still running
+    if _is_container_running(existing):
+        _uninstall_agent(client_factory, agent_id)
+        _wait_for_uninstall(client_factory, agent_id, uninstall_timeout)
 
     _delete_agent(client_factory, agent_id)
     return dict(
@@ -693,6 +744,7 @@ def main():
             choices=["present", "absent", "gathered"],
             default="present",
         ),
+        uninstall_timeout=dict(type="int", required=False, default=120),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | object_module_args
