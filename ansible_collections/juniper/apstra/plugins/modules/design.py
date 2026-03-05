@@ -24,6 +24,13 @@ except ImportError:
     g = None
     normalize_port_speed = None
 
+try:
+    from aos.sdk.interface_map.interface_map_generator import (
+        gen_interface_map as _sdk_gen_interface_map,
+    )
+except ImportError:
+    _sdk_gen_interface_map = None
+
 DOCUMENTATION = """
 ---
 module: design
@@ -85,9 +92,9 @@ options:
       - For rack_type — must contain C(leafs) and optionally C(generics), C(access).
       - For template — must contain C(spine), C(racks), and optionally
         C(overlay_control_protocol), C(asn_allocation_policy).
-      - For interface_map — must contain C(logical_device_id),
-        C(device_profile_id). Port mappings are auto-generated from the
-        device profile.
+      - For interface_map — must contain C(logical_device) and C(device_profile).
+        Optionally C(dp_usage) (list of [port_id, transform_id] pairs); if omitted,
+        auto-generated from the device profile's default transformations.
     type: dict
     required: false
   state:
@@ -189,8 +196,8 @@ EXAMPLES = """
       design_type: interface_map
       name: simple_dc_vjunos_ifmap
     body:
-      logical_device_id: simple_dc_vjunos_switch_96x1
-      device_profile_id: vJunos-switch
+      logical_device: simple_dc_vjunos_switch_96x1
+      device_profile: vJunos-switch
     state: present
 """
 
@@ -450,18 +457,78 @@ def _get_template(client, name):
         return None
 
 
+# ── Interface Map Helpers ────────────────────────────────────────────────────
+
+
+def _get_interface_map(client, label):
+    """List design interface maps and return the one matching label. Returns None if not found."""
+    result = client.request("/design/interface-maps", method="GET")
+    if not result:
+        return None
+    for item in result.get("items", []):
+        if item.get("label") == label:
+            return item
+    return None
+
+
+def _create_interface_map(client, label, spec):
+    """Create a design interface map via the AOS SDK generator + API.
+
+    spec keys:
+      logical_device  — existing LD name (e.g. "simple_dc_vjunos_switch_96x1")
+      device_profile  — device profile ID (e.g. "vJunos-switch")
+      dp_usage        — optional list of [port_id, transform_id] pairs;
+                        auto-generated from default transforms if omitted
+    """
+    if _sdk_gen_interface_map is None:
+        raise Exception(
+            "The 'aos.sdk.interface_map' package is required for interface_map creation."
+        )
+
+    dp_id = spec.get("device_profile")
+    ld_id = spec.get("logical_device")
+
+    dp = client.device_profiles[dp_id].get()
+    if dp is None:
+        raise Exception(f"Device profile '{dp_id}' not found.")
+
+    ld = client.logical_devices[ld_id].get()
+    if ld is None:
+        raise Exception(f"Logical device '{ld_id}' not found.")
+
+    if spec.get("dp_usage"):
+        dp_usage = [tuple(u) for u in spec["dp_usage"]]
+    else:
+        # Auto-generate: use each port's default transformation
+        dp_usage = []
+        for port in dp["ports"]:
+            for transform in port["transformations"]:
+                if transform["is_default"]:
+                    dp_usage.append((port["port_id"], transform["transformation_id"]))
+                    break
+
+    payload = _sdk_gen_interface_map(dp, ld, dp_usage, label=label)
+    client.request("/design/interface-maps", method="POST", data=payload)
+    return _get_interface_map(client, label)
+
+
+def _delete_interface_map(client, label):
+    """Delete a design interface map by label. Returns True if deleted, False if not found."""
+    existing = _get_interface_map(client, label)
+    if not existing:
+        return False
+    imap_id = existing["id"]
+    client.request(f"/design/interface-maps/{imap_id}", method="DELETE")
+    return True
+
+
 # ── Delete Helpers ───────────────────────────────────────────────────────────
 
 
 def _delete_design_element(client, design_type, name):
     """Delete a design element by type and name."""
     if design_type == "interface_map":
-        # Interface maps use raw_request since the SDK doesn't expose them
-        try:
-            resp = client.raw_request(f"/api/design/interface-maps/{name}", "DELETE")
-            return resp.status_code in (200, 202, 204)
-        except Exception:
-            return False
+        return _delete_interface_map(client, name)
 
     resource_map = {
         "logical_device": client.logical_devices,
@@ -476,91 +543,6 @@ def _delete_design_element(client, design_type, name):
         return True
     except Exception:
         return False
-
-
-# ── Interface Map Helpers ────────────────────────────────────────────────────
-
-
-def _get_interface_map(client, name):
-    """Try to get an existing interface map. Returns None if not found."""
-    try:
-        resp = client.raw_request(f"/api/design/interface-maps/{name}")
-        if resp.status_code == 200:
-            return resp.json()
-        return None
-    except Exception:
-        return None
-
-
-def _create_interface_map(client, name, spec):
-    """Create an interface map by fetching device profile ports and building mappings.
-
-    The spec must contain:
-      - logical_device_id: str
-      - device_profile_id: str
-
-    Port mappings are auto-generated from the device profile's ports list.
-    Each port is mapped with all standard roles (superspine, unused, leaf,
-    generic, peer, access, spine) at the speed reported by the device profile.
-    """
-    logical_device_id = spec.get("logical_device_id")
-    device_profile_id = spec.get("device_profile_id")
-    if not logical_device_id or not device_profile_id:
-        raise Exception(
-            "body must contain 'logical_device_id' and 'device_profile_id' "
-            "for design_type=interface_map"
-        )
-
-    # Fetch device profile to get ports
-    dp_resp = client.raw_request(f"/api/device-profiles/{device_profile_id}")
-    if dp_resp.status_code != 200:
-        raise Exception(
-            f"Device profile '{device_profile_id}' not found: "
-            f"{dp_resp.status_code} {dp_resp.text}"
-        )
-    dp = dp_resp.json()
-    ports = dp.get("ports", [])
-
-    # Resolve speed from device profile or spec
-    default_speed = spec.get("speed", 1)
-
-    # Build interface mappings from device profile ports
-    interfaces = []
-    all_roles = ["superspine", "unused", "leaf", "generic", "peer", "access", "spine"]
-    for idx, port in enumerate(ports):
-        port_id = port.get("port_id")
-        transform_id = port.get("transformations", [{}])[0].get("transformation_id", 1)
-        interfaces.append(
-            {
-                "name": f"ge-0/0/{idx}",
-                "roles": all_roles,
-                "position": idx + 1,
-                "state": "active",
-                "mapping": [port_id, transform_id, 1, 1, idx + 1],
-                "speed": {"value": default_speed, "unit": "G"},
-                "setting": {
-                    "param": '{"global": {"speed": ""}, "interface": {"speed": ""}}'
-                },
-            }
-        )
-
-    payload = {
-        "id": name,
-        "label": spec.get("label", name),
-        "logical_device_id": logical_device_id,
-        "device_profile_id": device_profile_id,
-        "interfaces": interfaces,
-    }
-
-    resp = client.raw_request("/api/design/interface-maps", "POST", data=payload)
-    if resp.status_code not in (200, 201):
-        raise Exception(
-            f"Failed to create interface map '{name}': "
-            f"{resp.status_code} {resp.text}"
-        )
-
-    # Return the created interface map
-    return _get_interface_map(client, name) or payload
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -585,6 +567,11 @@ def main():
     spec = module.params.get("body")
     state = module.params["state"]
 
+    if design_type == "interface_map" and _sdk_gen_interface_map is None:
+        module.fail_json(
+            msg="The 'aos.sdk.interface_map' package is required for interface_map operations but not installed."
+        )
+
     if not design_type or design_type not in (
         "logical_device",
         "rack_type",
@@ -592,8 +579,7 @@ def main():
         "interface_map",
     ):
         module.fail_json(
-            msg="id.design_type is required and must be one of: "
-            "logical_device, rack_type, template, interface_map"
+            msg="id.design_type is required and must be one of: logical_device, rack_type, template, interface_map"
         )
     if not name:
         module.fail_json(msg="id.name is required")
