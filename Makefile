@@ -141,7 +141,8 @@ install: build
 	test-customize_generic_systems \
 	test-system_agents \
 	test-interface_map \
-	test-fabric_settings
+	test-fabric_settings \
+	test-ztp_device
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -215,6 +216,9 @@ test-fabric_settings: install
 test-rollback: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rollback.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
 
+test-ztp_device: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
+
 TESTBED_FILE ?=
 
 # ── ConnectorOps full run (all phases) ────────────────────────────────────────
@@ -276,7 +280,7 @@ delete-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-customize_generic_systems test-system_agents test-interface_map test-fabric_settings
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-customize_generic_systems test-system_agents test-interface_map test-fabric_settings test-ztp_device
 
 clean-pipenv:
 	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true
