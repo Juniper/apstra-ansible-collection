@@ -102,42 +102,6 @@ options:
 """
 
 EXAMPLES = """
-# List all registered ZTP devices
-- name: List all ZTP devices
-  juniper.apstra.ztp_device:
-    state: present
-  register: ztp_list
-
-- name: Show ZTP device list
-  ansible.builtin.debug:
-    var: ztp_list.ztp_devices
-
-# Create a new ZTP device
-- name: Create a ZTP device
-  juniper.apstra.ztp_device:
-    body:
-      ip_addr: "192.168.50.10"
-      system_id: "device-001"
-    state: present
-  register: ztp_created
-
-# Update a ZTP device (delete + recreate since API does not support PUT/PATCH)
-- name: Update a ZTP device
-  juniper.apstra.ztp_device:
-    id:
-      ip_addr: "192.168.50.10"
-    body:
-      ip_addr: "192.168.50.10"
-      system_id: "device-001-updated"
-    state: present
-
-# Delete a ZTP device
-- name: Delete a ZTP device
-  juniper.apstra.ztp_device:
-    id:
-      ip_addr: "192.168.50.10"
-    state: absent
-
 # Check ZTP device status by IP address
 # Fails with an error if the IP address is not registered
 - name: Get ZTP device status by IP
