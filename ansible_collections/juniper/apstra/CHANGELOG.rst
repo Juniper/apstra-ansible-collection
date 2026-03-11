@@ -4,6 +4,38 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.6
+======
+
+Major Changes
+-------------
+- Added ``ztp_device`` module: Create, delete, and check ZTP (Zero Touch Provisioning) device status. Supports ``state: present`` (list all or create), ``state: absent`` (delete by IP), and ``state: status`` (lookup by IP address or system ID).
+- Added ``rollback`` module: Roll back a blueprint to a specific revision (``state: rolledback``), revert to the latest backup (``state: reverted``), or list available revisions (``state: listed``).
+- Added ``connectivity_template`` module: Create, update, and delete Connectivity Templates in an Apstra blueprint composed of network primitives (IP Link, BGP Peering, Routing Policy, etc.).
+- Added ``connectivity_template_assignment`` module: Assign or unassign Connectivity Templates to application point nodes (interfaces) within an Apstra blueprint.
+- Added ``external_gateway`` module: Create, update, and delete external EVPN remote gateways in an Apstra blueprint for inter-DC or WAN BGP/L2VPN peering.
+- Added ``generic_systems`` module: Create, update, and delete generic systems in an Apstra blueprint, including links to fabric switches, loopback configuration, and ASN assignment via graph mutation.
+- Added ``configlets`` module: Create, update, and delete configlets in Apstra. Supports global catalog and blueprint-scoped configlets with role-based targeting conditions.
+- Added ``property_set`` module: Create, update, and delete property sets (key-value stores) at global and blueprint scope.
+- Added ``resource_pools`` module: Create, update, and delete global resource pools. Supported types: ASN, Integer, IP, IPv6, VLAN, and VNI.
+- Refactored blueprint module utilities: extracted blueprint API helpers into dedicated ``bp_*.py`` modules under ``module_utils/apstra`` for better maintainability and reuse.
+- Moved raw API graph-mutation helpers to ``module_utils/apstra`` for shared use across modules.
+
+Minor Changes
+-------------
+- Standardized ``id``/``body``/``state`` parameter structure across all modules for consistency.
+- Added phase tags to integration test playbooks to support phased execution.
+- Added Installation Documentation and Getting Started section to README.
+- Updated README with detailed module descriptions and doc links for all new modules.
+
+Bug Fixes
+---------
+- ``generic_systems``: Fixed ``_list_agents`` SDK response unwrap, platform field carry-through on update, and ASN coercion to integer.
+- ``connectivity_template``: Fixed ``neighbor_asn_type`` static setting and ASN domain node PATCH handling.
+- ``external_gateway``: Fixed blueprint commit after applying external gateway configuration.
+- ``endpoint_policy``: Fixed VN endpoint policy to use pipeline EP ID; restored correct idempotency behavior.
+- Restored ``id``/``body``/``state`` param structure and ``external`` field handling in ``_handle_update``.
+
 v1.0.5
 ======
 
