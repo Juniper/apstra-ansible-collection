@@ -2,9 +2,7 @@
 
 # Juniper Networks Apstra Ansible Collection
 
-This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra platform.
-
-This collection has been validated on Juniper Apstra version 5.0 and later (SDK 6.1.0).
+This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules for network management via the Juniper Apstra platform. See the [Apstra version compatibility](#apstra-version-compatibility) matrix below for supported Apstra versions.
 
 ## Support
 
@@ -33,6 +31,17 @@ For more information about communication, see the [Ansible communication guide](
 
 This collection has been tested against following Ansible versions: **>=2.16.14**.
 
+## Apstra version compatibility
+
+The following matrix shows which collection version to use with each Juniper Apstra release:
+
+Collection Version | Supported Apstra Versions | Notes
+--- | --- | ---
+**v1.0.6** | 6.0, 6.1 | Current release. Includes new modules: `rollback`, `ztp_device`, `connectivity_template`, `connectivity_template_assignment`, `external_gateway`, `generic_systems`, `configlets`, `property_set`, `resource_pools`.
+**v1.0.5** | 5.1 | Use this version for Apstra 5.x deployments.
+
+> **Note:** Collection versions prior to v1.0.5 are not recommended for production use.
+
 ## Included Content
 
 ### Modules
@@ -53,11 +62,13 @@ Name | Description
 [juniper.apstra.property_set](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/property_set_module.rst) | Create, update, and delete property sets (key-value stores). Supports both global catalog scope and blueprint scope.
 [juniper.apstra.resource_group](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/resource_group_module.rst) | Assign global resource pools (ASN, IP, IPv6, VLAN, VNI) to named resource groups within an Apstra blueprint.
 [juniper.apstra.resource_pools](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/resource_pools_module.rst) | Create, update, and delete global resource pools in Apstra. Supported types: ASN, Integer, IP, IPv6, VLAN, and VNI.
+[juniper.apstra.rollback](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/rollback_module.rst) | Roll back a blueprint to a specific revision (`state: rolledback`), revert to the latest backup (`state: reverted`), or list available revisions (`state: listed`).
 [juniper.apstra.routing_policy](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/routing_policy_module.rst) | Create, update, and delete routing policies in an Apstra blueprint (BGP import/export filters, aggregate prefixes, extra routes).
 [juniper.apstra.security_zone](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/security_zone_module.rst) | Create, update, and delete security zones (VRFs) in an Apstra blueprint, including VNI ID, DHCP relay, and routing policy association.
 [juniper.apstra.system_agents](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/blueprint_module.rst) | Onboard, update, and delete NOS system agents in Apstra to connect physical devices to the management plane.
 [juniper.apstra.tag](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/tag_module.rst) | Create, update, and delete tags in Apstra. Tags can be applied to blueprint objects and used as configlet targeting selectors.
 [juniper.apstra.virtual_network](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/virtual_network_module.rst) | Create, update, and delete virtual networks (VXLAN/VLAN) in an Apstra blueprint. Configures VN type, VNI ID, IPv4/IPv6 gateways, DHCP, and security zone binding. Supports lookup by label.
+[juniper.apstra.ztp_device](https://github.com/Juniper/apstra-ansible-collection/blob/main/ansible_collections/juniper/apstra/docs/ztp_device_module.rst) | Create, delete, and check the status of ZTP (Zero Touch Provisioning) devices in Apstra. Supports `state: present` (list all or create), `state: absent` (delete by IP), and `state: status` (lookup by IP address or system ID).
 
 Click the `Content` button to see the list of content included in this collection.
 

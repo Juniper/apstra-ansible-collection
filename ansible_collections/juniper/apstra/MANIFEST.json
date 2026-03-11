@@ -2,7 +2,7 @@
  "collection_info": {
   "namespace": "juniper",
   "name": "apstra",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "authors": [
    "Pratik Dave <pratikd@juniper.net>",
    "Edwin Jacques <ejacques@juniper.net>"
@@ -33,7 +33,7 @@
   "name": "FILES.json",
   "ftype": "file",
   "chksum_type": "sha256",
-  "chksum_sha256": "fd3141ae299a9315544c4f69e59195b1938a42da0afca4d39fe3113187aca139",
+  "chksum_sha256": "2a791504a778847a85a41af2920b16f98d7427d67097435e7cb5799467402382",
   "format": 1
  },
  "format": 1
