@@ -273,6 +273,8 @@ Create `apstra_quickstart.yml`:
     apstra_url: "https://<YOUR_APSTRA_SERVER_IP>/api"
     apstra_username: "admin"
     apstra_password: "YOUR_PASSWORD"
+    # Set to false if your Apstra server uses a self-signed certificate
+    apstra_verify_certs: false
 
   tasks:
     # ── Step 1: Authenticate ──────────────────────────────────
@@ -281,6 +283,7 @@ Create `apstra_quickstart.yml`:
         api_url: "{{ apstra_url }}"
         username: "{{ apstra_username }}"
         password: "{{ apstra_password }}"
+        verify_certificates: "{{ apstra_verify_certs }}"
         logout: false
       register: auth
 
@@ -289,23 +292,25 @@ Create `apstra_quickstart.yml`:
       juniper.apstra.apstra_facts:
         api_url: "{{ apstra_url }}"
         auth_token: "{{ auth.token }}"
+        verify_certificates: "{{ apstra_verify_certs }}"
         gather_network_facts: "all"
         available_network_facts: true
-      register: apstra_facts
+      register: facts_result
 
     - name: Display discovered blueprints
       ansible.builtin.debug:
-        var: apstra_facts.ansible_facts.blueprints
+        var: apstra_facts.blueprints
 
     # ── Step 3: Create a blueprint ────────────────────────────
     - name: Create or retrieve a blueprint
       juniper.apstra.blueprint:
         api_url: "{{ apstra_url }}"
         auth_token: "{{ auth.token }}"
+        verify_certificates: "{{ apstra_verify_certs }}"
         body:
           label: "my_first_blueprint"
           design: "two_stage_l3clos"
-        lock_state: "locked"
+        lock_state: "ignore"
       register: bp
 
     - name: Show blueprint details
@@ -317,6 +322,7 @@ Create `apstra_quickstart.yml`:
       juniper.apstra.authenticate:
         api_url: "{{ apstra_url }}"
         auth_token: "{{ auth.token }}"
+        verify_certificates: "{{ apstra_verify_certs }}"
         logout: true
 ```
 
@@ -398,12 +404,12 @@ ansible-doc juniper.apstra.<module_name>
 If your Apstra server uses a self-signed certificate, disable SSL verification:
 
 ```yaml
-# In your playbook vars
-vars:
-  apstra_url: "https://apstra-server/api"
-  # Set in environment
+# Option 1: Per-task parameter (add to every juniper.apstra task)
+verify_certificates: false
+
+# Option 2: Environment variable (applies to all tasks)
 environment:
-  APSTRA_API_TLS_VERIFY: "false"
+  APSTRA_VERIFY_CERTIFICATES: "false"
 ```
 
 Or globally via `ansible.cfg`:
