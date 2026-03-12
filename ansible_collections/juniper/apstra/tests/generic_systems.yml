@@ -62,127 +62,169 @@
       ansible.builtin.debug:
         msg: "Using blueprint_id={{ blueprint_id }}"
 
-    # ── Discover leaves and assign interface maps ──────────────────
+    # ── Discover leaves and spines via blueprint module ──────────────
 
-    - name: Query leaves via QE
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
-        method: POST
-        headers:
-          AuthToken: "{{ auth.token }}"
-        body_format: json
-        body:
-          query: "node('system', role='leaf', name='leaf')"
-        validate_certs: false
-        status_code: 200
-      register: leaves_qe
+    - name: Query system nodes (leaves and spines) via blueprint module
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: queried
+        query_type: nodes_by_role
+        roles:
+          - leaf
+          - spine
+        auth_token: "{{ auth.token }}"
+      register: system_nodes_qe
       when: not use_existing_blueprint | bool
 
-    - name: Extract leaf IDs
+    - name: Extract leaf and spine IDs from blueprint query
       ansible.builtin.set_fact:
-        leaf_ids: "{{ leaves_qe.json['items'] | map(attribute='leaf') | map(attribute='id') | list }}"
+        leaf_ids: >-
+          {{ system_nodes_qe.nodes | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.id') | list }}
+        spine_ids: >-
+          {{ system_nodes_qe.nodes | dict2items
+             | selectattr('value.role', 'equalto', 'spine')
+             | map(attribute='value.id') | list }}
       when: not use_existing_blueprint | bool
 
-    - name: Display leaf IDs
+    - name: Display discovered nodes
       ansible.builtin.debug:
-        msg: "Found {{ leaf_ids | length }} leaves: {{ leaf_ids }}"
+        msg: "Found {{ leaf_ids | length }} leaves: {{ leaf_ids }}, {{ spine_ids | length }} spines: {{ spine_ids }}"
       when: not use_existing_blueprint | bool
 
-    - name: Build interface map assignment body
+    # ── Query design interface maps via design module ────────────────
+
+    - name: Query all design interface maps
+      juniper.apstra.design:
+        id:
+          design_type: interface_map
+          name: all
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: all_imaps
+      no_log: true
+      when: not use_existing_blueprint | bool
+
+    # ── Discover leaf logical device and find matching interface map ──
+
+    - name: Get leaf logical device from blueprint
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        query: >-
+          node('system', id='{{ leaf_ids[0] }}', name='sys')
+          .out('logical_device')
+          .node('logical_device', name='ld')
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: leaf_ld_qe
+      when: not use_existing_blueprint | bool
+
+    - name: Extract leaf logical device ID
       ansible.builtin.set_fact:
-        imap_body:
-          assignments: "{{ {leaf_ids[0]: 'Juniper_vQFX__AOS-7x10-Leaf'} }}"
+        leaf_ld_id: "{{ leaf_ld_qe.results[0]['ld']['label'] | regex_replace('_v\\d+$', '') }}"
       when: not use_existing_blueprint | bool
 
-    - name: Assign interface map to test leaf
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/interface-map-assignments"
-        method: PATCH
-        headers:
-          AuthToken: "{{ auth.token }}"
-        body_format: json
-        body: "{{ imap_body }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
-      register: imap_assign
+    - name: Find matching leaf interface map
+      ansible.builtin.set_fact:
+        leaf_imap_id: >-
+          {{ (all_imaps.design_items
+            | selectattr('logical_device_id', 'equalto', leaf_ld_id)
+            | selectattr('id', 'match', '(?i)juniper|vqfx')
+            | list | default(
+              all_imaps.design_items
+                | selectattr('logical_device_id', 'equalto', leaf_ld_id)
+                | list, true)
+              | first).id }}
+      when: not use_existing_blueprint | bool
+
+    - name: Display chosen leaf interface map
+      ansible.builtin.debug:
+        msg: "Leaf logical device={{ leaf_ld_id }}, interface map={{ leaf_imap_id }}"
+      when: not use_existing_blueprint | bool
+
+    # ── Discover spine logical device and find matching interface map ──
+
+    - name: Get spine logical device from blueprint
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        query: >-
+          node('system', id='{{ spine_ids[0] }}', name='sys')
+          .out('logical_device')
+          .node('logical_device', name='ld')
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: spine_ld_qe
+      when: not use_existing_blueprint | bool
+
+    - name: Extract spine logical device ID
+      ansible.builtin.set_fact:
+        spine_ld_id: "{{ spine_ld_qe.results[0]['ld']['label'] | regex_replace('_v\\d+$', '') }}"
+      when: not use_existing_blueprint | bool
+
+    - name: Find matching spine interface map
+      ansible.builtin.set_fact:
+        spine_imap_id: >-
+          {{ (all_imaps.design_items
+            | selectattr('logical_device_id', 'equalto', spine_ld_id)
+            | selectattr('id', 'match', '(?i)juniper|vqfx')
+            | list | default(
+              all_imaps.design_items
+                | selectattr('logical_device_id', 'equalto', spine_ld_id)
+                | list, true)
+              | first).id }}
+      when: not use_existing_blueprint | bool
+
+    - name: Display chosen spine interface map
+      ansible.builtin.debug:
+        msg: "Spine logical device={{ spine_ld_id }}, interface map={{ spine_imap_id }}"
+      when: not use_existing_blueprint | bool
+
+    # ── Assign interface maps to leaf and spine via module ────────────
+
+    - name: Build interface map assignments dict
+      ansible.builtin.set_fact:
+        imap_assignments: "{{ {leaf_ids[0]: leaf_imap_id, spine_ids[0]: spine_imap_id} }}"
+      when: not use_existing_blueprint | bool
+
+    - name: Assign interface maps to test leaf and spine
+      juniper.apstra.interface_map:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          assignments: "{{ imap_assignments }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: imap_result
       when: not use_existing_blueprint | bool
 
     - name: Display interface map assignment result
       ansible.builtin.debug:
-        var: imap_assign.status
+        msg: "Interface maps assigned. Changed: {{ imap_result.changed | default(false) }}"
       when: not use_existing_blueprint | bool
 
-    # ── Discover spines and assign interface maps ──────────────────
-
-    - name: Query spines via QE
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
-        method: POST
-        headers:
-          AuthToken: "{{ auth.token }}"
-        body_format: json
-        body:
-          query: "node('system', role='spine', name='spine')"
-        validate_certs: false
-        status_code: 200
-      register: spines_qe
-      when: not use_existing_blueprint | bool
-
-    - name: Extract spine IDs
-      ansible.builtin.set_fact:
-        spine_ids: "{{ spines_qe.json['items'] | map(attribute='spine') | map(attribute='id') | list }}"
-      when: not use_existing_blueprint | bool
-
-    - name: Display spine IDs
-      ansible.builtin.debug:
-        msg: "Found {{ spine_ids | length }} spines: {{ spine_ids }}"
-      when: not use_existing_blueprint | bool
-
-    - name: Build spine interface map assignment body
-      ansible.builtin.set_fact:
-        spine_imap_body:
-          assignments: "{{ {spine_ids[0]: 'Juniper_vQFX__AOS-7x10-Spine'} }}"
-      when: not use_existing_blueprint | bool
-
-    - name: Assign interface map to test spine
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/interface-map-assignments"
-        method: PATCH
-        headers:
-          AuthToken: "{{ auth.token }}"
-        body_format: json
-        body: "{{ spine_imap_body }}"
-        validate_certs: false
-        status_code: [200, 202, 204]
-      register: spine_imap_assign
-      when: not use_existing_blueprint | bool
-
-    - name: Display spine interface map assignment result
-      ansible.builtin.debug:
-        var: spine_imap_assign.status
-      when: not use_existing_blueprint | bool
+    # ── Discover spine interfaces for external GS tests ──────────────
 
     - name: Query all interfaces on test spine
-      ansible.builtin.uri:
-        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
-        method: POST
-        headers:
-          AuthToken: "{{ auth.token }}"
-        body_format: json
-        body:
-          query: >-
-            node('system', id='{{ spine_ids[0] }}', name='sys')
-            .out('hosted_interfaces')
-            .node('interface', name='intf')
-        validate_certs: false
-        status_code: 200
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        query: >-
+          node('system', id='{{ spine_ids[0] }}', name='sys')
+          .out('hosted_interfaces')
+          .node('interface', name='intf')
+        state: queried
+        auth_token: "{{ auth.token }}"
       register: spine_all_intf_qe
       when: not use_existing_blueprint | bool
 
     - name: Extract physical interface names on spine
       ansible.builtin.set_fact:
         spine_phys_if_names: >-
-          {{ spine_all_intf_qe.json['items']
+          {{ spine_all_intf_qe.results
              | map(attribute='intf')
              | map(attribute='if_name')
              | select('match', '^(ge|xe|et)-')
@@ -236,24 +278,50 @@
           transform={{ test_if_transform_id }}
 
     # ══════════════════════════════════════════════════════════════════
+    #  Cleanup stale single-link GS from prior failed runs
+    # ══════════════════════════════════════════════════════════════════
+
+    - name: "Cleanup stale GS (test-gs-tf-001-updated) if present"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-tf-001-updated"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
+    - name: "Cleanup stale GS (test-gs-tf-001) if present"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-tf-001"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
+    # ══════════════════════════════════════════════════════════════════
     #  TEST 1: Create generic system with a single link
     # ══════════════════════════════════════════════════════════════════
 
     - name: "TEST 1 - Create generic system with a single link"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-gs-tf-001"
-        hostname: "test-gs-tf-001"
-        tags:
-          - "server"
-          - "test"
-        deploy_mode: "deploy"
-        links:
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_1 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-tf-001"
+          hostname: "test-gs-tf-001"
+          tags:
+            - "server"
+            - "test"
+          deploy_mode: "deploy"
+          links:
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_create
@@ -283,19 +351,21 @@
 
     - name: "TEST 2 - Create same generic system again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-gs-tf-001"
-        hostname: "test-gs-tf-001"
-        tags:
-          - "server"
-          - "test"
-        deploy_mode: "deploy"
-        links:
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_1 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-tf-001"
+          hostname: "test-gs-tf-001"
+          tags:
+            - "server"
+            - "test"
+          deploy_mode: "deploy"
+          links:
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_create_idem
@@ -317,13 +387,15 @@
 
     - name: "TEST 3 - Update generic system hostname and name"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        name: "test-gs-tf-001-updated"
-        hostname: "test-gs-tf-001-updated"
-        tags:
-          - "server"
-          - "test"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          name: "test-gs-tf-001-updated"
+          hostname: "test-gs-tf-001-updated"
+          tags:
+            - "server"
+            - "test"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_update
@@ -348,13 +420,15 @@
 
     - name: "TEST 4 - Update with same values (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        name: "test-gs-tf-001-updated"
-        hostname: "test-gs-tf-001-updated"
-        tags:
-          - "server"
-          - "test"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          name: "test-gs-tf-001-updated"
+          hostname: "test-gs-tf-001-updated"
+          tags:
+            - "server"
+            - "test"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_update_idem
@@ -376,9 +450,11 @@
 
     - name: "TEST 5 - Change deploy mode to ready"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        deploy_mode: "ready"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          deploy_mode: "ready"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_deploy_mode
@@ -401,12 +477,14 @@
 
     - name: "TEST 6 - Update tags"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
-        tags:
-          - "server"
-          - "test"
-          - "updated"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
+        body:
+          tags:
+            - "server"
+            - "test"
+            - "updated"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_tags_update
@@ -429,8 +507,9 @@
 
     - name: "TEST 7 - Delete generic system"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: gs_delete
@@ -452,8 +531,9 @@
 
     - name: "TEST 8 - Delete same system again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ gs_system_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_system_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: gs_delete_idem
@@ -470,30 +550,46 @@
         success_msg: "TEST 8 PASSED: Delete idempotency - no change"
 
     # ══════════════════════════════════════════════════════════════════
+    #  Cleanup stale LAG GS from prior failed runs
+    # ══════════════════════════════════════════════════════════════════
+
+    - name: "Cleanup stale LAG GS (test-lag-server-tf) if present"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-lag-server-tf"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
+    # ══════════════════════════════════════════════════════════════════
     #  TEST 9: Create generic system with dual LAG links
     # ══════════════════════════════════════════════════════════════════
 
     - name: "TEST 9 - Create generic system with dual LAG links"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-lag-server-tf"
-        hostname: "test-lag-server-tf"
-        tags:
-          - "server"
-          - "lag"
-        links:
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_2 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_3 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-lag-server-tf"
+          hostname: "test-lag-server-tf"
+          tags:
+            - "server"
+            - "lag"
+          links:
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_2 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_3 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
         state: present
         auth_token: "{{ auth.token }}"
       register: lag_gs_create
@@ -521,25 +617,27 @@
 
     - name: "TEST 10 - Create same LAG system again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-lag-server-tf"
-        hostname: "test-lag-server-tf"
-        tags:
-          - "server"
-          - "lag"
-        links:
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_2 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_3 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            lag_mode: "lacp_active"
-            group_label: "bond0"
-            tags: ["10G", "bond0"]
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-lag-server-tf"
+          hostname: "test-lag-server-tf"
+          tags:
+            - "server"
+            - "lag"
+          links:
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_2 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_3 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              lag_mode: "lacp_active"
+              group_label: "bond0"
+              tags: ["10G", "bond0"]
         state: present
         auth_token: "{{ auth.token }}"
       register: lag_gs_idem
@@ -557,8 +655,9 @@
 
     - name: "TEST 11 - Delete LAG generic system"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ lag_system_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ lag_system_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: lag_gs_delete
@@ -575,21 +674,47 @@
         success_msg: "TEST 11 PASSED: LAG generic system deleted"
 
     # ══════════════════════════════════════════════════════════════════
+    #  External GS: Clean up stale renamed GS from prior failed runs
+    # ══════════════════════════════════════════════════════════════════
+
+    - name: "Cleanup stale external GS (test-ext-gs-tf-updated) if present"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-ext-gs-tf-updated"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
+    - name: "Cleanup stale external GS (test-ext-gs-tf) if present"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-ext-gs-tf"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
+    # ══════════════════════════════════════════════════════════════════
     #  TEST 12: Create external generic system
     # ══════════════════════════════════════════════════════════════════
 
     - name: "TEST 12 - Create external generic system linked to spine"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-ext-gs-tf"
-        hostname: "test-ext-gs-tf"
-        external: true
-        links:
-          - target_switch_id: "{{ test_spine_id }}"
-            target_switch_if_name: "{{ test_spine_if_1 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-ext-gs-tf"
+          hostname: "test-ext-gs-tf"
+          external: true
+          links:
+            - target_switch_id: "{{ test_spine_id }}"
+              target_switch_if_name: "{{ test_spine_if_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_create
@@ -617,16 +742,18 @@
 
     - name: "TEST 13 - Create same external GS again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-ext-gs-tf"
-        hostname: "test-ext-gs-tf"
-        external: true
-        links:
-          - target_switch_id: "{{ test_spine_id }}"
-            target_switch_if_name: "{{ test_spine_if_1 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-            tags:
-              - "10G"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-ext-gs-tf"
+          hostname: "test-ext-gs-tf"
+          external: true
+          links:
+            - target_switch_id: "{{ test_spine_id }}"
+              target_switch_if_name: "{{ test_spine_if_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+              tags:
+                - "10G"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_idem
@@ -644,10 +771,12 @@
 
     - name: "TEST 14 - Update external GS hostname"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        name: "test-ext-gs-tf-updated"
-        hostname: "test-ext-gs-tf-updated"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          name: "test-ext-gs-tf-updated"
+          hostname: "test-ext-gs-tf-updated"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_update
@@ -670,10 +799,12 @@
 
     - name: "TEST 15 - Update external GS with same values (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        name: "test-ext-gs-tf-updated"
-        hostname: "test-ext-gs-tf-updated"
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          name: "test-ext-gs-tf-updated"
+          hostname: "test-ext-gs-tf-updated"
         state: present
         auth_token: "{{ auth.token }}"
       register: ext_gs_update_idem
@@ -689,14 +820,23 @@
     #  TEST 16: Delete external GS
     # ══════════════════════════════════════════════════════════════════
 
+    - name: Pause before external GS delete (let Apstra settle)
+      ansible.builtin.pause:
+        seconds: 3
+
     - name: "TEST 16 - Delete external GS"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        external: true
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          external: true
         state: absent
         auth_token: "{{ auth.token }}"
       register: ext_gs_delete
+      retries: 3
+      delay: 5
+      until: ext_gs_delete is not failed
 
     - name: Display external GS delete result
       ansible.builtin.debug:
@@ -715,9 +855,11 @@
 
     - name: "TEST 17 - Delete same external GS again (idempotency)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        system_id: "{{ ext_system_id }}"
-        external: true
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ ext_system_id }}"
+        body:
+          external: true
         state: absent
         auth_token: "{{ auth.token }}"
       register: ext_gs_delete_idem
@@ -735,21 +877,25 @@
 
     - name: Create generic system for name-based deletion test
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-gs-delete-by-name"
-        hostname: "test-gs-delete-by-name"
-        links:
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_4 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-delete-by-name"
+          hostname: "test-gs-delete-by-name"
+          links:
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_4 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
         state: present
         auth_token: "{{ auth.token }}"
       register: gs_for_name_delete
 
     - name: "TEST 18 - Delete generic system by name"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "test-gs-delete-by-name"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-delete-by-name"
         state: absent
         auth_token: "{{ auth.token }}"
       register: gs_name_delete
@@ -771,9 +917,11 @@
 
     - name: "TEST 19 - Create without links or external (should fail)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "should-fail-no-links"
-        hostname: "should-fail-no-links"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "should-fail-no-links"
+          hostname: "should-fail-no-links"
         state: present
         auth_token: "{{ auth.token }}"
       register: no_links_result
@@ -788,16 +936,18 @@
 
     - name: "TEST 20 - Duplicate link endpoints (should fail)"
       juniper.apstra.generic_systems:
-        blueprint_id: "{{ blueprint_id }}"
-        name: "should-fail-dup-links"
-        hostname: "should-fail-dup-links"
-        links:
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_1 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
-          - target_switch_id: "{{ test_leaf_id }}"
-            target_switch_if_name: "{{ test_if_name_1 }}"
-            target_switch_if_transform_id: "{{ test_if_transform_id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "should-fail-dup-links"
+          hostname: "should-fail-dup-links"
+          links:
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+            - target_switch_id: "{{ test_leaf_id }}"
+              target_switch_if_name: "{{ test_if_name_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
         state: present
         auth_token: "{{ auth.token }}"
       register: dup_links_result

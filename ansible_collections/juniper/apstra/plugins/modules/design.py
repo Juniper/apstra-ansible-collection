@@ -18,8 +18,8 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 )
 
 try:
-    import aos.sdk.api.generator as g
-    from aos.sdk.api.generator._utils import normalize_port_speed
+    import aos.sdk.generator as g
+    from aos.sdk.generator import normalize_port_speed
 except ImportError:
     g = None
     normalize_port_speed = None
@@ -100,12 +100,19 @@ options:
   state:
     description:
       - Desired state of the design element.
+      - C(present) creates the element if it does not exist.
+      - C(absent) deletes the element.
+      - C(queried) lists elements of the given C(design_type).
+        When C(id.name) is provided, returns that single element.
+        When C(id.name) is C('*') or C('all'), returns all elements
+        of the type.
     type: str
     required: false
     default: present
     choices:
       - present
       - absent
+      - queried
 """
 
 EXAMPLES = """
@@ -199,6 +206,34 @@ EXAMPLES = """
       logical_device: simple_dc_vjunos_switch_96x1
       device_profile: vJunos-switch
     state: present
+
+- name: List all interface maps
+  juniper.apstra.design:
+    api_url: "https://apstra:443/api"
+    auth_token: "{{ token }}"
+    id:
+      design_type: interface_map
+      name: all
+    state: queried
+  register: all_imaps
+
+- name: Use queried interface maps
+  ansible.builtin.debug:
+    msg: "Found {{ all_imaps.design_items | length }} interface maps"
+
+- name: Query a specific logical device by name
+  juniper.apstra.design:
+    api_url: "https://apstra:443/api"
+    auth_token: "{{ token }}"
+    id:
+      design_type: logical_device
+      name: AOS-7x10-Leaf
+    state: queried
+  register: ld_result
+
+- name: Show queried logical device
+  ansible.builtin.debug:
+    msg: "Logical device: {{ ld_result.data }}"
 """
 
 RETURN = """
@@ -209,7 +244,16 @@ id:
 data:
   description: The full design element data from the server.
   type: dict
-  returned: always
+  returned: when state is present, absent, or queried with a specific name
+design_items:
+  description:
+    - List of design elements returned by C(state=queried).
+    - When querying all (C(name=all) or C(name=*)), contains every element
+      of the given C(design_type).
+    - When querying a specific name, contains a single-element list.
+  type: list
+  elements: dict
+  returned: when state is queried
 changed:
   description: Whether the element was created or already existed.
   type: bool
@@ -460,12 +504,17 @@ def _get_template(client, name):
 # ── Interface Map Helpers ────────────────────────────────────────────────────
 
 
-def _get_interface_map(client, label):
-    """List design interface maps and return the one matching label. Returns None if not found."""
+def _list_interface_maps(client):
+    """List all design interface maps. Returns a list of dicts."""
     result = client.request("/design/interface-maps", method="GET")
     if not result:
-        return None
-    for item in result.get("items", []):
+        return []
+    return result.get("items", [])
+
+
+def _get_interface_map(client, label):
+    """List design interface maps and return the one matching label. Returns None if not found."""
+    for item in _list_interface_maps(client):
         if item.get("label") == label:
             return item
     return None
@@ -545,6 +594,30 @@ def _delete_design_element(client, design_type, name):
         return False
 
 
+def _list_design_elements(client, design_type):
+    """List all design elements of a given type. Returns a list of dicts."""
+    if design_type == "interface_map":
+        return _list_interface_maps(client)
+
+    resource_map = {
+        "logical_device": client.logical_devices,
+        "rack_type": client.rack_types,
+        "template": client.templates,
+    }
+    resource = resource_map.get(design_type)
+    if resource is None:
+        raise Exception(f"Unsupported design_type: {design_type}")
+    try:
+        result = resource.get()
+        if isinstance(result, dict) and "items" in result:
+            return result["items"]
+        if isinstance(result, list):
+            return result
+        return [result] if result else []
+    except Exception:
+        return []
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -553,7 +626,11 @@ def main():
     argument_spec.update(
         id=dict(type="dict", required=True),
         body=dict(type="dict", required=False),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
+        state=dict(
+            type="str",
+            default="present",
+            choices=["present", "absent", "queried"],
+        ),
     )
 
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=False)
@@ -567,7 +644,11 @@ def main():
     spec = module.params.get("body")
     state = module.params["state"]
 
-    if design_type == "interface_map" and _sdk_gen_interface_map is None:
+    if (
+        design_type == "interface_map"
+        and state != "queried"
+        and _sdk_gen_interface_map is None
+    ):
         module.fail_json(
             msg="The 'aos.sdk.interface_map' package is required for interface_map operations but not installed."
         )
@@ -581,12 +662,48 @@ def main():
         module.fail_json(
             msg="id.design_type is required and must be one of: logical_device, rack_type, template, interface_map"
         )
-    if not name:
-        module.fail_json(msg="id.name is required")
+    if not name and state != "queried":
+        module.fail_json(msg="id.name is required when state is 'present' or 'absent'")
 
     try:
         client_factory = ApstraClientFactory.from_params(module)
         client = client_factory.get_base_client()
+
+        if state == "queried":
+            # List or fetch design elements
+            if name and name not in ("*", "all"):
+                get_fn_map = {
+                    "logical_device": _get_logical_device,
+                    "rack_type": _get_rack_type,
+                    "template": _get_template,
+                    "interface_map": _get_interface_map,
+                }
+                existing = get_fn_map[design_type](client, name)
+                if existing:
+                    module.exit_json(
+                        changed=False,
+                        id=id_param,
+                        data=existing,
+                        design_items=[existing],
+                        msg=f"{design_type} '{name}' found.",
+                    )
+                else:
+                    module.exit_json(
+                        changed=False,
+                        id=id_param,
+                        data={},
+                        design_items=[],
+                        msg=f"{design_type} '{name}' not found.",
+                    )
+            else:
+                items = _list_design_elements(client, design_type)
+                module.exit_json(
+                    changed=False,
+                    id=id_param,
+                    design_items=items,
+                    msg=f"Found {len(items)} {design_type}(s).",
+                )
+            return
 
         if state == "absent":
             deleted = _delete_design_element(client, design_type, name)

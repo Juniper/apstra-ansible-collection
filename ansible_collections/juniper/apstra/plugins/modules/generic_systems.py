@@ -740,7 +740,7 @@ def _handle_present(module, client_factory):
     loopback_ipv6 = body.get("loopback_ipv6")
     port_channel_id_min = body.get("port_channel_id_min") or 0
     port_channel_id_max = body.get("port_channel_id_max") or 0
-    is_external = body.get("external") or False
+    is_external = body.get("external")  # None means "not specified by user"
 
     _validate_links(links)
 
@@ -1222,7 +1222,7 @@ def _handle_absent(module, client_factory):
     sys_id = id_param.get("system_id")
     name = body.get("name")
     hostname = body.get("hostname")
-    is_external = body.get("external") or False
+    is_external = body.get("external")  # None means "not specified by user"
     clear_cts = body.get("clear_cts_on_destroy") or False
 
     # Try to resolve system by name/hostname if no system_id given
@@ -1277,8 +1277,14 @@ def _handle_absent(module, client_factory):
         # before deleting an external generic system.
         link_ids = get_system_link_ids(client_factory, bp_id, sys_id)
         if link_ids:
-            delete_switch_system_links(client_factory, bp_id, link_ids)
-            time.sleep(1)
+            try:
+                delete_switch_system_links(client_factory, bp_id, link_ids)
+                time.sleep(1)
+            except Exception:
+                # Some Apstra versions return 500 on link deletion;
+                # proceed to delete the external GS directly which
+                # cascades to its links.
+                time.sleep(2)
         delete_external_generic_system(client_factory, bp_id, sys_id)
         return _build_result(
             client_factory,
