@@ -90,6 +90,10 @@ options:
   body:
     description:
       - A dictionary representing the blueprint to create.
+      - "Must include C(label) and C(design)."
+      - "Supported designs: C(two_stage_l3clos) (spine-leaf), C(three_stage_l3clos) (5-stage),
+        C(freeform), C(collapsed)."
+      - "Optional keys: C(init_type) (e.g. C(template_reference)), C(template_id)."
     required: false
     type: dict
   lock_state:

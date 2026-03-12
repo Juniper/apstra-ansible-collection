@@ -309,6 +309,8 @@ Create `apstra_quickstart.yml`:
         verify_certificates: "{{ apstra_verify_certs }}"
         body:
           label: "my_first_blueprint"
+          # Apstra reference design: two_stage_l3clos (spine-leaf),
+          # three_stage_l3clos, freeform, or collapsed
           design: "two_stage_l3clos"
         lock_state: "ignore"
       register: bp
