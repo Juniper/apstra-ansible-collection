@@ -2,10 +2,18 @@
 
 # Juniper Apstra Ansible Collection
 
-This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra AOS platform.
+This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra platform.
 
 - [Juniper Apstra Ansible Collection](#juniper-apstra-ansible-collection)
   - [Installation and Usage](#installation-and-usage)
+  - [Getting Started (New to Ansible?)](#getting-started-new-to-ansible)
+    - [What Is Ansible?](#what-is-ansible)
+    - [Key Concepts](#key-concepts)
+    - [Step 1 — Install Ansible and This Collection](#step-1--install-ansible-and-this-collection)
+    - [Step 2 — Set Your Apstra Credentials](#step-2--set-your-apstra-credentials)
+    - [Step 3 — Write Your First Playbook](#step-3--write-your-first-playbook)
+    - [Step 4 — Run It](#step-4--run-it)
+    - [Step 5 — Explore More Modules](#step-5--explore-more-modules)
   - [Contributing](#contributing)
   - [Development Environment](#development-environment)
     - [Setup](#setup)
@@ -27,16 +35,162 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
 
 See [README](ansible_collections/juniper/apstra/README.md).
 
+---
+
+## Getting Started (New to Ansible?)
+
+If you have never used Ansible before, this section explains the minimum you need to know to start automating Apstra with this collection.
+
+### What Is Ansible?
+
+Ansible is an agentless automation tool. You write **playbooks** — plain YAML files that describe what you want done — and Ansible executes them against a target system. No agent needs to be installed on the target; Ansible talks to Apstra over its REST API directly from your laptop or CI runner.
+
+### Key Concepts
+
+| Term | What it means |
+|---|---|
+| **Playbook** | A YAML file containing one or more automation tasks |
+| **Task** | A single action, e.g. "create a security zone" |
+| **Module** | The code behind each task — this collection provides 20+ Apstra-specific modules |
+| **Variable** | A reusable value referenced in playbooks as `{{ variable_name }}` |
+| **Register** | Saves a task's output to a variable for use in later tasks |
+
+### Step 1 — Install Ansible and This Collection
+
+```bash
+# Install Ansible (Python 3.11 recommended)
+pip install ansible-core>=2.16.14
+
+# Install the collection from Ansible Galaxy
+ansible-galaxy collection install juniper.apstra
+
+# Or install directly from this repo
+git clone https://github.com/Juniper/apstra-ansible-collection.git
+cd apstra-ansible-collection
+make setup
+pipenv shell
+```
+
+### Step 2 — Set Your Apstra Credentials
+
+Create a `.env` file (or export these as environment variables):
+
+```bash
+export APSTRA_API_URL="https://<your-apstra-host>/api"
+export APSTRA_USERNAME="admin"
+export APSTRA_PASSWORD="your-password"
+export APSTRA_VERIFY_CERTIFICATES=0   # set to 1 in production
+```
+
+### Step 3 — Write Your First Playbook
+
+A playbook is just a YAML file. Here is a minimal example that logs in to Apstra, creates a security zone (VRF) in a blueprint, and logs out:
+
+```yaml
+# my_first_playbook.yml
+---
+- name: Create a security zone in Apstra
+  hosts: localhost        # runs locally — no SSH needed
+  gather_facts: false
+  connection: local
+
+  vars:
+    blueprint_id: "your-blueprint-id-here"
+
+  tasks:
+
+    # Step 1: Log in and get a session token
+    - name: Authenticate to Apstra
+      juniper.apstra.authenticate:
+        verify_certificates: false
+      register: auth            # saves the result (including token) to 'auth'
+
+    # Step 2: Create a security zone (VRF)
+    - name: Create security zone 'blue'
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          label: "blue"
+          vrf_name: "blue"
+          sz_type: "evpn"
+        auth_token: "{{ auth.token }}"
+        state: present
+
+    # Step 3: Commit the blueprint to deploy changes
+    - name: Commit blueprint
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: committed
+        lock_state: unlocked
+        auth_token: "{{ auth.token }}"
+
+    # Step 4: Log out
+    - name: Logout
+      juniper.apstra.authenticate:
+        auth_token: "{{ auth.token }}"
+        logout: true
+```
+
+### Step 4 — Run It
+
+```bash
+ansible-playbook my_first_playbook.yml
+```
+
+You should see output like:
+
+```
+PLAY [Create a security zone in Apstra] ***************************
+
+TASK [Authenticate to Apstra] *************************************
+ok: [localhost]
+
+TASK [Create security zone 'blue'] ********************************
+changed: [localhost]
+
+TASK [Commit blueprint] *******************************************
+changed: [localhost]
+
+TASK [Logout] *****************************************************
+changed: [localhost]
+
+PLAY RECAP ********************************************************
+localhost : ok=4  changed=3  unreachable=0  failed=0
+```
+
+Running the same playbook again will show `ok` (not `changed`) for the security zone task — this is **idempotency**, a core Ansible principle meaning "only change what needs changing."
+
+### Step 5 — Explore More Modules
+
+Every module in this collection follows the same pattern:
+
+```yaml
+- name: <description>
+  juniper.apstra.<module_name>:
+    id:
+      blueprint: "{{ blueprint_id }}"   # required for blueprint-scoped modules
+    body:
+      <module-specific parameters>
+    auth_token: "{{ auth.token }}"
+    state: present    # present | absent | committed | queried | gathered
+```
+
+See [ansible_collections/juniper/apstra/README.md](ansible_collections/juniper/apstra/README.md) for the full module reference, and the [tests/](ansible_collections/juniper/apstra/tests/) directory for working examples of every module.
+
+---
+
 ## Contributing
 
-If you would like to contribute to this project, please follow the guidelines outlined in the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+If you would like to contribute to this project, please open an issue or submit a pull request on the [GitHub repository](https://github.com/Juniper/apstra-ansible-collection). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html) for general guidelines.
 
 ## Development Environment
 
 The following tools are recommended for development of this collection:
 1. [brew.sh](https://brew.sh/) -- Only needed for _Mac OS X_
 1. [pyenv](https://github.com/pyenv/pyenv/blob/master/README.md)
-2. [pipenv](https://github.com/pyenv/pyenv/blob/master/README.md)
+2. [pipenv](https://pipenv.pypa.io/en/latest/)
 3. [pre-commit](https://github.com/pre-commit/pre-commit)
 
 ### Setup
@@ -109,7 +263,7 @@ This will start a new interactive prompt in which the known supported version of
 
 ### Test Configuration
 
-To run tests, you should have an Apstra 5.0 instance in the lab.
+To run tests, you should have an Apstra 5.0 (or later) instance in the lab.
 
 At the root of your 'apstra-ansible-collection' repo, create a .env file. Put the authentication files you need in there. `pipenv` will set these when the pipenv is initialized. Here is an example.
 
@@ -183,8 +337,8 @@ Here's an example of how the Apstra SDK can be used to perform CRUD operations.
 
 ```python
         # Instantiate the client
-        client_factory = ApstraClientFactory.from_params(module.params)
-        client = client_factory.l3clos_client()
+        client_factory = ApstraClientFactory.from_params(module)
+        client = client_factory.get_l3clos_client()
 
         # Gather facts using the persistent connection
 

@@ -1003,6 +1003,49 @@ class ApstraClientFactory:
                 sleep(wait)
                 min_delay = min(min_delay * 2, max_delay)
 
+    def list_revisions(self, blueprint_id):
+        """
+        List all available revisions for a blueprint.
+
+        :param blueprint_id: The ID of the blueprint.
+        :return: A list of revision dicts.
+        """
+        base_client = self.get_base_client()
+        blueprint = base_client.blueprints[blueprint_id]
+        revisions = blueprint.revisions.list()
+        if revisions is None:
+            return []
+        return revisions
+
+    def rollback_blueprint(self, blueprint_id, revision_id):
+        """
+        Rollback a blueprint to a specific revision.
+
+        :param blueprint_id: The ID of the blueprint.
+        :param revision_id: The revision ID to rollback to.
+        :return: The API response dict (may be empty on success).
+        """
+        base_client = self.get_base_client()
+        blueprint = base_client.blueprints[blueprint_id]
+        response = blueprint.rollback(data={"revision_id": str(revision_id)})
+        if response is None:
+            response = {}
+        return response
+
+    def revert_blueprint(self, blueprint_id):
+        """
+        Revert a blueprint to the latest backup version.
+
+        :param blueprint_id: The ID of the blueprint.
+        :return: The API response dict (may be empty on success).
+        """
+        base_client = self.get_base_client()
+        blueprint = base_client.blueprints[blueprint_id]
+        response = blueprint.revert()
+        if response is None:
+            response = {}
+        return response
+    
     def compare_and_update(self, current, desired, changes, _depth=0):
         """
         Recursively compare and update the current state to match the desired state.

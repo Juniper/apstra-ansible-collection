@@ -24,6 +24,13 @@ except ImportError:
     g = None
     normalize_port_speed = None
 
+try:
+    from aos.sdk.interface_map.interface_map_generator import (
+        gen_interface_map as _sdk_gen_interface_map,
+    )
+except ImportError:
+    _sdk_gen_interface_map = None
+
 DOCUMENTATION = """
 ---
 module: design
@@ -31,7 +38,8 @@ short_description: Manage Apstra design elements (logical devices, rack types, t
 description:
   - Create or ensure existence of Apstra design elements required before
     blueprint creation.
-  - Supports logical devices, rack types, and rack-based templates.
+  - Supports logical devices, rack types, rack-based templates, and
+    interface maps.
   - Uses the AOS SDK generator functions to build proper API payloads
     from simplified YAML definitions (same format as aos_models/).
   - Idempotent — skips creation if the element already exists.
@@ -71,6 +79,7 @@ options:
           - logical_device
           - rack_type
           - template
+          - interface_map
       name:
         description:
           - The name/id of the design element.
@@ -83,6 +92,9 @@ options:
       - For rack_type — must contain C(leafs) and optionally C(generics), C(access).
       - For template — must contain C(spine), C(racks), and optionally
         C(overlay_control_protocol), C(asn_allocation_policy).
+      - For interface_map — must contain C(logical_device) and C(device_profile).
+        Optionally C(dp_usage) (list of [port_id, transform_id] pairs); if omitted,
+        auto-generated from the device profile's default transformations.
     type: dict
     required: false
   state:
@@ -175,6 +187,18 @@ EXAMPLES = """
       design_type: template
       name: connectorops_2spine4leaf
     state: absent
+
+- name: Create interface map (auto-generates port mappings from device profile)
+  juniper.apstra.design:
+    api_url: "https://apstra:443/api"
+    auth_token: "{{ token }}"
+    id:
+      design_type: interface_map
+      name: simple_dc_vjunos_ifmap
+    body:
+      logical_device: simple_dc_vjunos_switch_96x1
+      device_profile: vJunos-switch
+    state: present
 """
 
 RETURN = """
@@ -433,11 +457,79 @@ def _get_template(client, name):
         return None
 
 
+# ── Interface Map Helpers ────────────────────────────────────────────────────
+
+
+def _get_interface_map(client, label):
+    """List design interface maps and return the one matching label. Returns None if not found."""
+    result = client.request("/design/interface-maps", method="GET")
+    if not result:
+        return None
+    for item in result.get("items", []):
+        if item.get("label") == label:
+            return item
+    return None
+
+
+def _create_interface_map(client, label, spec):
+    """Create a design interface map via the AOS SDK generator + API.
+
+    spec keys:
+      logical_device  — existing LD name (e.g. "simple_dc_vjunos_switch_96x1")
+      device_profile  — device profile ID (e.g. "vJunos-switch")
+      dp_usage        — optional list of [port_id, transform_id] pairs;
+                        auto-generated from default transforms if omitted
+    """
+    if _sdk_gen_interface_map is None:
+        raise Exception(
+            "The 'aos.sdk.interface_map' package is required for interface_map creation."
+        )
+
+    dp_id = spec.get("device_profile")
+    ld_id = spec.get("logical_device")
+
+    dp = client.device_profiles[dp_id].get()
+    if dp is None:
+        raise Exception(f"Device profile '{dp_id}' not found.")
+
+    ld = client.logical_devices[ld_id].get()
+    if ld is None:
+        raise Exception(f"Logical device '{ld_id}' not found.")
+
+    if spec.get("dp_usage"):
+        dp_usage = [tuple(u) for u in spec["dp_usage"]]
+    else:
+        # Auto-generate: use each port's default transformation
+        dp_usage = []
+        for port in dp["ports"]:
+            for transform in port["transformations"]:
+                if transform["is_default"]:
+                    dp_usage.append((port["port_id"], transform["transformation_id"]))
+                    break
+
+    payload = _sdk_gen_interface_map(dp, ld, dp_usage, label=label)
+    client.request("/design/interface-maps", method="POST", data=payload)
+    return _get_interface_map(client, label)
+
+
+def _delete_interface_map(client, label):
+    """Delete a design interface map by label. Returns True if deleted, False if not found."""
+    existing = _get_interface_map(client, label)
+    if not existing:
+        return False
+    imap_id = existing["id"]
+    client.request(f"/design/interface-maps/{imap_id}", method="DELETE")
+    return True
+
+
 # ── Delete Helpers ───────────────────────────────────────────────────────────
 
 
 def _delete_design_element(client, design_type, name):
     """Delete a design element by type and name."""
+    if design_type == "interface_map":
+        return _delete_interface_map(client, name)
+
     resource_map = {
         "logical_device": client.logical_devices,
         "rack_type": client.rack_types,
@@ -475,13 +567,19 @@ def main():
     spec = module.params.get("body")
     state = module.params["state"]
 
+    if design_type == "interface_map" and _sdk_gen_interface_map is None:
+        module.fail_json(
+            msg="The 'aos.sdk.interface_map' package is required for interface_map operations but not installed."
+        )
+
     if not design_type or design_type not in (
         "logical_device",
         "rack_type",
         "template",
+        "interface_map",
     ):
         module.fail_json(
-            msg="id.design_type is required and must be one of: logical_device, rack_type, template"
+            msg="id.design_type is required and must be one of: logical_device, rack_type, template, interface_map"
         )
     if not name:
         module.fail_json(msg="id.name is required")
@@ -502,11 +600,13 @@ def main():
             "logical_device": _get_logical_device,
             "rack_type": _get_rack_type,
             "template": _get_template,
+            "interface_map": _get_interface_map,
         }
         create_fn_map = {
             "logical_device": _create_logical_device,
             "rack_type": _create_rack_type,
             "template": _create_template,
+            "interface_map": _create_interface_map,
         }
 
         existing = get_fn_map[design_type](client, name)

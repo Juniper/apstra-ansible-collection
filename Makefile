@@ -134,12 +134,15 @@ install: build
 	test-resource_pools \
 	test-property_set \
 	test-external_gateway \
+	test-customize_external_gateway \
 	test-connectivity_template \
 	test-configlets \
 	test-generic_systems \
+	test-customize_generic_systems \
 	test-system_agents \
 	test-interface_map \
-	test-fabric_settings
+	test-fabric_settings \
+	test-ztp_device
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -210,7 +213,15 @@ test-interface_map: install
 test-fabric_settings: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/fabric_settings.yml
 
+test-rollback: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rollback.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
+
+test-ztp_device: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
+
 TESTBED_FILE ?=
+
+# ── ConnectorOps full run (all phases) ────────────────────────────────────────
 create-connectorops-blueprint: install
 	@if [ -z "$(TESTBED_FILE)" ]; then echo "ERROR: TESTBED_FILE is required. Usage: make create-connectorops-blueprint TESTBED_FILE=/path/to/testbed.yaml"; exit 1; fi
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
@@ -218,7 +229,58 @@ create-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-interface_map test-fabric_settings
+# ── ConnectorOps demo targets (cumulative — each includes all prerequisites) ─
+#  make demo-auth                   → Phase 1 only
+#  make demo-onboard                → Phases 1-2
+#  make demo-design                 → Phases 1-3
+#  make demo-interface-maps         → Phases 1-4
+#  make demo-blueprint              → Phases 1-5
+#  make demo-external-gateway       → Phases 1-6
+#  make demo-connectivity-template  → Phases 1-7
+
+_DEMO_BASE = pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+	$(APSTRA_COLLECTION_ROOT)/tests/create_connectorops_blueprint.yml \
+	-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
+	-e testbed_file=$(TESTBED_FILE)
+
+_DEMO_CHECK = @if [ -z "$(TESTBED_FILE)" ]; then echo "ERROR: TESTBED_FILE is required. Usage: make $@ TESTBED_FILE=/path/to/testbed.yaml"; exit 1; fi
+
+demo-auth: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth"
+
+demo-onboard: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard"
+
+demo-design: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard,phase3_design"
+
+demo-interface-maps: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard,phase3_design,phase4_interface_maps"
+
+demo-blueprint: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard,phase3_design,phase4_interface_maps,phase5_blueprint"
+
+demo-external-gateway: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard,phase3_design,phase4_interface_maps,phase5_blueprint,phase6_external_gateway"
+
+demo-connectivity-template: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard,phase3_design,phase4_interface_maps,phase5_blueprint,phase6_external_gateway,phase7_connectivity_template"
+
+delete-connectorops-blueprint: install
+	@if [ -z "$(TESTBED_FILE)" ]; then echo "ERROR: TESTBED_FILE is required. Usage: make delete-connectorops-blueprint TESTBED_FILE=/path/to/testbed.yaml"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+		$(APSTRA_COLLECTION_ROOT)/tests/delete_connectorops_blueprint.yml \
+		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
+		-e testbed_file=$(TESTBED_FILE)
+
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-customize_generic_systems test-system_agents test-interface_map test-fabric_settings test-ztp_device
 
 # Integration Tests
 .PHONY: test-integration-property_set
