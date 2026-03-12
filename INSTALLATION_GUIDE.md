@@ -139,7 +139,7 @@ ansible-galaxy collection install juniper-apstra-*.tar.gz --force
 
 ## 3. Install the Apstra SDK
 
-The collection depends on the **Apstra SDK** (`aos_sdk`) Python package. This SDK is **not available on PyPI** — it must be downloaded from the Juniper Support Downloads portal.
+The collection depends on the **Apstra SDK** (`aos_sdk`) Python package. A different package named `aos-sdk-api` exists on PyPI but is **not compatible** — the full SDK must be downloaded from the Juniper Support Downloads portal.
 
 ### Option A: From Juniper Support Downloads (Recommended)
 
