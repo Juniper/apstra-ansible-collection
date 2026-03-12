@@ -1,0 +1,1434 @@
+---
+################################################################################
+# Resource Pools Integration Tests
+#
+# Validates:
+# - ASN pool CRUD operations and idempotency
+# - IP pool CRUD operations (subnets format)
+# - VLAN pool CRUD operations
+# - VNI pool CRUD operations
+# - IPv6 pool CRUD operations
+# - Integer pool CRUD operations
+# - Error handling for invalid inputs
+# - Blueprint assignment (reuses pools from earlier tests)
+# - Blueprint assignment edge cases and negative tests
+#
+# Test Flow:
+# - Tests 1-6: Create and verify each pool type (pools kept for later tests)
+# - Test 7: Error handling (negative tests for resource_pools)
+# - Test 8: Blueprint assignment using pools from Tests 1, 2, 4
+# - Test 9: Blueprint assignment edge cases (multi-object scenarios)
+#   - SCENARIO 1: Multiple pools to single resource group
+#   - SCENARIO 2: Non-existent resource group (negative)
+#   - SCENARIO 3: Non-existent blueprint (negative)
+#   - SCENARIO 4: Pool replacement
+#   - SCENARIO 5: Unassign all pools (empty pool_ids)
+# - Final cleanup: Delete all pools and blueprints
+################################################################################
+
+- name: Resource Pools Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  vars:
+    test_timestamp: "{{ ansible_date_time.epoch }}"
+    test_results: []
+    apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
+    # Pool references (populated during tests, used across tests)
+    asn_pool_id: ""
+    ip_pool_id: ""
+    vlan_pool_id: ""
+    vni_pool_id: ""
+    ipv6_pool_id: ""
+    integer_pool_id: ""
+
+  tasks:
+    - name: Initialize test results tracker
+      ansible.builtin.set_fact:
+        test_results: []
+
+    - name: Authenticate to Apstra server
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    ################################################################################
+    # TEST 1: ASN Pool - Create and Verify (pool kept for blueprint test)
+    ################################################################################
+
+    - name: "TEST 1: ASN Pool - Create and Verify"
+      block:
+        - name: Create ASN pool with range 65000-65050
+          juniper.apstra.resource_pools:
+            type: asn
+            body:
+              display_name: "test_asn_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 65000
+                  last: 65050
+            auth_token: "{{ auth.token }}"
+          register: asn_pool
+
+        - name: Store ASN pool ID for later tests
+          ansible.builtin.set_fact:
+            asn_pool_id: "{{ asn_pool.id.asn_pool }}"
+
+        - name: Verify ASN pool creation with correct range size (51 ASNs)
+          ansible.builtin.assert:
+            that:
+              - asn_pool.changed
+              - asn_pool.id.asn_pool is defined
+              - asn_pool.asn_pool.display_name == "test_asn_pool_" ~ test_timestamp
+              - asn_pool.asn_pool.ranges | length == 1
+              - asn_pool.asn_pool.ranges[0].first == 65000
+              - asn_pool.asn_pool.ranges[0].last == 65050
+
+        - name: Create same ASN pool again (idempotency check)
+          juniper.apstra.resource_pools:
+            type: asn
+            body:
+              display_name: "test_asn_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 65000
+                  last: 65050
+            auth_token: "{{ auth.token }}"
+          register: asn_pool_nochange
+
+        - name: Verify ASN pool idempotency
+          ansible.builtin.assert:
+            that:
+              - not asn_pool_nochange.changed
+              - asn_pool_nochange.id.asn_pool == asn_pool.id.asn_pool
+
+        - name: Update ASN pool - add second range 65200-65250
+          juniper.apstra.resource_pools:
+            type: asn
+            id:
+              asn_pool: "{{ asn_pool.id.asn_pool }}"
+            body:
+              display_name: "test_asn_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 65000
+                  last: 65050
+                - first: 65200
+                  last: 65250
+            auth_token: "{{ auth.token }}"
+          register: asn_pool_update
+
+        - name: Verify ASN pool update - now has two ranges
+          ansible.builtin.assert:
+            that:
+              - asn_pool_update.changed
+              - asn_pool_update.asn_pool.ranges | length == 2
+
+        - name: Record TEST 1 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: ASN Pool CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create ASN pool with range 65000-65050',
+                  'Verify pool creation (51 ASNs)',
+                  'Re-apply same config (idempotency)',
+                  'Add second range 65200-65250',
+                  'Verify pool now has two ranges'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 1 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 1: ASN Pool CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create ASN pool with range 65000-65050',
+                  'Verify pool creation (51 ASNs)',
+                  'Re-apply same config (idempotency)',
+                  'Add second range 65200-65250',
+                  'Verify pool now has two ranges'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 2: IP Pool - Create and Verify (pool kept for blueprint test)
+    ################################################################################
+
+    - name: "TEST 2: IP Pool - Create and Verify"
+      block:
+        - name: Create IP pool with subnet 10.100.0.0/24
+          juniper.apstra.resource_pools:
+            type: ip
+            body:
+              display_name: "test_ip_pool_{{ test_timestamp }}"
+              subnets:
+                - network: "10.100.0.0/24"
+            auth_token: "{{ auth.token }}"
+          register: ip_pool
+
+        - name: Store IP pool ID for later tests
+          ansible.builtin.set_fact:
+            ip_pool_id: "{{ ip_pool.id.ip_pool }}"
+
+        - name: Verify IP pool creation with /24 subnet
+          ansible.builtin.assert:
+            that:
+              - ip_pool.changed
+              - ip_pool.id.ip_pool is defined
+              - ip_pool.ip_pool.subnets | length == 1
+              - ip_pool.ip_pool.subnets[0].network == "10.100.0.0/24"
+
+        - name: Create same IP pool again (idempotency check)
+          juniper.apstra.resource_pools:
+            type: ip
+            body:
+              display_name: "test_ip_pool_{{ test_timestamp }}"
+              subnets:
+                - network: "10.100.0.0/24"
+            auth_token: "{{ auth.token }}"
+          register: ip_pool_nochange
+
+        - name: Verify IP pool idempotency
+          ansible.builtin.assert:
+            that:
+              - not ip_pool_nochange.changed
+
+        - name: Update IP pool - add second subnet 10.101.0.0/24
+          juniper.apstra.resource_pools:
+            type: ip
+            id:
+              ip_pool: "{{ ip_pool.id.ip_pool }}"
+            body:
+              display_name: "test_ip_pool_{{ test_timestamp }}"
+              subnets:
+                - network: "10.100.0.0/24"
+                - network: "10.101.0.0/24"
+            auth_token: "{{ auth.token }}"
+          register: ip_pool_update
+
+        - name: Verify IP pool update - now has two subnets
+          ansible.builtin.assert:
+            that:
+              - ip_pool_update.changed
+              - ip_pool_update.ip_pool.subnets | length == 2
+
+        - name: Record TEST 2 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: IP Pool CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create IP pool with subnet 10.100.0.0/24',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Add second subnet 10.101.0.0/24',
+                  'Verify pool now has two subnets'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 2 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 2: IP Pool CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create IP pool with subnet 10.100.0.0/24',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Add second subnet 10.101.0.0/24',
+                  'Verify pool now has two subnets'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 3: VLAN Pool - Create and Verify
+    ################################################################################
+
+    - name: "TEST 3: VLAN Pool - Create and Verify"
+      block:
+        - name: Create VLAN pool with range 100-200
+          juniper.apstra.resource_pools:
+            type: vlan
+            body:
+              display_name: "test_vlan_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 100
+                  last: 200
+            auth_token: "{{ auth.token }}"
+          register: vlan_pool
+
+        - name: Store VLAN pool ID for later cleanup
+          ansible.builtin.set_fact:
+            vlan_pool_id: "{{ vlan_pool.id.vlan_pool }}"
+
+        - name: Verify VLAN pool creation with range 100-200
+          ansible.builtin.assert:
+            that:
+              - vlan_pool.changed
+              - vlan_pool.id.vlan_pool is defined
+              - vlan_pool.vlan_pool.ranges[0].first == 100
+              - vlan_pool.vlan_pool.ranges[0].last == 200
+
+        - name: Create same VLAN pool again (idempotency check)
+          juniper.apstra.resource_pools:
+            type: vlan
+            body:
+              display_name: "test_vlan_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 100
+                  last: 200
+            auth_token: "{{ auth.token }}"
+          register: vlan_pool_nochange
+
+        - name: Verify VLAN pool idempotency
+          ansible.builtin.assert:
+            that:
+              - not vlan_pool_nochange.changed
+
+        - name: Update VLAN pool - extend range to 100-300
+          juniper.apstra.resource_pools:
+            type: vlan
+            id:
+              vlan_pool: "{{ vlan_pool.id.vlan_pool }}"
+            body:
+              display_name: "test_vlan_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 100
+                  last: 300
+            auth_token: "{{ auth.token }}"
+          register: vlan_pool_update
+
+        - name: Verify VLAN pool update - range extended
+          ansible.builtin.assert:
+            that:
+              - vlan_pool_update.changed
+              - vlan_pool_update.vlan_pool.ranges[0].last == 300
+
+        - name: Record TEST 3 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: VLAN Pool CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create VLAN pool with range 100-200',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Extend range to 100-300',
+                  'Verify range extended'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 3 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 3: VLAN Pool CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create VLAN pool with range 100-200',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Extend range to 100-300',
+                  'Verify range extended'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 4: VNI Pool - Create and Verify (pool kept for blueprint test)
+    ################################################################################
+
+    - name: "TEST 4: VNI Pool - Create and Verify"
+      block:
+        - name: Create VNI pool with range 5000-6000
+          juniper.apstra.resource_pools:
+            type: vni
+            body:
+              display_name: "test_vni_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 5000
+                  last: 6000
+            auth_token: "{{ auth.token }}"
+          register: vni_pool
+
+        - name: Store VNI pool ID for later tests
+          ansible.builtin.set_fact:
+            vni_pool_id: "{{ vni_pool.id.vni_pool }}"
+
+        - name: Verify VNI pool creation with range 5000-6000
+          ansible.builtin.assert:
+            that:
+              - vni_pool.changed
+              - vni_pool.id.vni_pool is defined
+              - vni_pool.vni_pool.ranges[0].first == 5000
+              - vni_pool.vni_pool.ranges[0].last == 6000
+
+        - name: Create same VNI pool again (idempotency check)
+          juniper.apstra.resource_pools:
+            type: vni
+            body:
+              display_name: "test_vni_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 5000
+                  last: 6000
+            auth_token: "{{ auth.token }}"
+          register: vni_pool_nochange
+
+        - name: Verify VNI pool idempotency
+          ansible.builtin.assert:
+            that:
+              - not vni_pool_nochange.changed
+
+        - name: Update VNI pool - extend range to 5000-7000
+          juniper.apstra.resource_pools:
+            type: vni
+            id:
+              vni_pool: "{{ vni_pool.id.vni_pool }}"
+            body:
+              display_name: "test_vni_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 5000
+                  last: 7000
+            auth_token: "{{ auth.token }}"
+          register: vni_pool_update
+
+        - name: Verify VNI pool update - range extended
+          ansible.builtin.assert:
+            that:
+              - vni_pool_update.changed
+              - vni_pool_update.vni_pool.ranges[0].last == 7000
+
+        - name: Record TEST 4 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: VNI Pool CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create VNI pool with range 5000-6000',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Extend range to 5000-7000',
+                  'Verify range extended'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 4 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 4: VNI Pool CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create VNI pool with range 5000-6000',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Extend range to 5000-7000',
+                  'Verify range extended'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 5: IPv6 Pool - Create and Verify
+    ################################################################################
+
+    - name: "TEST 5: IPv6 Pool - Create and Verify"
+      block:
+        - name: Create IPv6 pool with subnet fc01:a05:fab::/48
+          juniper.apstra.resource_pools:
+            type: ipv6
+            body:
+              display_name: "test_ipv6_pool_{{ test_timestamp }}"
+              subnets:
+                - network: "fc01:a05:fab::/48"
+            auth_token: "{{ auth.token }}"
+          register: ipv6_pool
+
+        - name: Store IPv6 pool ID for later cleanup
+          ansible.builtin.set_fact:
+            ipv6_pool_id: "{{ ipv6_pool.id.ipv6_pool }}"
+
+        - name: Verify IPv6 pool creation with /48 subnet
+          ansible.builtin.assert:
+            that:
+              - ipv6_pool.changed
+              - ipv6_pool.id.ipv6_pool is defined
+              - ipv6_pool.ipv6_pool.subnets | length == 1
+
+        - name: Create same IPv6 pool again (idempotency check)
+          juniper.apstra.resource_pools:
+            type: ipv6
+            body:
+              display_name: "test_ipv6_pool_{{ test_timestamp }}"
+              subnets:
+                - network: "fc01:a05:fab::/48"
+            auth_token: "{{ auth.token }}"
+          register: ipv6_pool_nochange
+
+        - name: Verify IPv6 pool idempotency
+          ansible.builtin.assert:
+            that:
+              - not ipv6_pool_nochange.changed
+
+        - name: Update IPv6 pool - add second subnet
+          juniper.apstra.resource_pools:
+            type: ipv6
+            id:
+              ipv6_pool: "{{ ipv6_pool.id.ipv6_pool }}"
+            body:
+              display_name: "test_ipv6_pool_{{ test_timestamp }}"
+              subnets:
+                - network: "fc01:a05:fab::/48"
+                - network: "fc01:a05:fac::/48"
+            auth_token: "{{ auth.token }}"
+          register: ipv6_pool_update
+
+        - name: Verify IPv6 pool update - now has two subnets
+          ansible.builtin.assert:
+            that:
+              - ipv6_pool_update.changed
+              - ipv6_pool_update.ipv6_pool.subnets | length == 2
+
+        - name: Record TEST 5 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 5: IPv6 Pool CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create IPv6 pool with subnet fc01:a05:fab::/48',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Add second subnet fc01:a05:fac::/48',
+                  'Verify pool now has two subnets'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 5 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 5: IPv6 Pool CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create IPv6 pool with subnet fc01:a05:fab::/48',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Add second subnet fc01:a05:fac::/48',
+                  'Verify pool now has two subnets'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 6: Integer Pool - Create and Verify
+    ################################################################################
+
+    - name: "TEST 6: Integer Pool - Create and Verify"
+      block:
+        - name: Create Integer pool with range 1000-2000
+          juniper.apstra.resource_pools:
+            type: integer
+            body:
+              display_name: "test_integer_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 1000
+                  last: 2000
+            auth_token: "{{ auth.token }}"
+          register: integer_pool
+
+        - name: Store Integer pool ID for later cleanup
+          ansible.builtin.set_fact:
+            integer_pool_id: "{{ integer_pool.id.integer_pool }}"
+
+        - name: Verify Integer pool creation with range 1000-2000
+          ansible.builtin.assert:
+            that:
+              - integer_pool.changed
+              - integer_pool.id.integer_pool is defined
+              - integer_pool.integer_pool.ranges[0].first == 1000
+              - integer_pool.integer_pool.ranges[0].last == 2000
+
+        - name: Create same Integer pool again (idempotency check)
+          juniper.apstra.resource_pools:
+            type: integer
+            body:
+              display_name: "test_integer_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 1000
+                  last: 2000
+            auth_token: "{{ auth.token }}"
+          register: integer_pool_nochange
+
+        - name: Verify Integer pool idempotency
+          ansible.builtin.assert:
+            that:
+              - not integer_pool_nochange.changed
+
+        - name: Update Integer pool - add second range 3000-4000
+          juniper.apstra.resource_pools:
+            type: integer
+            id:
+              integer_pool: "{{ integer_pool.id.integer_pool }}"
+            body:
+              display_name: "test_integer_pool_{{ test_timestamp }}"
+              ranges:
+                - first: 1000
+                  last: 2000
+                - first: 3000
+                  last: 4000
+            auth_token: "{{ auth.token }}"
+          register: integer_pool_update
+
+        - name: Verify Integer pool update - now has two ranges
+          ansible.builtin.assert:
+            that:
+              - integer_pool_update.changed
+              - integer_pool_update.integer_pool.ranges | length == 2
+
+        - name: Record TEST 6 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 6: Integer Pool CRUD',
+                'status': 'PASSED',
+                'steps': [
+                  'Create Integer pool with range 1000-2000',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Add second range 3000-4000',
+                  'Verify pool now has two ranges'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 6 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 6: Integer Pool CRUD',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create Integer pool with range 1000-2000',
+                  'Verify pool creation',
+                  'Re-apply same config (idempotency)',
+                  'Add second range 3000-4000',
+                  'Verify pool now has two ranges'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 7: Error Handling
+    ################################################################################
+
+    - name: "TEST 7: Error Handling"
+      block:
+        - name: Create ASN pool without display_name (should fail)
+          juniper.apstra.resource_pools:
+            type: asn
+            body:
+              ranges:
+                - first: 65000
+                  last: 65100
+            auth_token: "{{ auth.token }}"
+          register: no_name_result
+          ignore_errors: true
+
+        - name: Access non-existent ASN pool (should fail)
+          juniper.apstra.resource_pools:
+            type: asn
+            id:
+              asn_pool: "non-existent-pool-{{ test_timestamp }}"
+            auth_token: "{{ auth.token }}"
+          register: not_found_result
+          ignore_errors: true
+
+        - name: Delete non-existent ASN pool (should not fail - idempotent delete)
+          juniper.apstra.resource_pools:
+            type: asn
+            id:
+              asn_pool: "non-existent-pool-{{ test_timestamp }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: delete_missing
+
+        - name: Verify error handling behavior
+          ansible.builtin.assert:
+            that:
+              - no_name_result.failed
+              - not_found_result.failed
+              - not delete_missing.changed
+
+        - name: Record TEST 7 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 7: Error Handling',
+                'status': 'PASSED',
+                'steps': [
+                  'Create ASN pool without display_name (expect failure)',
+                  'Access non-existent ASN pool (expect failure)',
+                  'Delete non-existent ASN pool (expect idempotent success)',
+                  'Verify error handling behavior'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 7 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 7: Error Handling',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create ASN pool without display_name (expect failure)',
+                  'Access non-existent ASN pool (expect failure)',
+                  'Delete non-existent ASN pool (expect idempotent success)',
+                  'Verify error handling behavior'
+                ]
+              }] }}
+
+    ################################################################################
+    # TEST 8: Blueprint Assignment - Reuses pools from Tests 1, 2, 4
+    # Uses direct API calls (ansible.builtin.uri) for resource pool assignment
+    # because the resource_group module has limitations
+    ################################################################################
+
+    - name: "TEST 8: Blueprint Assignment (using existing pools)"
+      vars:
+        bp_name: "test_bp_rp_{{ test_timestamp }}"
+      block:
+        - name: Initialize resource group name variables
+          ansible.builtin.set_fact:
+            asn_rg_name: ""
+            ip_rg_name: ""
+            vni_rg_name: ""
+            bp_id: ""
+
+        - name: Skip test if required pools were not created
+          ansible.builtin.assert:
+            that:
+              - asn_pool_id != ''
+              - ip_pool_id != ''
+              - vni_pool_id != ''
+            fail_msg: "Skipping blueprint test - required pools not available"
+
+        - name: Create blueprint for resource pool assignment testing
+          juniper.apstra.blueprint:
+            body:
+              label: "{{ bp_name }}"
+              design: "two_stage_l3clos"
+              init_type: "template_reference"
+              template_id: "L2_Virtual_EVPN"
+            lock_state: "ignore"
+            auth_token: "{{ auth.token }}"
+          register: bp
+
+        - name: Store blueprint ID
+          ansible.builtin.set_fact:
+            bp_id: "{{ bp.id.blueprint }}"
+
+        - name: Verify blueprint creation
+          ansible.builtin.assert:
+            that:
+              - bp.id.blueprint is defined
+
+        - name: Get resource groups from blueprint via API
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: rg_response
+
+        - name: Debug - Show resource groups from API
+          ansible.builtin.debug:
+            msg: "Resource groups: {{ rg_response.json | to_nice_json }}"
+
+        - name: Find ASN resource group
+          ansible.builtin.set_fact:
+            asn_rg: "{{ rg_response.json['items'] | selectattr('type', 'equalto', 'asn') | first | default({}) }}"
+          failed_when: false
+
+        - name: Find IP resource group
+          ansible.builtin.set_fact:
+            ip_rg: "{{ rg_response.json['items'] | selectattr('type', 'equalto', 'ip') | first | default({}) }}"
+          failed_when: false
+
+        - name: Find VNI resource group
+          ansible.builtin.set_fact:
+            vni_rg: "{{ rg_response.json['items'] | selectattr('type', 'equalto', 'vni') | first | default({}) }}"
+          failed_when: false
+
+        - name: Store resource group names
+          ansible.builtin.set_fact:
+            asn_rg_name: "{{ asn_rg.name | default('') }}"
+            ip_rg_name: "{{ ip_rg.name | default('') }}"
+            vni_rg_name: "{{ vni_rg.name | default('') }}"
+
+        - name: Debug - Show discovered resource group names
+          ansible.builtin.debug:
+            msg: |
+              Discovered resource groups:
+                ASN: {{ asn_rg_name | default('NOT FOUND') }}
+                IP:  {{ ip_rg_name | default('NOT FOUND') }}
+                VNI: {{ vni_rg_name | default('NOT FOUND') }}
+              Available types: {{ rg_response.json['items'] | map(attribute='type') | unique | list }}
+
+        - name: Verify resource groups discovered
+          ansible.builtin.assert:
+            that:
+              - asn_rg_name | length > 0 or ip_rg_name | length > 0 or vni_rg_name | length > 0
+            fail_msg: "No resource groups found in blueprint"
+
+        - name: Assign ASN pool (from TEST 1) to blueprint
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/asn/{{ asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ asn_pool_id }}"
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: asn_assign
+          when: asn_rg_name | length > 0
+
+        - name: Display ASN pool assignment result
+          ansible.builtin.debug:
+            var: asn_assign
+          when: asn_assign is defined
+
+        - name: Assign IP pool (from TEST 2) to blueprint
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/ip/{{ ip_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ ip_pool_id }}"
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: ip_assign
+          when: ip_rg_name | length > 0
+
+        - name: Display IP pool assignment result
+          ansible.builtin.debug:
+            var: ip_assign
+          when: ip_assign is defined
+
+        - name: Assign VNI pool (from TEST 4) to blueprint
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/vni/{{ vni_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ vni_pool_id }}"
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: vni_assign
+          when: vni_rg_name | length > 0
+
+        - name: Display VNI pool assignment result
+          ansible.builtin.debug:
+            var: vni_assign
+          when: vni_assign is defined
+
+        - name: Verify ASN pool assignment via API
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/asn/{{ asn_rg_name }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: asn_check
+          when: asn_rg_name | length > 0
+
+        - name: Assert ASN pool is assigned
+          ansible.builtin.assert:
+            that:
+              - asn_pool_id in asn_check.json.pool_ids
+            fail_msg: "ASN pool was not properly assigned to the blueprint"
+            success_msg: "ASN pool successfully assigned to the blueprint"
+          when: asn_rg_name | length > 0 and asn_check.json is defined
+
+        - name: Re-assign same ASN pool (idempotency check)
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/asn/{{ asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ asn_pool_id }}"
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: asn_reassign
+          when: asn_rg_name | length > 0
+
+        - name: Unassign ASN pool from resource group
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/asn/{{ asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids: []
+            validate_certs: false
+            status_code: [200, 202, 204]
+          when: asn_rg_name | length > 0
+
+        - name: Unassign IP pool from resource group
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/ip/{{ ip_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids: []
+            validate_certs: false
+            status_code: [200, 202, 204]
+          when: ip_rg_name | length > 0
+
+        - name: Unassign VNI pool from resource group
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp.id.blueprint }}/resource_groups/vni/{{ vni_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids: []
+            validate_certs: false
+            status_code: [200, 202, 204]
+          when: vni_rg_name | length > 0
+
+        - name: Delete blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ bp.id.blueprint }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: bp_delete
+
+        - name: Verify blueprint deletion
+          ansible.builtin.assert:
+            that:
+              - bp_delete.changed
+
+        - name: Record TEST 8 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 8: Blueprint Assignment',
+                'status': 'PASSED',
+                'steps': [
+                  'Create blueprint for testing',
+                  'Discover resource groups via API (ASN/IP/VNI)',
+                  'Assign ASN pool (from TEST 1) to blueprint via API',
+                  'Assign IP pool (from TEST 2) to blueprint via API',
+                  'Assign VNI pool (from TEST 4) to blueprint via API',
+                  'Verify ASN pool assignment via API',
+                  'Re-assign same ASN pool (idempotency)',
+                  'Unassign all pools from resource groups via API',
+                  'Delete blueprint'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 8 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 8: Blueprint Assignment',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create blueprint for testing',
+                  'Discover resource groups via API (ASN/IP/VNI)',
+                  'Assign ASN pool (from TEST 1) to blueprint via API',
+                  'Assign IP pool (from TEST 2) to blueprint via API',
+                  'Assign VNI pool (from TEST 4) to blueprint via API',
+                  'Verify ASN pool assignment via API',
+                  'Re-assign same ASN pool (idempotency)',
+                  'Unassign all pools from resource groups via API',
+                  'Delete blueprint'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup - Unassign pools via API
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ bp_id }}/resource_groups/{{ item.type }}/{{ item.name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids: []
+            validate_certs: false
+            status_code: [200, 202, 204, 404]
+          loop:
+            - {type: "asn", name: "{{ asn_rg_name }}"}
+            - {type: "ip", name: "{{ ip_rg_name }}"}
+            - {type: "vni", name: "{{ vni_rg_name }}"}
+          when: bp_id | length > 0 and item.name | length > 0
+          failed_when: false
+
+        - name: Cleanup - Delete blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ bp_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          failed_when: false
+          when: bp_id | length > 0
+
+    ################################################################################
+    # TEST 9: Blueprint Assignment Edge Cases & Negative Tests
+    # Uses direct API calls (ansible.builtin.uri) for resource pool assignment
+    ################################################################################
+
+    - name: "TEST 9: Blueprint Assignment Edge Cases"
+      vars:
+        bp_name: "test_bp_edge_{{ test_timestamp }}"
+      block:
+        - name: Initialize edge case test variables
+          ansible.builtin.set_fact:
+            edge_bp_id: ""
+            edge_asn_rg_name: ""
+            edge_ip_rg_name: ""
+            second_asn_pool_id: ""
+
+        - name: Skip test if required pools were not created
+          ansible.builtin.assert:
+            that:
+              - asn_pool_id != ''
+              - ip_pool_id != ''
+            fail_msg: "Skipping edge case test - required pools not available"
+
+        # --- Create secondary ASN pool for multi-pool tests ---
+        - name: Create second ASN pool for multi-pool assignment test
+          juniper.apstra.resource_pools:
+            type: asn
+            body:
+              display_name: "test_asn_pool_secondary_{{ test_timestamp }}"
+              ranges:
+                - first: 65300
+                  last: 65350
+            auth_token: "{{ auth.token }}"
+          register: second_asn_pool
+
+        - name: Store second ASN pool ID
+          ansible.builtin.set_fact:
+            second_asn_pool_id: "{{ second_asn_pool.id.asn_pool }}"
+
+        # --- Create blueprint for edge case testing ---
+        - name: Create blueprint for edge case testing
+          juniper.apstra.blueprint:
+            body:
+              label: "{{ bp_name }}"
+              design: "two_stage_l3clos"
+              init_type: "template_reference"
+              template_id: "L2_Virtual_EVPN"
+            lock_state: "ignore"
+            auth_token: "{{ auth.token }}"
+          register: edge_bp
+
+        - name: Store edge case blueprint ID
+          ansible.builtin.set_fact:
+            edge_bp_id: "{{ edge_bp.id.blueprint }}"
+
+        # --- Discover resource groups via API ---
+        - name: Get resource groups from edge case blueprint via API
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: edge_rg_response
+
+        - name: Find ASN resource group for edge cases
+          ansible.builtin.set_fact:
+            edge_asn_rg: "{{ edge_rg_response.json['items'] | selectattr('type', 'equalto', 'asn') | first | default({}) }}"
+          failed_when: false
+
+        - name: Find IP resource group for edge cases
+          ansible.builtin.set_fact:
+            edge_ip_rg: "{{ edge_rg_response.json['items'] | selectattr('type', 'equalto', 'ip') | first | default({}) }}"
+          failed_when: false
+
+        - name: Store edge resource group names
+          ansible.builtin.set_fact:
+            edge_asn_rg_name: "{{ edge_asn_rg.name | default('') }}"
+            edge_ip_rg_name: "{{ edge_ip_rg.name | default('') }}"
+
+        ########################################################################
+        # SCENARIO 1: Assign multiple pools to single resource group
+        ########################################################################
+        - name: "SCENARIO 1: Assign multiple ASN pools to single resource group"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ asn_pool_id }}"
+                - "{{ second_asn_pool_id }}"
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: multi_pool_assign
+          when: edge_asn_rg_name | length > 0
+
+        - name: Verify multiple pools assigned to single resource group
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: multi_pool_check
+          when: edge_asn_rg_name | length > 0
+
+        - name: Assert both ASN pools are assigned
+          ansible.builtin.assert:
+            that:
+              - asn_pool_id in multi_pool_check.json.pool_ids
+              - second_asn_pool_id in multi_pool_check.json.pool_ids
+              - multi_pool_check.json.pool_ids | length == 2
+            fail_msg: "Expected both ASN pools to be assigned to resource group"
+          when: edge_asn_rg_name | length > 0 and multi_pool_check.json is defined
+
+        ########################################################################
+        # SCENARIO 2: Assign to non-existent resource group (negative test)
+        ########################################################################
+        - name: "SCENARIO 2: Assign pool to non-existent resource group (should fail)"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/non_existent_rg_{{ test_timestamp }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ asn_pool_id }}"
+            validate_certs: false
+            status_code: [400, 404, 422]
+          register: no_rg_result
+          failed_when: false
+
+        - name: Verify non-existent resource group assignment failed
+          ansible.builtin.assert:
+            that:
+              - no_rg_result.status in [400, 404, 422]
+            fail_msg: "Expected failure when assigning to non-existent resource group"
+
+        ########################################################################
+        # SCENARIO 3: Assign to non-existent blueprint (negative test)
+        ########################################################################
+        - name: "SCENARIO 3: Assign pool to non-existent blueprint (should fail)"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/non-existent-bp-{{ test_timestamp }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ asn_pool_id }}"
+            validate_certs: false
+            status_code: [400, 404, 422]
+          register: no_bp_result
+          failed_when: false
+          when: edge_asn_rg_name | length > 0
+
+        - name: Verify non-existent blueprint assignment failed
+          ansible.builtin.assert:
+            that:
+              - no_bp_result.status in [400, 404, 422]
+            fail_msg: "Expected failure when assigning to non-existent blueprint"
+          when: edge_asn_rg_name | length > 0
+
+        ########################################################################
+        # SCENARIO 4: Replace pools (update assignment)
+        ########################################################################
+        - name: "SCENARIO 4: Replace multiple pools with single pool"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids:
+                - "{{ second_asn_pool_id }}"
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: replace_pool_result
+          when: edge_asn_rg_name | length > 0
+
+        - name: Verify pool replacement
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: replaced_check
+          when: edge_asn_rg_name | length > 0
+
+        - name: Assert only second pool remains after replacement
+          ansible.builtin.assert:
+            that:
+              - second_asn_pool_id in replaced_check.json.pool_ids
+              - asn_pool_id not in replaced_check.json.pool_ids
+              - replaced_check.json.pool_ids | length == 1
+            fail_msg: "Expected only second ASN pool after replacement"
+          when: edge_asn_rg_name | length > 0 and replaced_check.json is defined
+
+        ########################################################################
+        # SCENARIO 5: Empty pool assignment (unassign all)
+        ########################################################################
+        - name: "SCENARIO 5: Unassign all pools (empty pool_ids)"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids: []
+            validate_certs: false
+            status_code: [200, 202, 204]
+          register: unassign_all_result
+          when: edge_asn_rg_name | length > 0
+
+        - name: Verify all pools unassigned
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp.id.blueprint }}/resource_groups/asn/{{ edge_asn_rg_name }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: 200
+          register: unassign_check
+          when: edge_asn_rg_name | length > 0
+
+        - name: Assert no pools remain after unassignment
+          ansible.builtin.assert:
+            that:
+              - unassign_check.json.pool_ids | length == 0
+            fail_msg: "Expected no pools after unassignment"
+          when: edge_asn_rg_name | length > 0 and unassign_check.json is defined
+
+        - name: Record TEST 9 success
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 9: Blueprint Assignment Edge Cases',
+                'status': 'PASSED',
+                'steps': [
+                  'Create secondary ASN pool for testing',
+                  'Create blueprint for edge case testing',
+                  'SCENARIO 1: Assign multiple pools to single resource group',
+                  'SCENARIO 2: Assign to non-existent resource group (expect failure)',
+                  'SCENARIO 3: Assign to non-existent blueprint (expect failure)',
+                  'SCENARIO 4: Replace multiple pools with single pool',
+                  'SCENARIO 5: Unassign all pools (empty pool_ids)'
+                ]
+              }] }}
+
+      rescue:
+        - name: Record TEST 9 failure
+          ansible.builtin.set_fact:
+            test_results: >-
+              {{ test_results + [{
+                'test': 'TEST 9: Blueprint Assignment Edge Cases',
+                'status': 'FAILED',
+                'error': ansible_failed_result.msg | default('Unknown error'),
+                'steps': [
+                  'Create secondary ASN pool for testing',
+                  'Create blueprint for edge case testing',
+                  'SCENARIO 1: Assign multiple pools to single resource group',
+                  'SCENARIO 2: Assign to non-existent resource group (expect failure)',
+                  'SCENARIO 3: Assign to non-existent blueprint (expect failure)',
+                  'SCENARIO 4: Replace multiple pools with single pool',
+                  'SCENARIO 5: Unassign all pools (empty pool_ids)'
+                ]
+              }] }}
+
+      always:
+        - name: Cleanup - Unassign pools from edge case blueprint via API
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ edge_bp_id }}/resource_groups/{{ item.type }}/{{ item.name }}"
+            method: PUT
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              pool_ids: []
+            validate_certs: false
+            status_code: [200, 202, 204, 404]
+          loop:
+            - {type: "asn", name: "{{ edge_asn_rg_name }}"}
+            - {type: "ip", name: "{{ edge_ip_rg_name }}"}
+          when: edge_bp_id | length > 0 and item.name | length > 0
+          failed_when: false
+
+        - name: Cleanup - Delete edge case blueprint
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ edge_bp_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          failed_when: false
+          when: edge_bp_id | length > 0
+
+        - name: Cleanup - Delete secondary ASN pool
+          juniper.apstra.resource_pools:
+            type: asn
+            id:
+              asn_pool: "{{ second_asn_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          failed_when: false
+          when: second_asn_pool_id | length > 0
+
+    ################################################################################
+    # Final Cleanup - Delete All Resource Pools
+    ################################################################################
+
+    - name: "Cleanup: Delete all resource pools"
+      block:
+        - name: Delete ASN pool
+          juniper.apstra.resource_pools:
+            type: asn
+            id:
+              asn_pool: "{{ asn_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: asn_pool_id | length > 0
+          failed_when: false
+
+        - name: Delete IP pool
+          juniper.apstra.resource_pools:
+            type: ip
+            id:
+              ip_pool: "{{ ip_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: ip_pool_id | length > 0
+          failed_when: false
+
+        - name: Delete VLAN pool
+          juniper.apstra.resource_pools:
+            type: vlan
+            id:
+              vlan_pool: "{{ vlan_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: vlan_pool_id | length > 0
+          failed_when: false
+
+        - name: Delete VNI pool
+          juniper.apstra.resource_pools:
+            type: vni
+            id:
+              vni_pool: "{{ vni_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: vni_pool_id | length > 0
+          failed_when: false
+
+        - name: Delete IPv6 pool
+          juniper.apstra.resource_pools:
+            type: ipv6
+            id:
+              ipv6_pool: "{{ ipv6_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: ipv6_pool_id | length > 0
+          failed_when: false
+
+        - name: Delete Integer pool
+          juniper.apstra.resource_pools:
+            type: integer
+            id:
+              integer_pool: "{{ integer_pool_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: integer_pool_id | length > 0
+          failed_when: false
+
+    ################################################################################
+    # Final Logout and Test Summary
+    ################################################################################
+
+    - name: Logout from Apstra server
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+
+    - name: Calculate test statistics
+      ansible.builtin.set_fact:
+        tests_passed: "{{ test_results | selectattr('status', 'equalto', 'PASSED') | list | length }}"
+        tests_failed: "{{ test_results | selectattr('status', 'equalto', 'FAILED') | list | length }}"
+        tests_total: "{{ test_results | length }}"
+
+    - name: Display each test result with steps
+      ansible.builtin.debug:
+        msg: |
+          {{ '✅' if item.status == 'PASSED' else '❌' }} {{ item.test }}: {{ item.status }}{{ ' - ' + item.error if item.error is defined else '' }}
+          {% for step in item.steps | default([]) %}
+              • {{ step }}
+          {% endfor %}
+      loop: "{{ test_results }}"
+      loop_control:
+        label: "{{ item.test }}"
