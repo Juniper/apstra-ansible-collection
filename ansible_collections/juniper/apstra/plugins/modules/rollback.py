@@ -175,6 +175,8 @@ def main():
         blueprint_id = id.get("blueprint")
         if not blueprint_id:
             raise ValueError("'id.blueprint' is required for rollback operations")
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id["blueprint"] = blueprint_id
 
         result["id"] = id
 

@@ -204,6 +204,10 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Coerce integer fields that the API requires as int, not str
         if body:
             for int_field in ("vni_id", "vlan_id"):

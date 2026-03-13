@@ -519,6 +519,10 @@ def main():
         body = module.params.get("body", None)
         state = module.params["state"]
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Determine scope: global vs blueprint
         is_blueprint_scope = "blueprint" in id
 

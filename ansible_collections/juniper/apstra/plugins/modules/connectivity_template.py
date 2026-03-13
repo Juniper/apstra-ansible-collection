@@ -831,6 +831,8 @@ def main():
         blueprint_id = id_param.get("blueprint")
         if not blueprint_id:
             raise ValueError("'id.blueprint' is required")
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
         ct_id = id_param.get("ct_id")
         name = body.get("name")
         ct_type = body.get("type")

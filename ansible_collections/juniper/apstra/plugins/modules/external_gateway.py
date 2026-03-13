@@ -268,6 +268,10 @@ def main():
         body = module.params.get("body", None)
         state = module.params["state"]
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Coerce integer fields — Ansible may pass them as strings
         # when values come from Jinja2 templating
         _INT_FIELDS = ("gw_asn", "ttl", "keepalive_timer", "holdtime_timer")

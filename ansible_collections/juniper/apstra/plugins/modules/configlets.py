@@ -543,6 +543,8 @@ def _manage_blueprint_configlet(module, client_factory):
     blueprint_id = id.get("blueprint")
     if not blueprint_id:
         raise ValueError("Must specify 'blueprint' in id for blueprint configlets")
+    blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+    id["blueprint"] = blueprint_id
 
     configlet_id = id.get("configlet", None)
 

@@ -722,6 +722,8 @@ def _handle_present(module, client_factory):
     bp_id = id_param.get("blueprint")
     if not bp_id:
         raise ValueError("'id.blueprint' is required")
+    bp_id = client_factory.resolve_blueprint_id(bp_id)
+    id_param["blueprint"] = bp_id
     sys_id = id_param.get("system_id")
     name = body.get("name")
     hostname = body.get("hostname")
@@ -1219,6 +1221,8 @@ def _handle_absent(module, client_factory):
     bp_id = id_param.get("blueprint")
     if not bp_id:
         raise ValueError("'id.blueprint' is required")
+    bp_id = client_factory.resolve_blueprint_id(bp_id)
+    id_param["blueprint"] = bp_id
     sys_id = id_param.get("system_id")
     name = body.get("name")
     hostname = body.get("hostname")
