@@ -509,10 +509,15 @@ def _manage_catalog_configlet(module, client_factory):
             else:
                 raise ValueError(f"Unexpected create response: {created_object}")
 
-        # Return the final object state
-        result[leaf_object_type] = client_factory.object_request(
-            object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-        )
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result[leaf_object_type] = current_object
+        else:
+            result[leaf_object_type] = client_factory.object_request(
+                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+            )
 
     if state == "absent":
         if current_object is None:
@@ -613,18 +618,23 @@ def _manage_blueprint_configlet(module, client_factory):
             else:
                 raise ValueError(f"Unexpected create response: {created}")
 
-        # Return the final object state (with retry for eventual consistency)
-        final_object = None
-        for attempt in range(10):
-            final_object = get_blueprint_configlet(
-                client_factory, blueprint_id, configlet_id
-            )
-            if final_object is not None:
-                break
-            import time
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result["configlet"] = current_object
+        else:
+            final_object = None
+            for attempt in range(10):
+                final_object = get_blueprint_configlet(
+                    client_factory, blueprint_id, configlet_id
+                )
+                if final_object is not None:
+                    break
+                import time
 
-            time.sleep(3)
-        result["configlet"] = final_object
+                time.sleep(3)
+            result["configlet"] = final_object
 
     if state == "absent":
         if current_object is None:

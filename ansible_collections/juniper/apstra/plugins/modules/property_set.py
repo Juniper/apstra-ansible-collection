@@ -366,8 +366,12 @@ def _handle_global_property_set(module, client_factory, id, body, state, result)
             result["response"] = created
             result["msg"] = f"{leaf_object_type} created successfully"
 
-        # Return the final object state
-        if id and id.get(leaf_object_type):
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result[leaf_object_type] = current_object
+        elif id and id.get(leaf_object_type):
             result[leaf_object_type] = client_factory.object_request(
                 object_type=object_type,
                 op="get",
@@ -473,8 +477,12 @@ def _handle_blueprint_property_set(module, client_factory, id, body, state, resu
             result["response"] = created
             result["msg"] = f"{leaf_object_type} created successfully"
 
-        # Return the final object state (may take a few tries)
-        if id.get(leaf_object_type):
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result[leaf_object_type] = current_object
+        elif id.get(leaf_object_type):
             result[leaf_object_type] = client_factory.object_request(
                 object_type=object_type,
                 op="get",

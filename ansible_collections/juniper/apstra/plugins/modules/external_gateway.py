@@ -380,8 +380,12 @@ def main():
                 result["response"] = created
                 result["msg"] = f"{leaf_object_type} created successfully"
 
-            # Return the final object state (may take a few tries)
-            if id.get(leaf_object_type):
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            elif id.get(leaf_object_type):
                 final_obj = client_factory.object_request(
                     object_type=object_type,
                     op="get",

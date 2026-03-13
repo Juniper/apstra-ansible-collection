@@ -479,15 +479,15 @@ def main():
                     id, leaf_object_type, tags
                 )
 
-            # Return the final object state (may take a few tries)
-            result[leaf_object_type] = client_factory.object_request(
-                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-            )
-            result[leaf_object_type][application_points_leaf_object_type] = (
-                client_factory.object_request(
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            else:
+                result[leaf_object_type] = client_factory.object_request(
                     object_type=object_type, op="get", id=id, retry=10, retry_delay=3
                 )
-            )
 
         # If we still don't have an id, there's a problem
         if id is None:
