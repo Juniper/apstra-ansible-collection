@@ -16,7 +16,8 @@
   connection: local
   vars:
     template_id: "{{ template | default('L2_Virtual_EVPN') }}"
-    interface_map_id: "{{ im_id | default('Juniper_vJunos-switch_vJunos') }}"
+    spine_interface_map_id: "{{ spine_im_id | default('Juniper_vQFX__AOS-7x10-Spine') }}"
+    leaf_interface_map_id: "{{ leaf_im_id | default('Juniper_vQFX__AOS-7x10-Leaf') }}"
 
   tasks:
     # ── Auth ──────────────────────────────────────────────────────
@@ -53,7 +54,7 @@
     # ── Discover nodes that need interface maps ───────────────────
     - name: Get blueprint nodes (system nodes)
       ansible.builtin.uri:
-        url: "{{ lookup('env', 'APSTRA_API_URL') }}/blueprints/{{ bp.id }}/nodes?node_type=system"
+        url: "{{ lookup('env', 'APSTRA_API_URL') }}/blueprints/{{ bp.id.blueprint }}/nodes?node_type=system"
         method: GET
         headers:
           AuthToken: "{{ auth.token }}"
@@ -78,12 +79,17 @@
       when: switch_nodes | length == 0
 
     # ── Build assignments dict ────────────────────────────────────
+    - name: Separate spine and leaf nodes
+      ansible.builtin.set_fact:
+        spine_nodes: "{{ switch_nodes | selectattr('value.role', 'equalto', 'spine') | map(attribute='key') | list }}"
+        leaf_nodes: "{{ switch_nodes | rejectattr('value.role', 'equalto', 'spine') | map(attribute='key') | list }}"
+
     - name: Build interface map assignment dict
       ansible.builtin.set_fact:
         im_assignments: >-
           {{
-            dict(switch_nodes | map(attribute='key') |
-            zip_longest([], fillvalue=interface_map_id))
+            dict(spine_nodes | zip_longest([], fillvalue=spine_interface_map_id)
+               + leaf_nodes  | zip_longest([], fillvalue=leaf_interface_map_id))
           }}
 
     - name: Display planned assignments
@@ -93,8 +99,9 @@
     # ── Test 1: Assign interface maps ─────────────────────────────
     - name: "Test 1: Assign interface maps to switch nodes"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ im_assignments }}"
+        id: "{{ bp.id }}"
+        body:
+          assignments: "{{ im_assignments }}"
         auth_token: "{{ auth.token }}"
         state: present
       register: assign_result
@@ -113,8 +120,9 @@
     # ── Test 2: Idempotent assign ─────────────────────────────────
     - name: "Test 2: Assign same interface maps again (idempotent)"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ im_assignments }}"
+        id: "{{ bp.id }}"
+        body:
+          assignments: "{{ im_assignments }}"
         auth_token: "{{ auth.token }}"
         state: present
       register: idem_result
@@ -133,13 +141,13 @@
     # ── Test 3: Clear assignments ─────────────────────────────────
     - name: Build clear assignments (first node only)
       ansible.builtin.set_fact:
-        clear_assignment:
-          "{{ switch_nodes[0].key }}": null
+        clear_assignment: "{{ {switch_nodes[0].key: None} }}"
 
     - name: "Test 3: Clear interface map for first node"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ clear_assignment }}"
+        id: "{{ bp.id }}"
+        body:
+          assignments: "{{ clear_assignment }}"
         auth_token: "{{ auth.token }}"
         state: absent
       register: clear_result
@@ -158,8 +166,9 @@
     # ── Test 4: Clear idempotent ──────────────────────────────────
     - name: "Test 4: Clear same node again (idempotent)"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ clear_assignment }}"
+        id: "{{ bp.id }}"
+        body:
+          assignments: "{{ clear_assignment }}"
         auth_token: "{{ auth.token }}"
         state: absent
       register: clear_idem_result
