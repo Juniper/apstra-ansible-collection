@@ -199,6 +199,10 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
         if len(missing_id) > 1 or (

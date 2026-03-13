@@ -186,20 +186,20 @@ msg:
 # ──────────────────────────────────────────────────────────────────
 
 
-def _get_l3clos_client(client_factory, blueprint_id):
-    """Return the l3clos client scoped to the blueprint."""
+def _get_l3clos_client(client_factory):
+    """Return the l3clos client."""
     return client_factory.get_l3clos_client()
 
 
 def _get_settings(client_factory, blueprint_id):
     """GET /api/blueprints/{id}/fabric-settings."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
+    client = _get_l3clos_client(client_factory)
     return client.blueprints[blueprint_id].fabric_settings.get()
 
 
 def _update_settings(client_factory, blueprint_id, data):
-    """PUT/PATCH /api/blueprints/{id}/fabric-settings."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
+    """PATCH /api/blueprints/{id}/fabric-settings."""
+    client = _get_l3clos_client(client_factory)
     return client.blueprints[blueprint_id].fabric_settings.update(data)
 
 
@@ -240,6 +240,9 @@ def _handle_settings(module, client_factory):
     p = module.params
     id_param = p["id"] or {}
     blueprint_id = id_param.get("blueprint")
+    if blueprint_id:
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
     desired_settings = p["body"]
 
     if not desired_settings:
@@ -263,8 +266,13 @@ def _handle_settings(module, client_factory):
     # Apply only the changed fields
     _update_settings(client_factory, blueprint_id, desired_settings)
 
-    # Re-read to return final state
-    final = _get_settings(client_factory, blueprint_id)
+    # Build final state by merging desired into current (avoids stale cache)
+    final = dict(current)
+    for k, v in desired_settings.items():
+        if isinstance(v, dict) and isinstance(final.get(k), dict):
+            final[k] = dict(final[k], **v)
+        else:
+            final[k] = v
     changed_keys = list(diff.keys())
     return dict(
         changed=True,

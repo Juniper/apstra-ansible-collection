@@ -700,6 +700,11 @@ def main():
         lock_timeout = module.params["lock_timeout"]
         commit_timeout = module.params["commit_timeout"]
 
+        # Resolve blueprint name to ID if needed
+        if blueprint_id:
+            blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+            id["blueprint"] = blueprint_id
+
         # ── state=queried ─────────────────────────────────────────
         if state == "queried":
             if not blueprint_id:
