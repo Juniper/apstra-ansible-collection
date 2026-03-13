@@ -891,10 +891,15 @@ def main():
                 else:
                     raise ValueError(f"Unexpected create response: {created_object}")
 
-            # Return the final object state (may take a few tries)
-            result[leaf_object_type] = client_factory.object_request(
-                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-            )
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            else:
+                result[leaf_object_type] = client_factory.object_request(
+                    object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+                )
 
         if state == "absent":
             if current_object is None:
