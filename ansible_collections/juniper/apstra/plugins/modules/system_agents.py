@@ -131,7 +131,7 @@ options:
       platform:
         description:
           - The device platform/OS family.
-          - Usually auto-detected; only specify if needed.
+          - Required when creating an agent without a C(profile).
         type: str
         required: false
         choices: ["junos", "eos", "nxos"]
@@ -509,7 +509,15 @@ def _build_create_body(params):
 
 
 def _build_update_body(params):
-    """Build the PUT body for updating a system agent."""
+    """Build the PUT body for updating a system agent.
+
+    The PUT endpoint replaces the mutable configuration fields, so all
+    required fields must be included.  The caller is expected to merge
+    existing config values into *params* before calling this function.
+
+    Note: ``management_ip`` and ``agent_type`` are immutable after
+    creation and must NOT be included in the PUT body.
+    """
     body = {}
 
     if params.get("label") is not None:
@@ -636,12 +644,18 @@ def _handle_present(module, client_factory):
             return _build_result(agent, False, "system agent already up to date")
 
         # Carry over existing config fields that are required by the PUT endpoint
-        # but not specified by the user (e.g. platform, operation_mode).
+        # but not specified by the user (e.g. platform, operation_mode, username).
+        # Note: management_ip and agent_type are immutable after creation and
+        # are not accepted by the PUT endpoint.
         existing_config = existing.get("config", {})
-        if not p.get("platform") and existing_config.get("platform"):
-            p["platform"] = existing_config["platform"]
-        if not p.get("operation_mode") and existing_config.get("operation_mode"):
-            p["operation_mode"] = existing_config["operation_mode"]
+        carry_over_fields = {
+            "platform": "platform",
+            "operation_mode": "operation_mode",
+            "device_username": "username",
+        }
+        for param_key, config_key in carry_over_fields.items():
+            if not p.get(param_key) and existing_config.get(config_key):
+                p[param_key] = existing_config[config_key]
 
         update_body = _build_update_body(p)
         _update_agent(client_factory, agent_id, update_body)
@@ -655,6 +669,12 @@ def _handle_present(module, client_factory):
         # CREATE path
         if not management_ip:
             raise ValueError("management_ip is required to create a new system agent")
+
+        if not p.get("platform") and not p.get("profile"):
+            raise ValueError(
+                "'platform' (or 'profile') is required when creating a new "
+                "system agent. Supported platforms: junos, eos, nxos"
+            )
 
         create_body = _build_create_body(p)
         try:

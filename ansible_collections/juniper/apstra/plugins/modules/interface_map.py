@@ -162,25 +162,32 @@ msg:
 # ──────────────────────────────────────────────────────────────────
 
 
-def _get_l3clos_client(client_factory, blueprint_id):
-    """Return the l3clos client scoped to the blueprint."""
-    return client_factory.get_l3clos_client()
+def _get_base_client(client_factory):
+    """Return the base AOS SDK client."""
+    return client_factory.get_base_client()
 
 
 def _get_assignments(client_factory, blueprint_id):
     """GET /api/blueprints/{id}/interface-map-assignments."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
-    result = client.blueprints[blueprint_id].get_im_assignments()
-    if result and "assignments" in result:
+    client = _get_base_client(client_factory)
+    resp = client.raw_request(
+        f"/blueprints/{blueprint_id}/interface-map-assignments"
+    )
+    result = resp.json() if hasattr(resp, "json") else resp
+    if isinstance(result, dict) and "assignments" in result:
         return result["assignments"]
     return {}
 
 
 def _patch_assignments(client_factory, blueprint_id, assignments):
     """PATCH /api/blueprints/{id}/interface-map-assignments."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
+    client = _get_base_client(client_factory)
     data = {"assignments": assignments}
-    client.blueprints[blueprint_id].patch_im_assignments(data)
+    client.raw_request(
+        f"/blueprints/{blueprint_id}/interface-map-assignments",
+        method="PATCH",
+        data=data,
+    )
 
 
 def _compute_changes(current, desired, state):
