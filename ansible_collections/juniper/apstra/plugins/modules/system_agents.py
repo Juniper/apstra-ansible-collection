@@ -303,7 +303,8 @@ EXAMPLES = """
 - name: Acknowledge all quarantined devices
   juniper.apstra.system_agents:
     state: acknowledged
-  register: ack_result"""
+  register: ack_result
+"""
 
 RETURN = """
 changed:

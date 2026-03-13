@@ -19,10 +19,8 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 
 try:
     import aos.sdk.generator as g
-    from aos.sdk.generator import normalize_port_speed
 except ImportError:
     g = None
-    normalize_port_speed = None
 
 try:
     from aos.sdk.interface_map.interface_map_generator import (
