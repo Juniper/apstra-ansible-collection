@@ -17,7 +17,6 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_primitives import (
-    PRIMITIVE_TYPES,
     PLURAL_TO_SINGULAR,
     ALLOWED_PRIMITIVES,
     CHILD_PRIMITIVES,

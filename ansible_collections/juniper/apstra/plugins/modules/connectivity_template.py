@@ -14,11 +14,8 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
     apstra_client_module_args,
     ApstraClientFactory,
-    AOS_IMPORT_ERROR,
 )
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_primitives import (
-    CT_TYPES,
-)
+
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_validator import (
     validate_primitives,
     CTValidationError,
@@ -910,7 +907,7 @@ def main():
                 else:
                     result["changed"] = False
                     result["msg"] = (
-                        "connectivity_template already exists, " "no changes needed"
+                        "connectivity_template already exists, no changes needed"
                     )
             else:
                 # ── Create path ───────────────────────────────────────
@@ -949,7 +946,7 @@ def main():
         # ── STATE: absent ─────────────────────────────────────────────
         elif state == "absent":
             if not ct_id and name:
-                ct_id, _ = _find_ct_by_name(ep_client, blueprint_id, name)
+                ct_id, _parsed_export = _find_ct_by_name(ep_client, blueprint_id, name)
 
             if ct_id:
                 # Unassign from all application points before deleting
