@@ -41,6 +41,10 @@
         auth_token: "{{ auth.token }}"
       register: bp
 
+    - name: Set blueprint ID fact
+      ansible.builtin.set_fact:
+        blueprint_id: "{{ bp.id.blueprint }}"
+
     - name: Show blueprint
       ansible.builtin.debug:
         var: bp
@@ -48,7 +52,8 @@
     # ── Test 1: Set fabric L3 MTU ─────────────────────────────────
     - name: "Test 1: Set fabric_l3_mtu"
       juniper.apstra.fabric_settings:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         body:
           fabric_l3_mtu: 9100
         auth_token: "{{ auth.token }}"
@@ -69,7 +74,8 @@
     # ── Test 2: Idempotent MTU ────────────────────────────────────
     - name: "Test 2: Set same MTU again (idempotent)"
       juniper.apstra.fabric_settings:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         body:
           fabric_l3_mtu: 9100
         auth_token: "{{ auth.token }}"
@@ -89,7 +95,8 @@
     # ── Test 3: Set multiple settings ─────────────────────────────
     - name: "Test 3: Set multiple fabric settings"
       juniper.apstra.fabric_settings:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         body:
           external_router_mtu: 9100
           default_svi_l3_mtu: 9100
@@ -110,7 +117,8 @@
     # ── Test 4: Change one, keep another ──────────────────────────
     - name: "Test 4: Change one setting, keep another unchanged"
       juniper.apstra.fabric_settings:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         body:
           external_router_mtu: 9200
           default_svi_l3_mtu: 9100
@@ -131,9 +139,10 @@
     # ── Test 5: ESI MAC MSB ──────────────────────────────────────
     - name: "Test 5: Set ESI MAC MSB"
       juniper.apstra.fabric_settings:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         body:
-          esi_mac_msb: 4
+          esi_mac_msb: 2
         auth_token: "{{ auth.token }}"
       register: esi_result
 
@@ -147,7 +156,8 @@
     # ── Cleanup: Delete blueprint ─────────────────────────────────
     - name: Delete test blueprint
       juniper.apstra.blueprint:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
         state: absent
