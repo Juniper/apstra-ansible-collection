@@ -214,6 +214,31 @@
       ansible.builtin.debug:
         var: ps_custom
 
+    # ── Name Resolution: import PS by label ───────────────────────
+
+    - name: Delete custom PS from blueprint for re-import test
+      juniper.apstra.property_set:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          property_set: "{{ ps_custom.id.property_set }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Import property set by label (name resolution)
+      juniper.apstra.property_set:
+        id: "{{ bp.id }}"
+        body:
+          id: "test_ansible_global_ps"
+        auth_token: "{{ auth.token }}"
+      register: ps_by_name
+
+    - name: Verify property set label resolution
+      ansible.builtin.assert:
+        that:
+          - ps_by_name is not failed
+        fail_msg: "Property set label resolution failed"
+        success_msg: "PASSED: Property set imported by label"
+
     - name: Import the values_yaml global PS into blueprint
       juniper.apstra.property_set:
         id: "{{ bp.id }}"
@@ -249,7 +274,7 @@
       juniper.apstra.property_set:
         id:
           blueprint: "{{ bp.id.blueprint }}"
-          property_set: "{{ ps_custom.id.property_set }}"
+          property_set: "{{ ps_by_name.id.property_set }}"
         state: absent
         auth_token: "{{ auth.token }}"
       register: ps_custom_delete
