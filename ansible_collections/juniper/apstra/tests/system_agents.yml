@@ -34,6 +34,15 @@
       ansible.builtin.debug:
         msg: "Auth token acquired"
 
+    # ── Cleanup stale agents from prior failed runs ───────────────
+    - name: "Cleanup: Remove stale agent by IP (if any)"
+      juniper.apstra.system_agents:
+        body:
+          management_ip: "{{ test_management_ip }}"
+        auth_token: "{{ auth.token }}"
+        state: absent
+      ignore_errors: true
+
     # ── Test 1: Create agent ──────────────────────────────────────
     - name: "Test 1: Create system agent"
       juniper.apstra.system_agents:

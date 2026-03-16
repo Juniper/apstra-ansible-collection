@@ -188,6 +188,9 @@ options:
       - C(acknowledged) discovers unacknowledged (OOS-QUARANTINED)
         systems and approves them (sets admin_state=normal) so they
         become OOS-READY for blueprint assignment.
+      - When C(state=acknowledged) and C(body.management_ip) is provided,
+        only the device matching that IP will be acknowledged. Without
+        C(management_ip), all unacknowledged devices are acknowledged.
     type: str
     required: false
     choices: ["present", "absent", "gathered", "installed", "acknowledged"]
@@ -304,6 +307,15 @@ EXAMPLES = """
   juniper.apstra.system_agents:
     state: acknowledged
   register: ack_result
+
+# ── Acknowledge a single device by management IP ─────────────
+
+- name: Acknowledge one device by IP
+  juniper.apstra.system_agents:
+    body:
+      management_ip: "10.0.0.1"
+    state: acknowledged
+  register: ack_one
 """
 
 RETURN = """
@@ -851,10 +863,14 @@ def _handle_acknowledged(module, client_factory):
 
     1. GET /api/systems — list all systems.
     2. Find systems where status.is_acknowledged == false.
-    3. PUT /api/systems/{device_key} with admin_state=normal.
+    3. If ``body.management_ip`` is provided, filter to only the device
+       whose ``facts.mgmt_ipaddr`` matches that IP.
+    4. PUT /api/systems/{device_key} with admin_state=normal.
 
     Returns the list of device_keys that were acknowledged.
     """
+    body = module.params.get("body") or {}
+    target_ip = body.get("management_ip")
     base = _get_base_client(client_factory)
 
     # List all systems
@@ -871,6 +887,31 @@ def _handle_acknowledged(module, client_factory):
     need_ack = [
         s for s in all_systems if not s.get("status", {}).get("is_acknowledged", True)
     ]
+
+    # If a specific management IP was requested, filter to that device
+    if target_ip:
+        need_ack = [
+            s for s in need_ack if s.get("facts", {}).get("mgmt_ipaddr") == target_ip
+        ]
+        if not need_ack:
+            # Check if the device exists but is already acknowledged
+            already = [
+                s
+                for s in all_systems
+                if s.get("facts", {}).get("mgmt_ipaddr") == target_ip
+                and s.get("status", {}).get("is_acknowledged", False)
+            ]
+            if already:
+                return dict(
+                    changed=False,
+                    acknowledged_systems=[],
+                    msg=f"Device {target_ip} is already acknowledged",
+                )
+            return dict(
+                changed=False,
+                acknowledged_systems=[],
+                msg=f"No unacknowledged device found with IP {target_ip}",
+            )
 
     acknowledged = []
     for system in need_ack:
