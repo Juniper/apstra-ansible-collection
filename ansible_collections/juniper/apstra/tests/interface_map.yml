@@ -3,8 +3,7 @@
 #
 # Prerequisites:
 #   - Apstra server reachable
-#   - A blueprint with switch nodes that need interface map assignments
-#   - Known interface_map_id for the device type in the blueprint
+#   - Will create/delete its own test blueprint
 #
 # Usage:
 #   ansible-playbook tests/interface_map.yml \
@@ -16,7 +15,6 @@
   connection: local
   vars:
     template_id: "{{ template | default('L2_Virtual_EVPN') }}"
-    interface_map_id: "{{ im_id | default('Juniper_vJunos-switch_vJunos') }}"
 
   tasks:
     # ── Auth ──────────────────────────────────────────────────────
@@ -46,44 +44,119 @@
         auth_token: "{{ auth.token }}"
       register: bp
 
+    - name: Set blueprint ID fact
+      ansible.builtin.set_fact:
+        blueprint_id: "{{ bp.id.blueprint }}"
+
     - name: Show blueprint
       ansible.builtin.debug:
         var: bp
 
     # ── Discover nodes that need interface maps ───────────────────
-    - name: Get blueprint nodes (system nodes)
-      ansible.builtin.uri:
-        url: "{{ lookup('env', 'APSTRA_API_URL') }}/blueprints/{{ bp.id }}/nodes?node_type=system"
-        method: GET
-        headers:
-          AuthToken: "{{ auth.token }}"
-        validate_certs: false
-      register: nodes_response
+    - name: Get blueprint nodes (system nodes via graph query)
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: queried
+        query_type: nodes_by_role
+        roles:
+          - spine
+          - leaf
+        auth_token: "{{ auth.token }}"
+      register: system_nodes_qe
 
-    - name: Find switch nodes needing interface maps
+    - name: Extract leaf and spine IDs
       ansible.builtin.set_fact:
-        switch_nodes: >-
-          {{
-            nodes_response.json.nodes | dict2items |
-            selectattr('value.role', 'in', ['spine', 'leaf', 'superspine']) |
-            list
-          }}
+        leaf_ids: >-
+          {{ system_nodes_qe.nodes | dict2items
+            | selectattr('value.role', 'equalto', 'leaf')
+            | map(attribute='value.id') | list }}
+        spine_ids: >-
+          {{ system_nodes_qe.nodes | dict2items
+            | selectattr('value.role', 'equalto', 'spine')
+            | map(attribute='value.id') | list }}
 
-    - name: Display switch nodes
+    - name: Display node IDs
       ansible.builtin.debug:
-        msg: "Found {{ switch_nodes | length }} switch nodes"
+        msg: "leaf_ids={{ leaf_ids }}, spine_ids={{ spine_ids }}"
 
     - name: Skip tests if no switch nodes
       ansible.builtin.meta: end_play
-      when: switch_nodes | length == 0
+      when: (leaf_ids | length == 0) and (spine_ids | length == 0)
+
+    # ── Discover interface maps from design catalog ───────────────
+    - name: Get all design interface maps
+      juniper.apstra.design:
+        id:
+          design_type: interface_map
+          name: all
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: all_imaps
+
+    # Query leaf logical device
+    - name: Query leaf logical device
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: queried
+        query: >-
+          node('system', id='{{ leaf_ids[0] }}', name='sys')
+          .out('logical_device')
+          .node('logical_device', name='ld')
+        auth_token: "{{ auth.token }}"
+      register: leaf_ld_qe
+
+    - name: Extract leaf logical device name
+      ansible.builtin.set_fact:
+        leaf_ld_id: "{{ leaf_ld_qe.results[0]['ld']['label'] | regex_replace('_v\\d+$', '') }}"
+
+    - name: Find matching leaf interface map
+      ansible.builtin.set_fact:
+        leaf_imap_id: >-
+          {{ (all_imaps.design_items
+            | selectattr('logical_device_id', 'equalto', leaf_ld_id)
+            | list | first).id }}
+
+    # Query spine logical device
+    - name: Query spine logical device
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: queried
+        query: >-
+          node('system', id='{{ spine_ids[0] }}', name='sys')
+          .out('logical_device')
+          .node('logical_device', name='ld')
+        auth_token: "{{ auth.token }}"
+      register: spine_ld_qe
+
+    - name: Extract spine logical device name
+      ansible.builtin.set_fact:
+        spine_ld_id: "{{ spine_ld_qe.results[0]['ld']['label'] | regex_replace('_v\\d+$', '') }}"
+
+    - name: Find matching spine interface map
+      ansible.builtin.set_fact:
+        spine_imap_id: >-
+          {{ (all_imaps.design_items
+            | selectattr('logical_device_id', 'equalto', spine_ld_id)
+            | list | first).id }}
+
+    - name: Display discovered interface maps
+      ansible.builtin.debug:
+        msg: >-
+          leaf_ld={{ leaf_ld_id }}, leaf_imap={{ leaf_imap_id }},
+          spine_ld={{ spine_ld_id }}, spine_imap={{ spine_imap_id }}
 
     # ── Build assignments dict ────────────────────────────────────
-    - name: Build interface map assignment dict
+    - name: Build interface map assignments for all nodes
       ansible.builtin.set_fact:
         im_assignments: >-
           {{
-            dict(switch_nodes | map(attribute='key') |
-            zip_longest([], fillvalue=interface_map_id))
+            dict(
+              leaf_ids | zip_longest([], fillvalue=leaf_imap_id) | list
+              + spine_ids | zip_longest([], fillvalue=spine_imap_id) | list
+            )
           }}
 
     - name: Display planned assignments
@@ -93,8 +166,10 @@
     # ── Test 1: Assign interface maps ─────────────────────────────
     - name: "Test 1: Assign interface maps to switch nodes"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ im_assignments }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          assignments: "{{ im_assignments }}"
         auth_token: "{{ auth.token }}"
         state: present
       register: assign_result
@@ -113,8 +188,10 @@
     # ── Test 2: Idempotent assign ─────────────────────────────────
     - name: "Test 2: Assign same interface maps again (idempotent)"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ im_assignments }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          assignments: "{{ im_assignments }}"
         auth_token: "{{ auth.token }}"
         state: present
       register: idem_result
@@ -131,15 +208,16 @@
         success_msg: "Test 2 PASSED: Idempotent (no change)"
 
     # ── Test 3: Clear assignments ─────────────────────────────────
-    - name: Build clear assignments (first node only)
+    - name: Build clear assignments (first leaf only)
       ansible.builtin.set_fact:
-        clear_assignment:
-          "{{ switch_nodes[0].key }}": null
+        clear_assignment: "{{ {leaf_ids[0]: None} }}"
 
-    - name: "Test 3: Clear interface map for first node"
+    - name: "Test 3: Clear interface map for first leaf"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ clear_assignment }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          assignments: "{{ clear_assignment }}"
         auth_token: "{{ auth.token }}"
         state: absent
       register: clear_result
@@ -158,8 +236,10 @@
     # ── Test 4: Clear idempotent ──────────────────────────────────
     - name: "Test 4: Clear same node again (idempotent)"
       juniper.apstra.interface_map:
-        blueprint_id: "{{ bp.id }}"
-        assignments: "{{ clear_assignment }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          assignments: "{{ clear_assignment }}"
         auth_token: "{{ auth.token }}"
         state: absent
       register: clear_idem_result
@@ -174,7 +254,8 @@
     # ── Cleanup: Delete blueprint ─────────────────────────────────
     - name: Delete test blueprint
       juniper.apstra.blueprint:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
         state: absent

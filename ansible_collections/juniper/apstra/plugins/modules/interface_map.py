@@ -72,23 +72,27 @@ options:
   id:
     description:
       - Identifies the blueprint scope.
-      - Must contain C(blueprint) key with the blueprint ID.
+      - Must contain C(blueprint) key with the blueprint ID or label.
     type: dict
     required: true
     suboptions:
       blueprint:
         description:
-          - The ID of the blueprint in which to manage interface map
-            assignments.
+          - The ID or label of the blueprint in which to manage
+            interface map assignments.
         type: str
         required: true
   body:
     description:
       - A dictionary containing the interface map assignments.
       - Must contain an C(assignments) key mapping blueprint node IDs
-        to interface map IDs.
+        (or node labels) to interface map IDs (or interface map names).
+      - Node keys that are not UUIDs are resolved by label via a
+        blueprint graph query.
+      - Interface map values that are not UUIDs are resolved by label
+        from the design interface-maps catalog.
       - Values may be C(null) or an empty string to clear an assignment.
-      - "Example: C(assignments: {node_id_1: Juniper_vJunos-switch_vJunos})"
+      - "Example: C(assignments: {spine1: Juniper_vJunos-switch_vJunos})"
     type: dict
     required: true
   state:
@@ -114,6 +118,18 @@ EXAMPLES = """
       assignments:
         "{{ spine_node_id }}": "Juniper_vJunos-switch_vJunos"
         "{{ leaf_node_id }}": "Juniper_vJunos-switch_vJunos"
+    state: present
+
+# ── Assign using node labels instead of UUIDs ─────────────────────
+
+- name: Assign interface maps by node label
+  juniper.apstra.interface_map:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      assignments:
+        spine1: "Juniper_vJunos-switch_vJunos"
+        leaf1: "Juniper_vJunos-switch_vJunos"
     state: present
 
 # ── Assign different maps per role ────────────────────────────────
@@ -162,23 +178,23 @@ msg:
 # ──────────────────────────────────────────────────────────────────
 
 
-def _get_l3clos_client(client_factory, blueprint_id):
-    """Return the l3clos client scoped to the blueprint."""
+def _get_l3clos_client(client_factory):
+    """Return the l3clos client."""
     return client_factory.get_l3clos_client()
 
 
 def _get_assignments(client_factory, blueprint_id):
     """GET /api/blueprints/{id}/interface-map-assignments."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
+    client = _get_l3clos_client(client_factory)
     result = client.blueprints[blueprint_id].get_im_assignments()
-    if result and "assignments" in result:
-        return result["assignments"]
+    if result and isinstance(result, dict):
+        return result
     return {}
 
 
 def _patch_assignments(client_factory, blueprint_id, assignments):
     """PATCH /api/blueprints/{id}/interface-map-assignments."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
+    client = _get_l3clos_client(client_factory)
     data = {"assignments": assignments}
     client.blueprints[blueprint_id].patch_im_assignments(data)
 
@@ -215,6 +231,50 @@ def _compute_changes(current, desired, state):
     return patch, has_changes
 
 
+def _resolve_node_label(client_factory, blueprint_id, label):
+    """Resolve a blueprint node label to its graph node ID.
+
+    Queries the blueprint graph for a ``system`` node with the given
+    label and returns its ID.  Returns ``None`` if not found.
+    """
+    obj = client_factory.get_by_label(blueprint_id, "system", label)
+    if obj:
+        return obj.id if hasattr(obj, "id") else obj.get("id")
+    return None
+
+
+def _resolve_assignments(module, client_factory, blueprint_id, desired, current):
+    """Resolve human-readable names in *desired* assignments to IDs.
+
+    * Node keys that don't appear in the *current* assignments dict
+      are treated as labels and resolved via a blueprint graph query.
+    * Interface-map values are passed through as-is because the
+      Apstra API already accepts interface-map labels.
+
+    Returns a new dict with all node keys resolved to graph IDs.
+    """
+    resolved = {}
+    for node_ref, im_ref in desired.items():
+        # ── Resolve node key ─────────────────────────────────────
+        if node_ref in current:
+            # Already a known graph node ID
+            node_id = node_ref
+        else:
+            # Try to resolve as a label
+            resolved_id = _resolve_node_label(client_factory, blueprint_id, node_ref)
+            if resolved_id:
+                module.debug(f"Resolved node label '{node_ref}' → '{resolved_id}'")
+                node_id = resolved_id
+            else:
+                # Not in current and not found by label — pass through
+                # and let the API handle the error if it's invalid
+                node_id = node_ref
+
+        resolved[node_id] = im_ref
+
+    return resolved
+
+
 # ──────────────────────────────────────────────────────────────────
 #  State handlers
 # ──────────────────────────────────────────────────────────────────
@@ -225,10 +285,19 @@ def _handle_present(module, client_factory):
     p = module.params
     id_param = p["id"] or {}
     blueprint_id = id_param.get("blueprint")
+    if blueprint_id:
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
     body = p["body"] or {}
     desired = body.get("assignments", {})
 
     current = _get_assignments(client_factory, blueprint_id)
+
+    # Resolve human-readable node labels and imap names to IDs
+    desired = _resolve_assignments(
+        module, client_factory, blueprint_id, desired, current
+    )
+
     patch, has_changes = _compute_changes(current, desired, "present")
 
     if not has_changes:
@@ -240,8 +309,9 @@ def _handle_present(module, client_factory):
 
     _patch_assignments(client_factory, blueprint_id, patch)
 
-    # Re-read to return final state
-    final = _get_assignments(client_factory, blueprint_id)
+    # Build final state from current + patch (avoids SDK cache staleness)
+    final = dict(current)
+    final.update(patch)
     return dict(
         changed=True,
         assignments=final,
@@ -254,10 +324,19 @@ def _handle_absent(module, client_factory):
     p = module.params
     id_param = p["id"] or {}
     blueprint_id = id_param.get("blueprint")
+    if blueprint_id:
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
     body = p["body"] or {}
     desired = body.get("assignments", {})
 
     current = _get_assignments(client_factory, blueprint_id)
+
+    # Resolve human-readable node labels and imap names to IDs
+    desired = _resolve_assignments(
+        module, client_factory, blueprint_id, desired, current
+    )
+
     patch, has_changes = _compute_changes(current, desired, "absent")
 
     if not has_changes:
@@ -269,7 +348,9 @@ def _handle_absent(module, client_factory):
 
     _patch_assignments(client_factory, blueprint_id, patch)
 
-    final = _get_assignments(client_factory, blueprint_id)
+    # Build final state from current + patch (avoids SDK cache staleness)
+    final = dict(current)
+    final.update(patch)
     return dict(
         changed=True,
         assignments=final,

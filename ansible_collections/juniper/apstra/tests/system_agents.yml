@@ -42,6 +42,7 @@
           agent_type: "offbox"
           label: "{{ test_label }}"
           operation_mode: "full_control"
+          platform: "junos"
           device_username: "{{ test_device_user }}"
           device_password: "{{ test_device_pass }}"
         auth_token: "{{ auth.token }}"
@@ -69,6 +70,7 @@
           agent_type: "offbox"
           label: "{{ test_label }}"
           operation_mode: "full_control"
+          platform: "junos"
           device_username: "{{ test_device_user }}"
           device_password: "{{ test_device_pass }}"
         auth_token: "{{ auth.token }}"
@@ -93,6 +95,8 @@
           agent_id: "{{ create_result.agent_id }}"
         body:
           label: "{{ updated_label }}"
+          device_username: "{{ test_device_user }}"
+          device_password: "{{ test_device_pass }}"
         auth_token: "{{ auth.token }}"
         state: present
       register: update_result
@@ -151,6 +155,7 @@
           management_ip: "{{ test_management_ip }}"
           agent_type: "offbox"
           label: "{{ test_label }}-ip-delete"
+          platform: "junos"
           device_username: "{{ test_device_user }}"
           device_password: "{{ test_device_pass }}"
         auth_token: "{{ auth.token }}"
