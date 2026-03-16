@@ -284,6 +284,21 @@ EXAMPLES = """
     state: present
   register: gs_create
 
+# ── Create using switch label instead of node ID ──────────────────
+
+- name: Create a generic system using switch name
+  juniper.apstra.generic_systems:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      name: "my-server-02"
+      hostname: "my-server-02.example.com"
+      links:
+        - target_switch_id: "leaf-1"
+          target_switch_if_name: "xe-0/0/8"
+          target_switch_if_transform_id: 1
+    state: present
+
 # ── Create a generic system with dual LAG links ───────────────────
 
 - name: Create a 4x10G server with two LAG bonds

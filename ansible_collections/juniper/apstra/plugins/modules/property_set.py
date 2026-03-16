@@ -188,6 +188,15 @@ EXAMPLES = """
       id: "dcqcn"
     state: present
 
+# Import using property set label instead of UUID
+- name: Import property set by name
+  juniper.apstra.property_set:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      id: "my_custom_ps"
+    state: present
+
 # Blueprint scope -- partial import with specific keys
 - name: Import property set with specific keys
   juniper.apstra.property_set:

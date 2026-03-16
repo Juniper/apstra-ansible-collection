@@ -222,6 +222,33 @@ EXAMPLES = """
     state: present
   register: ct_result
 
+# Use human-readable names instead of IDs — security zone, routing policy,
+# and virtual network labels are resolved automatically
+- name: Create CT using names instead of IDs
+  juniper.apstra.connectivity_template:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      name: "BGP-Named"
+      type: interface
+      primitives:
+        ip_links:
+          named_link:
+            security_zone: "my-routing-zone"
+            interface_type: tagged
+            vlan_id: 100
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+            bgp_peering_generic_systems:
+              peer1:
+                routing_policies:
+                  rp1:
+                    rp_to_attach: "my-routing-policy"
+        virtual_network_singles:
+          vn1:
+            vn_node_id: "my-virtual-network"
+    state: present
+
 # Interface CT: IP Link with Static Route child
 - name: Create IP Link with Static Route CT
   juniper.apstra.connectivity_template:

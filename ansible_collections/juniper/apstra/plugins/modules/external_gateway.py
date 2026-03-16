@@ -158,6 +158,21 @@ EXAMPLES = """
         - "PPbnMs25oIuO8WHldA"
     state: present
 
+# Use system node labels instead of graph node IDs for local_gw_nodes
+- name: Create external gateway using node names
+  juniper.apstra.external_gateway:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      gw_name: "dc2_border_gw"
+      gw_ip: "10.1.0.1"
+      gw_asn: 65500
+      local_gw_nodes:
+        - "border-leaf-1"
+        - "border-leaf-2"
+      ttl: 2
+    state: present
+
 # Delete an external gateway
 - name: Delete external gateway
   juniper.apstra.external_gateway:

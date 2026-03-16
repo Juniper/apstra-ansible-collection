@@ -47,6 +47,131 @@ def _is_uuid(value):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  Blueprint resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_blueprint_id(client_factory, blueprint_ref):
+    """Resolve a blueprint reference (UUID or label) to its UUID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_ref: The blueprint UUID or label.
+    :return: The resolved blueprint UUID string.
+    :raises Exception: If a label is given but no matching blueprint is found.
+    """
+    if not blueprint_ref:
+        return blueprint_ref
+
+    # Fast path: already a UUID
+    if _is_uuid(blueprint_ref):
+        return blueprint_ref
+
+    # Slow path: treat as a label and resolve
+    base_client = client_factory.get_base_client()
+    blueprints = base_client.blueprints.list()
+    if blueprints is None:
+        blueprints = []
+
+    # Exact ID match (non-UUID IDs)
+    for bp in blueprints:
+        if bp.get("id") == blueprint_ref:
+            return blueprint_ref
+
+    # Exact label match
+    for bp in blueprints:
+        if bp.get("label") == blueprint_ref:
+            return bp["id"]
+
+    # Case-insensitive label fallback
+    ref_lower = blueprint_ref.lower()
+    for bp in blueprints:
+        if (bp.get("label") or "").lower() == ref_lower:
+            return bp["id"]
+
+    available = [bp.get("label", "") for bp in blueprints]
+    raise Exception(
+        f"Blueprint with label '{blueprint_ref}' not found. " f"Available: {available}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Design template resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_template_id(client_factory, template_ref):
+    """Resolve a design template reference (ID or display_name) to its ID.
+
+    Users may supply either the exact template ID (e.g. ``L2_Virtual_EVPN``)
+    or the human-readable display name (e.g. ``L2 Virtual EVPN``).
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param template_ref: The template ID or display name.
+    :return: The resolved template ID string.
+    :raises ValueError: If no matching template is found.
+    """
+    if not template_ref:
+        return template_ref
+
+    base = client_factory.get_base_client()
+    resp = base.raw_request("/design/templates")
+    if resp.status_code != 200:
+        raise Exception(
+            f"Failed to list design templates: {resp.status_code} {resp.text}"
+        )
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    templates = data.get("items", [])
+
+    # 1. Exact ID match
+    for tmpl in templates:
+        if tmpl.get("id") == template_ref:
+            return template_ref
+
+    # 2. Case-insensitive display_name match
+    ref_lower = template_ref.lower()
+    matches = [
+        tmpl
+        for tmpl in templates
+        if (tmpl.get("display_name") or "").lower() == ref_lower
+    ]
+    if len(matches) == 1:
+        return matches[0]["id"]
+    if len(matches) > 1:
+        ids = [m["id"] for m in matches]
+        raise ValueError(
+            f"Multiple templates match display_name '{template_ref}': {ids}. "
+            "Please use the exact template ID instead."
+        )
+
+    # 3. No match found — build a helpful error message
+    available = [
+        f"  - {t.get('id')!r} ({t.get('display_name', '')})" for t in templates
+    ]
+    raise ValueError(
+        f"Template '{template_ref}' not found. "
+        f"Available templates:\n" + "\n".join(available)
+    )
+
+
+def resolve_system_node_ids(client_factory, blueprint_id, node_refs):
+    """Resolve a list of system node references to their graph node IDs.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param node_refs: List of system node UUIDs or labels.
+    :return: List of resolved system node ID strings.
+    """
+    if not node_refs:
+        return node_refs
+    return [
+        resolve_system_node_id(client_factory, blueprint_id, ref) for ref in node_refs
+    ]
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Resource Pool resolution  (Phase 1)
 # ──────────────────────────────────────────────────────────────────
 

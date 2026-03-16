@@ -111,6 +111,20 @@ EXAMPLES = """
       ipv4_enabled: false
     state: present
 
+# Use names instead of IDs — security zone and bound_to system labels resolve automatically
+- name: Create virtual network using names
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "Test-VN-by-name"
+      vn_type: "vxlan"
+      security_zone_id: "my-routing-zone"
+      bound_to:
+        - system_id: "spine1"
+          vlan_id: 100
+    state: present
+
 - name: Delete a virtual network
   juniper.apstra.virtual_network:
     id:

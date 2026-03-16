@@ -174,6 +174,18 @@ EXAMPLES = """
     state: present
   register: bp_import
 
+# Import using catalog configlet display_name instead of UUID
+- name: Import catalog configlet by name
+  juniper.apstra.configlets:
+    type: blueprint
+    id:
+      blueprint: "my-blueprint"
+    body:
+      configlet: "SNMP Config"
+      condition: 'role in ["spine", "leaf"]'
+      label: "SNMP Config"
+    state: present
+
 - name: Remove imported catalog configlet from blueprint
   juniper.apstra.configlets:
     type: blueprint

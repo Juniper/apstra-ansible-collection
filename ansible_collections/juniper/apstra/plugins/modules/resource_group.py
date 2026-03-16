@@ -94,6 +94,30 @@ EXAMPLES = """
         - "77777777-7f37-7e17-7d57-7f9c26f16967"
     state: present
 
+# Use pool display names instead of UUIDs — names are resolved automatically
+- name: Update resource group using pool names
+  juniper.apstra.resource_group:
+    id:
+      blueprint: "my-blueprint"
+      group_type: "asn"
+      group_name: "spine_asns"
+    body:
+      pool_ids:
+        - "vpod-evpn-asn-pool"
+    state: present
+
+# Use blueprint name instead of UUID
+- name: Update resource group using blueprint name
+  juniper.apstra.resource_group:
+    id:
+      blueprint: "my-blueprint"
+      group_type: "ip"
+      group_name: "leaf_loopback_ips"
+    body:
+      pool_ids:
+        - "my-ip-pool"
+    state: present
+
 - name: Delete a resource group
   juniper.apstra.resource_group:
     id:
