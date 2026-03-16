@@ -73,6 +73,79 @@
       ansible.builtin.debug:
         var: blueprint_delete
 
+    # ── Template name resolution tests ────────────────────────────
+
+    - name: Create blueprint using template display_name
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}_template_name"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2 Virtual EVPN"
+        auth_token: "{{ auth.token }}"
+      register: bp_template_name
+
+    - name: Show template-name blueprint
+      ansible.builtin.debug:
+        var: bp_template_name
+
+    - name: Verify template name resolution
+      ansible.builtin.assert:
+        that:
+          - bp_template_name.changed
+          - bp_template_name.id.blueprint | length > 0
+        fail_msg: "Blueprint creation with template display_name failed"
+        success_msg: "PASSED: Blueprint created using template display name"
+
+    - name: Delete template-name blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_template_name.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Create blueprint using template ID directly
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}_template_id"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        auth_token: "{{ auth.token }}"
+      register: bp_template_id
+
+    - name: Verify template ID pass-through
+      ansible.builtin.assert:
+        that:
+          - bp_template_id.changed
+          - bp_template_id.id.blueprint | length > 0
+        fail_msg: "Blueprint creation with template ID failed"
+        success_msg: "PASSED: Blueprint created using exact template ID"
+
+    - name: Delete template-id blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_template_id.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Verify invalid template name fails gracefully
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}_bad_template"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "NonExistentTemplate_12345"
+        auth_token: "{{ auth.token }}"
+      register: bp_bad_template
+      ignore_errors: true
+
+    - name: Verify bad template produced error
+      ansible.builtin.assert:
+        that:
+          - bp_bad_template is failed
+          - "'not found' in bp_bad_template.msg"
+        fail_msg: "Invalid template should have failed with 'not found'"
+        success_msg: "PASSED: Invalid template name correctly rejected"
+
     - name: Logout of Apstra
       juniper.apstra.authenticate:
         logout: true
