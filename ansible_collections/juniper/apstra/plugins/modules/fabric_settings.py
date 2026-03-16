@@ -186,21 +186,27 @@ msg:
 # ──────────────────────────────────────────────────────────────────
 
 
-def _get_l3clos_client(client_factory, blueprint_id):
-    """Return the l3clos client scoped to the blueprint."""
-    return client_factory.get_l3clos_client()
+def _get_base_client(client_factory):
+    """Return the base AOS SDK client."""
+    return client_factory.get_base_client()
 
 
 def _get_settings(client_factory, blueprint_id):
     """GET /api/blueprints/{id}/fabric-settings."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
-    return client.blueprints[blueprint_id].fabric_settings.get()
+    client = _get_base_client(client_factory)
+    resp = client.raw_request(f"/blueprints/{blueprint_id}/fabric-settings")
+    result = resp.json() if hasattr(resp, "json") else resp
+    return result if isinstance(result, dict) else {}
 
 
 def _update_settings(client_factory, blueprint_id, data):
-    """PUT/PATCH /api/blueprints/{id}/fabric-settings."""
-    client = _get_l3clos_client(client_factory, blueprint_id)
-    return client.blueprints[blueprint_id].fabric_settings.update(data)
+    """PATCH /api/blueprints/{id}/fabric-settings."""
+    client = _get_base_client(client_factory)
+    client.raw_request(
+        f"/blueprints/{blueprint_id}/fabric-settings",
+        method="PATCH",
+        data=data,
+    )
 
 
 def _deep_compare(current, desired):
@@ -263,8 +269,11 @@ def _handle_settings(module, client_factory):
     # Apply only the changed fields
     _update_settings(client_factory, blueprint_id, desired_settings)
 
-    # Re-read to return final state
-    final = _get_settings(client_factory, blueprint_id)
+    # Build expected final state by merging desired into current.
+    # The API GET may return stale data immediately after PATCH due to
+    # eventual consistency, so we construct the expected result instead.
+    final = dict(current)
+    final.update(desired_settings)
     changed_keys = list(diff.keys())
     return dict(
         changed=True,
