@@ -15,6 +15,10 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+    resolve_security_zone_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -213,6 +217,22 @@ def main():
                     else:
                         coerced.append(entry)
                 body["bound_to"] = coerced
+                # Resolve system_id names to graph node UUIDs
+                bp_id = id.get("blueprint")
+                if bp_id:
+                    for item in body["bound_to"]:
+                        if "system_id" in item:
+                            item["system_id"] = resolve_system_node_id(
+                                client_factory, bp_id, item["system_id"]
+                            )
+
+            # Resolve security_zone_id by label if needed
+            if "security_zone_id" in body:
+                bp_id = id.get("blueprint")
+                if bp_id:
+                    body["security_zone_id"] = resolve_security_zone_id(
+                        client_factory, bp_id, body["security_zone_id"]
+                    )
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)

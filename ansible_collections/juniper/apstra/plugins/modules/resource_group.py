@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_pool_ids,
+)
 
 DOCUMENTATION = """
 ---
@@ -162,6 +165,13 @@ def main():
         # Resolve blueprint name to ID if needed
         if "blueprint" in id:
             id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
+        # Resolve pool_ids by display_name if needed
+        group_type = id.get("group_type")
+        if body and "pool_ids" in body and group_type:
+            body["pool_ids"] = resolve_pool_ids(
+                client_factory, body["pool_ids"], group_type
+            )
 
         # Validate the id
         if "blueprint" not in id:

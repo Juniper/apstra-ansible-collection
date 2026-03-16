@@ -22,6 +22,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_configlet
     delete_blueprint_configlet,
     find_blueprint_configlet_by_label,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_configlet_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -395,19 +398,22 @@ def _catalog_get_by_id(client_factory, configlet_id):
 
 
 def _resolve_catalog_configlet_in_body(client_factory, body):
-    """If body.configlet is a string (catalog UUID), resolve it to the full catalog object dict.
+    """If body.configlet is a string (catalog UUID or display_name), resolve it
+    to the full catalog object dict.
 
     The Apstra API requires body.configlet to be a dict with display_name and
     generators.  When importing a catalog configlet into a blueprint, users pass
-    the catalog UUID as a convenience; this helper fetches the catalog object and
-    replaces the string with the dict the API expects.
+    the catalog UUID or display_name as a convenience; this helper fetches the
+    catalog object and replaces the string with the dict the API expects.
     """
     if body is None:
         return
     configlet_val = body.get("configlet")
     if not isinstance(configlet_val, str):
         return
-    catalog_obj = _catalog_get_by_id(client_factory, configlet_val)
+    # Resolve display_name to UUID if needed
+    resolved_id = resolve_configlet_id(client_factory, configlet_val)
+    catalog_obj = _catalog_get_by_id(client_factory, resolved_id)
     if catalog_obj is None:
         raise ValueError(
             f"Catalog configlet '{configlet_val}' not found. "

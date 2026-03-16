@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+)
 
 # SDK-based helpers (node read/write)
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
@@ -730,6 +733,14 @@ def _handle_present(module, client_factory):
     tags = body.get("tags")  # None means "not specified by user"; [] means "clear tags"
     links = body.get("links") or []
     deploy_mode = body.get("deploy_mode")  # None means "not specified by user"
+
+    # Resolve target_switch_id names to graph node UUIDs
+    for link in links:
+        if "target_switch_id" in link:
+            link["target_switch_id"] = resolve_system_node_id(
+                client_factory, bp_id, link["target_switch_id"]
+            )
+
     asn = body.get("asn")
     # Coerce ASN to int — Ansible Jinja2 may pass "110000" as a string
     # but the Apstra API requires an integer for domain_id.

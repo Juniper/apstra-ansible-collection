@@ -28,6 +28,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_parser im
     parse_ct_export,
     normalize_for_compare,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_ct_primitives,
+)
 
 
 DOCUMENTATION = """
@@ -865,6 +868,10 @@ def main():
                 validate_primitives(ct_type, primitives)
             except CTValidationError as e:
                 raise ValueError(str(e))
+
+            # Resolve name references in primitives (security_zone,
+            # routing_policy, virtual_network labels → UUIDs)
+            resolve_ct_primitives(client_factory, blueprint_id, primitives)
 
             ct_name = name or (
                 current_parsed.get("name") if current_parsed else "unnamed"

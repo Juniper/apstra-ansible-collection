@@ -18,6 +18,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_property_set import (
     reimport_blueprint_property_set,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_property_set_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -408,7 +411,9 @@ def _handle_blueprint_property_set(module, client_factory, id, body, state, resu
     current_object = None
     if object_id is None:
         if (body is not None) and ("id" in body):
-            # Datacenter import: check if the global property set is
+            # Datacenter import: resolve property set name to UUID if needed
+            body["id"] = resolve_property_set_id(client_factory, body["id"])
+            # Check if the global property set is
             # already imported into the blueprint using body["id"].
             try:
                 check_id = dict(id)

@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -284,6 +287,15 @@ def main():
                         raise ValueError(
                             f"'{field}' must be an integer, got: {body[field]!r}"
                         )
+
+            # Resolve local_gw_nodes system labels to graph node UUIDs
+            if "local_gw_nodes" in body and isinstance(body["local_gw_nodes"], list):
+                bp_id = id.get("blueprint")
+                if bp_id:
+                    body["local_gw_nodes"] = [
+                        resolve_system_node_id(client_factory, bp_id, node)
+                        for node in body["local_gw_nodes"]
+                    ]
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
