@@ -85,6 +85,49 @@
       ansible.builtin.debug:
         var: rg_update.resource_group
 
+    # ── Name Resolution: assign pool by display_name ───────────────
+
+    - name: Get first IP pool display_name
+      ansible.builtin.set_fact:
+        first_pool_name: "{{ ansible_facts.apstra_facts.ip_pools | dict2items | first }}"
+
+    - name: Update resource_group using pool display_name
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ first_pool_name.value.display_name }}"
+      register: rg_name_update
+
+    - name: Verify pool name resolution in resource_group
+      ansible.builtin.assert:
+        that:
+          - rg_name_update is not failed
+        fail_msg: "Pool display_name resolution failed in resource_group"
+        success_msg: "PASSED: Pool name resolution in resource_group"
+
+    # ── Name Resolution: access resource_group via blueprint label ──
+
+    - name: Get resource_group using blueprint label
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_name }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        auth_token: "{{ auth.token }}"
+      register: rg_by_label
+
+    - name: Verify blueprint label resolution in resource_group
+      ansible.builtin.assert:
+        that:
+          - rg_by_label is not failed
+          - rg_by_label.resource_group is defined
+        fail_msg: "Blueprint label resolution failed in resource_group"
+        success_msg: "PASSED: Blueprint label resolution in resource_group"
+
     - name: Delete blueprint
       juniper.apstra.blueprint:
         id: "{{ bp.id }}"

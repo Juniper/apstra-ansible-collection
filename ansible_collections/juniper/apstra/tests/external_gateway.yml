@@ -59,6 +59,15 @@
       ansible.builtin.debug:
         var: spine_nodes
 
+    - name: Extract spine labels for name resolution test
+      ansible.builtin.set_fact:
+        spine_labels: >-
+          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'spine')
+             | map(attribute='value.label')
+             | list }}
+
     # ---- Create external gateway ----
 
     - name: Create external gateway
@@ -159,6 +168,35 @@
           - ext_gw_2.changed
           - ext_gw_2.id.remote_gateway is defined
         fail_msg: "Second external gateway was not created"
+
+    # ---- Name Resolution: create external gateway using spine labels ----
+
+    - name: Create external gateway using spine labels (name resolution)
+      juniper.apstra.external_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_ext_gw_by_name"
+          gw_ip: "10.99.99.20"
+          gw_asn: 65520
+          local_gw_nodes: "{{ [spine_labels[0]] }}"
+        auth_token: "{{ auth.token }}"
+      register: ext_gw_by_name
+
+    - name: Verify external gateway with spine label resolution
+      ansible.builtin.assert:
+        that:
+          - ext_gw_by_name is not failed
+          - ext_gw_by_name.id.remote_gateway is defined
+        fail_msg: "Spine label resolution failed in external_gateway"
+        success_msg: "PASSED: Spine label resolution in external_gateway"
+
+    - name: Delete name-resolved external gateway
+      juniper.apstra.external_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ ext_gw_by_name.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
 
     # ---- Delete external gateways ----
 

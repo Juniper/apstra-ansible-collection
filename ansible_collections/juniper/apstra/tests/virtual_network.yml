@@ -144,6 +144,32 @@
       ansible.builtin.debug:
         var: vn_delete
 
+    # ── Name Resolution: create VN via blueprint label ────────────
+
+    - name: Create virtual_network using blueprint label
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        body:
+          label: "test_vn_by_name"
+          vn_type: "vxlan"
+        auth_token: "{{ auth.token }}"
+      register: vn_by_name
+
+    - name: Verify VN creation via blueprint label
+      ansible.builtin.assert:
+        that:
+          - vn_by_name is not failed
+          - vn_by_name.id.virtual_network is defined
+        fail_msg: "Blueprint label resolution failed in virtual_network"
+        success_msg: "PASSED: Blueprint label resolution in virtual_network"
+
+    - name: Delete VN created by name
+      juniper.apstra.virtual_network:
+        id: "{{ vn_by_name.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
     - name: Delete blueprint
       juniper.apstra.blueprint:
         id: "{{ bp.id }}"

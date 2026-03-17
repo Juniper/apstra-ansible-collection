@@ -320,30 +320,10 @@
         label: "{{ item.key }}"
       register: im_results
 
-    - name: "Phase 2.5g — Build interface map label-to-UUID lookup dict"
-      tags: [phase4_interface_maps]
-      ansible.builtin.set_fact:
-        _im_label_to_uuid: >-
-          {{ _im_label_to_uuid | default({}) | combine({item['id']['name']: item['data']['id']}) }}
-      loop: "{{ im_results.results }}"
-      loop_control:
-        label: "{{ item['id']['name'] }}"
-
-    - name: "Phase 2.5g — Debug interface map UUID lookup"
+    - name: "Phase 2.5g — Display created interface maps"
       tags: [phase4_interface_maps]
       ansible.builtin.debug:
-        msg: "Interface map UUID lookup: {{ _im_label_to_uuid }}"
-
-    - name: "Phase 2.5h — Set resolved interface map UUIDs (new vars to avoid extra-var precedence)"
-      tags: [phase4_interface_maps]
-      ansible.builtin.set_fact:
-        _spine_im_uuid: "{{ _im_label_to_uuid[spine_interface_map] }}"
-        _leaf_im_uuid: "{{ _im_label_to_uuid[leaf_interface_map] }}"
-
-    - name: "Phase 2.5h — Debug resolved interface map UUIDs"
-      tags: [phase4_interface_maps]
-      ansible.builtin.debug:
-        msg: "spine_im_uuid={{ _spine_im_uuid }} | leaf_im_uuid={{ _leaf_im_uuid }}"
+        msg: "Interface maps created: {{ im_results.results | map(attribute='id') | map(attribute='name') | list }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 3: Blueprint Creation
@@ -401,7 +381,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         state: queried
         query_type: nodes_by_role
         roles:
@@ -414,13 +394,15 @@
       ansible.builtin.set_fact:
         node_by_label: "{{ system_nodes_qe.nodes }}"
 
-    - name: Build interface map assignments dict
+    # Name resolution: use node labels as keys and interface map labels as
+    # values — the interface_map module resolves both to graph/API IDs.
+    - name: Build interface map assignments dict (by label)
       tags: [phase5_blueprint]
       ansible.builtin.set_fact:
         im_assignments: >-
           {{
             im_assignments | default({}) | combine({
-              item.value.id: (item.value.role == 'spine') | ternary(_spine_im_uuid, _leaf_im_uuid)
+              item.key: (item.value.role == 'spine') | ternary(spine_interface_map, leaf_interface_map)
             })
           }}
       loop: "{{ node_by_label | dict2items }}"
@@ -434,7 +416,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         body:
           assignments: "{{ im_assignments }}"
         state: present
@@ -518,7 +500,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         node_id: "{{ item.value.id }}"
         node_properties:
           label: "{{ item.key }}"
@@ -595,7 +577,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         node_id: "{{ node_by_label[item.key].id }}"
         system_id: "{{ device_serial_map[item.key] }}"
         deploy_mode: deploy
@@ -647,12 +629,12 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "asn"
           group_name: "spine_asns"
         body:
           pool_ids:
-            - "{{ asn_pool.id.asn_pool }}"
+            - "{{ asn_pool_name }}"
         state: present
 
     - name: "Phase 6d — Assign ASN pool to leaf ASNs"
@@ -662,12 +644,12 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "asn"
           group_name: "leaf_asns"
         body:
           pool_ids:
-            - "{{ asn_pool.id.asn_pool }}"
+            - "{{ asn_pool_name }}"
         state: present
 
     - name: "Phase 6e — Assign IP pool to spine-leaf links"
@@ -677,35 +659,15 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "ip"
           group_name: "spine_leaf_link_ips"
         body:
           pool_ids:
-            - "{{ ip_pool.id.ip_pool }}"
+            - "{{ ip_pool_name }}"
         state: present
 
-    # Loopback IPs use the built-in Private-172 pool
-    - name: "Phase 6f — Get all IP pools to find Private-172"
-      tags: [phase5_blueprint]
-      juniper.apstra.apstra_facts:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        gather_network_facts:
-          - ip_pools
-      register: all_pools
-
-    - name: Resolve Private-172 pool ID
-      tags: [phase5_blueprint]
-      ansible.builtin.set_fact:
-        private_172_pool_id: >-
-          {{
-            (all_pools.ansible_facts.apstra_facts.ip_pools | dict2items
-             | selectattr('value.display_name', 'equalto', loopback_pool_name)
-             | map(attribute='key') | first)
-          }}
-
+    # Loopback IPs — use pool display_name directly (name resolution)
     - name: "Phase 6g — Assign loopback IPs to spines"
       tags: [phase5_blueprint]
       juniper.apstra.resource_group:
@@ -713,12 +675,12 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "ip"
           group_name: "spine_loopback_ips"
         body:
           pool_ids:
-            - "{{ private_172_pool_id }}"
+            - "{{ loopback_pool_name }}"
         state: present
 
     - name: "Phase 6h — Assign loopback IPs to leafs"
@@ -728,12 +690,12 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "ip"
           group_name: "leaf_loopback_ips"
         body:
           pool_ids:
-            - "{{ private_172_pool_id }}"
+            - "{{ loopback_pool_name }}"
         state: present
 
     - name: "Phase 6i — Create Loopback IPs - Generics resource group"
@@ -743,7 +705,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "ip"
           group_name: "generic_loopback_ips"
         body:
@@ -757,7 +719,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "asn"
           group_name: "generic_asns"
         body:
@@ -774,7 +736,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         lock_state: "ignore"
         state: committed
       register: deploy_1
@@ -811,7 +773,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         state: queried
         query_type: nodes_by_type
         system_type: server
@@ -902,7 +864,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           system_id: "{{ _srx_system_id_map[item.key] }}"
         body:
           name: "{{ item.key }}"
@@ -934,6 +896,8 @@
       when: item.system_id is defined
 
     # -- Phase 8b.2: Query SRX interfaces and set if_name on each -----------
+    # Name resolution: use label= instead of id= in graph QE query —
+    # the SRX systems were just renamed in Phase 8b.
     - name: "Phase 8b.2 — Query SRX interfaces + links"
       tags: [phase6_external_gateway]
       juniper.apstra.blueprint:
@@ -941,8 +905,8 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
-        query: 'node(type="system", id="{{ _srx_system_id_map[item.key] }}", name="srx").out(type="hosted_interfaces").node(type="interface", if_type="ethernet", name="intf").out(type="link").node(type="link", name="lnk")'
+          blueprint: "{{ blueprint_label }}"
+        query: 'node(type="system", label="{{ item.key }}", name="srx").out(type="hosted_interfaces").node(type="interface", if_type="ethernet", name="intf").out(type="link").node(type="link", name="lnk")'
         state: queried
       loop: "{{ srx_nodes | dict2items }}"
       loop_control:
@@ -956,7 +920,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         node_id: "{{ item.intf.id }}"
         node_properties:
           if_name: "{{ 'ge-0/0/0' if 'leaf1_link' in item.lnk.label else 'ge-0/0/1' }}"
@@ -977,7 +941,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         node_id: "{{ _host_system_id_map[item.key] }}"
         node_properties:
           label: "{{ item.key }}"
@@ -994,7 +958,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         lock_state: "ignore"
         state: committed
 
@@ -1010,12 +974,12 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         body:
           gw_name: "remote_gw_{{ item.key }}"
           gw_ip: "{{ item.value.loopback_ip | regex_replace('/\\d+$', '') }}"
           gw_asn: "{{ item.value.asn }}"
-          local_gw_nodes: "{{ border_leaf_ids }}"
+          local_gw_nodes: "{{ border_leaf_names }}"
           ttl: 30
           keepalive_timer: 10
           holdtime_timer: 30
@@ -1032,7 +996,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         lock_state: "ignore"
         state: committed
 
@@ -1046,7 +1010,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         body:
           label: "{{ routing_policy_label }}"
           description: "Routing policy for SRX external routers"
@@ -1087,7 +1051,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         body:
           external_router_mtu: "{{ external_router_mtu }}"
       register: fabric_result
@@ -1099,7 +1063,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         lock_state: "ignore"
         state: committed
 
@@ -1123,29 +1087,8 @@
     # Phase 12: Connectivity Template (BGP-2-SRX)
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # First, discover the default routing zone ID for the CT
-    - name: "Phase 12a — Query routing zones"
-      tags: [phase7_connectivity_template]
-      juniper.apstra.apstra_facts:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        gather_network_facts:
-          - blueprints.security_zones
-        id:
-          blueprint: "{{ blueprint_id }}"
-      register: sz_facts
-
-    - name: Find default routing zone ID
-      tags: [phase7_connectivity_template]
-      ansible.builtin.set_fact:
-        default_rz_id: >-
-          {{
-            (sz_facts.ansible_facts.apstra_facts.blueprints[blueprint_id].security_zones | dict2items
-             | selectattr('value.vrf_name', 'equalto', 'default')
-             | map(attribute='key') | first)
-          }}
-
+    # Security zone and routing policy are referenced by label — name
+    # resolution in resolve_ct_primitives resolves them to graph node IDs.
     - name: "Phase 12b — Create BGP-2-SRX connectivity template"
       tags: [phase7_connectivity_template]
       juniper.apstra.connectivity_template:
@@ -1153,7 +1096,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         body:
           name: "BGP-2-SRX"
           type: interface
@@ -1162,7 +1105,7 @@
             ip_links:
               srx_link:
                 interface_type: untagged
-                security_zone: "{{ default_rz_id }}"
+                security_zone: "default"
                 ipv4_addressing_type: numbered
                 ipv6_addressing_type: none
                 bgp_peering_generic_systems:
@@ -1180,7 +1123,7 @@
                     neighbor_asn_type: static
                     routing_policies:
                       rp_attach:
-                        rp_to_attach: "{{ routing_policy.id.routing_policy }}"
+                        rp_to_attach: "{{ routing_policy_label }}"
         state: present
       register: ct_result
 
@@ -1192,7 +1135,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         state: queried
         query_type: interfaces_by_neighbor
         neighbor_labels: "{{ srx_nodes.keys() | list }}"
@@ -1211,6 +1154,7 @@
       ansible.builtin.debug:
         msg: "Found {{ srx_interface_ids | length }} SRX-facing interfaces"
 
+    # Name resolution: use ct_name (label) instead of ct_id (UUID)
     - name: "Phase 12d — Assign BGP-2-SRX CT to SRX interfaces"
       tags: [phase7_connectivity_template]
       juniper.apstra.connectivity_template_assignment:
@@ -1218,8 +1162,8 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
-          ct_id: "{{ ct_result.ct_id }}"
+          blueprint: "{{ blueprint_label }}"
+          ct_name: "BGP-2-SRX"
         body:
           application_point_ids: "{{ srx_interface_ids }}"
         state: present
@@ -1235,12 +1179,12 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
           group_type: "ip"
           group_name: "to_generic_link_ips"
         body:
           pool_ids:
-            - "{{ ip_pool.id.ip_pool }}"
+            - "{{ ip_pool_name }}"
         state: present
 
     - name: "Phase 13b — Deploy after CT + resource assignment"
@@ -1250,7 +1194,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         lock_state: "ignore"
         state: committed
 
@@ -1341,7 +1285,7 @@
     #     verify_certificates: "{{ verify_certs }}"
     #     auth_token: "{{ token }}"
     #     id:
-    #       blueprint: "{{ blueprint_id }}"
+    #       blueprint: "{{ blueprint_label }}"
     #     body:
     #       id: "{{ cops_ps.id.property_set }}"
     #     state: reimported
@@ -1352,7 +1296,7 @@
     #     verify_certificates: "{{ verify_certs }}"
     #     auth_token: "{{ token }}"
     #     id:
-    #       blueprint: "{{ blueprint_id }}"
+    #       blueprint: "{{ blueprint_label }}"
     #     lock_state: "ignore"
     #     state: committed
 
@@ -1380,7 +1324,7 @@
         auth_token: "{{ token }}"
         type: blueprint
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         body:
           label: "{{ configlet_label }}"
           condition: '"srx" in tags'
@@ -1403,7 +1347,7 @@
         verify_certificates: "{{ verify_certs }}"
         auth_token: "{{ token }}"
         id:
-          blueprint: "{{ blueprint_id }}"
+          blueprint: "{{ blueprint_label }}"
         lock_state: "ignore"
         state: committed
       register: final_deploy

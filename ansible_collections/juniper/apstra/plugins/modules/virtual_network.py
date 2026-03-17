@@ -15,6 +15,10 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+    resolve_security_zone_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -107,6 +111,20 @@ EXAMPLES = """
       ipv4_enabled: false
     state: present
 
+# Use names instead of IDs — security zone and bound_to system labels resolve automatically
+- name: Create virtual network using names
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "Test-VN-by-name"
+      vn_type: "vxlan"
+      security_zone_id: "my-routing-zone"
+      bound_to:
+        - system_id: "spine1"
+          vlan_id: 100
+    state: present
+
 - name: Delete a virtual network
   juniper.apstra.virtual_network:
     id:
@@ -191,6 +209,10 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Coerce integer fields that the API requires as int, not str
         # Note: vn_id must remain a string per the API spec
         if body:
@@ -209,6 +231,22 @@ def main():
                     else:
                         coerced.append(entry)
                 body["bound_to"] = coerced
+                # Resolve system_id names to graph node UUIDs
+                bp_id = id.get("blueprint")
+                if bp_id:
+                    for item in body["bound_to"]:
+                        if "system_id" in item:
+                            item["system_id"] = resolve_system_node_id(
+                                client_factory, bp_id, item["system_id"]
+                            )
+
+            # Resolve security_zone_id by label if needed
+            if "security_zone_id" in body:
+                bp_id = id.get("blueprint")
+                if bp_id:
+                    body["security_zone_id"] = resolve_security_zone_id(
+                        client_factory, bp_id, body["security_zone_id"]
+                    )
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -274,10 +312,15 @@ def main():
                     id, leaf_object_type, tags
                 )
 
-            # Return the final object state (may take a few tries)
-            result[leaf_object_type] = client_factory.object_request(
-                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-            )
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            else:
+                result[leaf_object_type] = client_factory.object_request(
+                    object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+                )
 
         # If we still don't have an id, there's a problem
         if id is None:

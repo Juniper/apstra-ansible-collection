@@ -457,34 +457,18 @@ class ApstraClientFactory:
     def resolve_blueprint_id(self, blueprint_ref):
         """
         Accept a blueprint UUID **or** a human-readable label/name and
-        return the UUID.  If *blueprint_ref* already looks like a UUID it
-        is returned unchanged.  Otherwise all blueprints are listed and
-        the first one whose ``label`` matches *blueprint_ref* is used.
+        return the UUID.  Delegates to the centralised resolver in
+        ``name_resolution.py``.
 
         :param blueprint_ref: UUID string or blueprint label.
         :return: The blueprint UUID string.
         :raises Exception: If a label is given but no matching blueprint is found.
         """
-        if not blueprint_ref:
-            return blueprint_ref
-
-        # Fast path: already a UUID
-        if self._UUID_RE.match(str(blueprint_ref)):
-            return blueprint_ref
-
-        # Slow path: treat as a label and resolve
-        base_client = self.get_base_client()
-        blueprints = base_client.blueprints.list()
-        if blueprints is None:
-            blueprints = []
-        for bp in blueprints:
-            if bp.get("label") == blueprint_ref:
-                return bp["id"]
-
-        raise Exception(
-            f"Blueprint with label '{blueprint_ref}' not found. "
-            "Pass a valid blueprint name or UUID."
+        from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+            resolve_blueprint_id as _resolve_bp,
         )
+
+        return _resolve_bp(self, blueprint_ref)
 
     def set_blueprint_design(self, blueprint_id, design):
         """

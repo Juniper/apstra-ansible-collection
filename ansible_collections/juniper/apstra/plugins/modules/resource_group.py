@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_pool_ids,
+)
 
 DOCUMENTATION = """
 ---
@@ -91,6 +94,30 @@ EXAMPLES = """
         - "77777777-7f37-7e17-7d57-7f9c26f16967"
     state: present
 
+# Use pool display names instead of UUIDs — names are resolved automatically
+- name: Update resource group using pool names
+  juniper.apstra.resource_group:
+    id:
+      blueprint: "my-blueprint"
+      group_type: "asn"
+      group_name: "spine_asns"
+    body:
+      pool_ids:
+        - "vpod-evpn-asn-pool"
+    state: present
+
+# Use blueprint name instead of UUID
+- name: Update resource group using blueprint name
+  juniper.apstra.resource_group:
+    id:
+      blueprint: "my-blueprint"
+      group_type: "ip"
+      group_name: "leaf_loopback_ips"
+    body:
+      pool_ids:
+        - "my-ip-pool"
+    state: present
+
 - name: Delete a resource group
   juniper.apstra.resource_group:
     id:
@@ -159,6 +186,17 @@ def main():
         body = module.params.get("body", None)
         state = module.params["state"]
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
+        # Resolve pool_ids by display_name if needed
+        group_type = id.get("group_type")
+        if body and "pool_ids" in body and group_type:
+            body["pool_ids"] = resolve_pool_ids(
+                client_factory, body["pool_ids"], group_type
+            )
+
         # Validate the id
         if "blueprint" not in id:
             raise ValueError("Must specify 'blueprint' in id")
@@ -197,10 +235,15 @@ def main():
                         result["changes"] = changes
                         result["msg"] = f"{leaf_object_type} updated successfully"
 
-            # Return the final object state (may take a few tries)
-            result[leaf_object_type] = client_factory.object_request(
-                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-            )
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            else:
+                result[leaf_object_type] = client_factory.object_request(
+                    object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+                )
 
         # If we still don't have an id, there's a problem
         if id is None:

@@ -95,6 +95,27 @@
       ansible.builtin.debug:
         var: vn
 
+    # ── Name Resolution: create VN using security zone label ──────
+
+    - name: Create virtual_network using security zone label
+      juniper.apstra.virtual_network:
+        id: "{{ bp.id }}"
+        body:
+          label: "test_vn_sz_by_name"
+          vn_type: "vxlan"
+          vn_id: "16777212"
+          security_zone_id: "test-vrf-label"
+        auth_token: "{{ auth.token }}"
+      register: vn_by_sz_name
+
+    - name: Verify security zone name resolution in VN
+      ansible.builtin.assert:
+        that:
+          - vn_by_sz_name is not failed
+          - vn_by_sz_name.id.virtual_network is defined
+        fail_msg: "Security zone label resolution failed in virtual_network"
+        success_msg: "PASSED: Security zone label resolution in virtual_network"
+
     - name: Get all endpoint_policies
       juniper.apstra.apstra_facts:
         gather_network_facts:

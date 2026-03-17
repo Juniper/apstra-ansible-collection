@@ -22,6 +22,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_configlet
     delete_blueprint_configlet,
     find_blueprint_configlet_by_label,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_configlet_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -170,6 +173,18 @@ EXAMPLES = """
       label: "SNMP Config"
     state: present
   register: bp_import
+
+# Import using catalog configlet display_name instead of UUID
+- name: Import catalog configlet by name
+  juniper.apstra.configlets:
+    type: blueprint
+    id:
+      blueprint: "my-blueprint"
+    body:
+      configlet: "SNMP Config"
+      condition: 'role in ["spine", "leaf"]'
+      label: "SNMP Config"
+    state: present
 
 - name: Remove imported catalog configlet from blueprint
   juniper.apstra.configlets:
@@ -395,19 +410,22 @@ def _catalog_get_by_id(client_factory, configlet_id):
 
 
 def _resolve_catalog_configlet_in_body(client_factory, body):
-    """If body.configlet is a string (catalog UUID), resolve it to the full catalog object dict.
+    """If body.configlet is a string (catalog UUID or display_name), resolve it
+    to the full catalog object dict.
 
     The Apstra API requires body.configlet to be a dict with display_name and
     generators.  When importing a catalog configlet into a blueprint, users pass
-    the catalog UUID as a convenience; this helper fetches the catalog object and
-    replaces the string with the dict the API expects.
+    the catalog UUID or display_name as a convenience; this helper fetches the
+    catalog object and replaces the string with the dict the API expects.
     """
     if body is None:
         return
     configlet_val = body.get("configlet")
     if not isinstance(configlet_val, str):
         return
-    catalog_obj = _catalog_get_by_id(client_factory, configlet_val)
+    # Resolve display_name to UUID if needed
+    resolved_id = resolve_configlet_id(client_factory, configlet_val)
+    catalog_obj = _catalog_get_by_id(client_factory, resolved_id)
     if catalog_obj is None:
         raise ValueError(
             f"Catalog configlet '{configlet_val}' not found. "
@@ -509,10 +527,15 @@ def _manage_catalog_configlet(module, client_factory):
             else:
                 raise ValueError(f"Unexpected create response: {created_object}")
 
-        # Return the final object state
-        result[leaf_object_type] = client_factory.object_request(
-            object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-        )
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result[leaf_object_type] = current_object
+        else:
+            result[leaf_object_type] = client_factory.object_request(
+                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+            )
 
     if state == "absent":
         if current_object is None:
@@ -543,6 +566,8 @@ def _manage_blueprint_configlet(module, client_factory):
     blueprint_id = id.get("blueprint")
     if not blueprint_id:
         raise ValueError("Must specify 'blueprint' in id for blueprint configlets")
+    blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+    id["blueprint"] = blueprint_id
 
     configlet_id = id.get("configlet", None)
 
@@ -611,18 +636,23 @@ def _manage_blueprint_configlet(module, client_factory):
             else:
                 raise ValueError(f"Unexpected create response: {created}")
 
-        # Return the final object state (with retry for eventual consistency)
-        final_object = None
-        for attempt in range(10):
-            final_object = get_blueprint_configlet(
-                client_factory, blueprint_id, configlet_id
-            )
-            if final_object is not None:
-                break
-            import time
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result["configlet"] = current_object
+        else:
+            final_object = None
+            for attempt in range(10):
+                final_object = get_blueprint_configlet(
+                    client_factory, blueprint_id, configlet_id
+                )
+                if final_object is not None:
+                    break
+                import time
 
-            time.sleep(3)
-        result["configlet"] = final_object
+                time.sleep(3)
+            result["configlet"] = final_object
 
     if state == "absent":
         if current_object is None:

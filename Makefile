@@ -219,6 +219,9 @@ test-rollback: install
 test-ztp_device: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
 
+test-name_resolution: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml
+
 TESTBED_FILE ?=
 
 # ── ConnectorOps full run (all phases) ────────────────────────────────────────

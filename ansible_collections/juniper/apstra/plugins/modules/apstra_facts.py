@@ -201,8 +201,13 @@ def main():
                 module.fail_json(msg=f"Unsupported network object '{object_type}'")
 
         # Iterate through the list of requested network objects and get everything.
+        id_param = module.params.get("id", {})
+        if id_param and "blueprint" in id_param:
+            id_param["blueprint"] = client_factory.resolve_blueprint_id(
+                id_param["blueprint"]
+            )
         object_map = client_factory.list_all_objects(
-            requested_network_objects, module.params.get("id", {})
+            requested_network_objects, id_param
         )
 
         # Structure used for gathered facts

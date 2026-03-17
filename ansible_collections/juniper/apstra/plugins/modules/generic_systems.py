@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+)
 
 # SDK-based helpers (node read/write)
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
@@ -280,6 +283,21 @@ EXAMPLES = """
             - "10G"
     state: present
   register: gs_create
+
+# ── Create using switch label instead of node ID ──────────────────
+
+- name: Create a generic system using switch name
+  juniper.apstra.generic_systems:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      name: "my-server-02"
+      hostname: "my-server-02.example.com"
+      links:
+        - target_switch_id: "leaf-1"
+          target_switch_if_name: "xe-0/0/8"
+          target_switch_if_transform_id: 1
+    state: present
 
 # ── Create a generic system with dual LAG links ───────────────────
 
@@ -722,12 +740,22 @@ def _handle_present(module, client_factory):
     bp_id = id_param.get("blueprint")
     if not bp_id:
         raise ValueError("'id.blueprint' is required")
+    bp_id = client_factory.resolve_blueprint_id(bp_id)
+    id_param["blueprint"] = bp_id
     sys_id = id_param.get("system_id")
     name = body.get("name")
     hostname = body.get("hostname")
     tags = body.get("tags")  # None means "not specified by user"; [] means "clear tags"
     links = body.get("links") or []
     deploy_mode = body.get("deploy_mode")  # None means "not specified by user"
+
+    # Resolve target_switch_id names to graph node UUIDs
+    for link in links:
+        if "target_switch_id" in link:
+            link["target_switch_id"] = resolve_system_node_id(
+                client_factory, bp_id, link["target_switch_id"]
+            )
+
     asn = body.get("asn")
     # Coerce ASN to int — Ansible Jinja2 may pass "110000" as a string
     # but the Apstra API requires an integer for domain_id.
@@ -1219,6 +1247,8 @@ def _handle_absent(module, client_factory):
     bp_id = id_param.get("blueprint")
     if not bp_id:
         raise ValueError("'id.blueprint' is required")
+    bp_id = client_factory.resolve_blueprint_id(bp_id)
+    id_param["blueprint"] = bp_id
     sys_id = id_param.get("system_id")
     name = body.get("name")
     hostname = body.get("hostname")

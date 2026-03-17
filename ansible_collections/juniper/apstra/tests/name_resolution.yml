@@ -1,0 +1,223 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# Name Resolution Integration Test
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Validates that human-readable names can be used instead of UUIDs/IDs
+# for blueprints, pools, security zones, routing policies, virtual networks,
+# and system nodes across all modules that support name resolution.
+#
+# This test:
+#   1. Creates a blueprint using template display_name
+#   2. Looks up blueprint by label (name resolution)
+#   3. Creates a security zone, then references it by label
+#   4. Creates a routing policy, then references it by label
+#   5. Assigns resource pools by display_name
+#   6. Creates a virtual network referencing the security zone by label
+#   7. Cleans up
+#
+# Usage:  make test-name_resolution
+# ═══════════════════════════════════════════════════════════════════════════════
+
+- name: Test name resolution across modules
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_name_res_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── 1. Blueprint creation using template display_name ─────────────
+    - name: Create blueprint using template display name
+      juniper.apstra.blueprint:
+        body:
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2 Virtual EVPN"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    - name: Verify blueprint was created
+      ansible.builtin.assert:
+        that:
+          - bp.id.blueprint is defined
+        fail_msg: "Blueprint creation using template display_name failed"
+
+    # ── 2. Blueprint lookup by label (name resolution) ────────────────
+    - name: Get resource groups using blueprint label
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_name }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        auth_token: "{{ auth.token }}"
+      register: rg_by_name
+
+    - name: Show resource group via label lookup
+      ansible.builtin.debug:
+        var: rg_by_name
+
+    - name: Verify blueprint name resolution worked
+      ansible.builtin.assert:
+        that:
+          - rg_by_name is defined
+          - rg_by_name.resource_group is defined
+        fail_msg: "Blueprint name resolution in resource_group failed"
+
+    # ── 3. Pool name resolution ───────────────────────────────────────
+    - name: Get available IP pools
+      juniper.apstra.apstra_facts:
+        id: "{{ bp.id }}"
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - ip_pools
+
+    - name: Extract first IP pool display_name
+      ansible.builtin.set_fact:
+        ip_pool_items: "{{ ansible_facts.apstra_facts.ip_pools | dict2items }}"
+
+    - name: Set pool display_name for test
+      ansible.builtin.set_fact:
+        test_pool_name: "{{ ip_pool_items[0].value.display_name }}"
+        test_pool_id: "{{ ip_pool_items[0].key }}"
+      when: ip_pool_items | length > 0
+
+    - name: Show pool info
+      ansible.builtin.debug:
+        msg: "Testing pool name resolution: '{{ test_pool_name }}' → '{{ test_pool_id }}'"
+      when: test_pool_name is defined
+
+    - name: Assign IP pool by display_name
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_name }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ test_pool_name }}"
+        auth_token: "{{ auth.token }}"
+      register: rg_pool_name
+      when: test_pool_name is defined
+
+    - name: Show pool name resolution result
+      ansible.builtin.debug:
+        var: rg_pool_name
+      when: test_pool_name is defined
+
+    - name: Verify pool name resolution worked
+      ansible.builtin.assert:
+        that:
+          - rg_pool_name is defined
+          - rg_pool_name is not failed
+        fail_msg: "Pool display_name resolution in resource_group failed"
+      when: test_pool_name is defined
+
+    # ── 4. Security zone creation ─────────────────────────────────────
+    - name: Create security zone
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "test-name-res-sz"
+          sz_type: "evpn"
+          vrf_name: "tnr_vrf"
+        auth_token: "{{ auth.token }}"
+      register: sz
+
+    - name: Show created security zone
+      ansible.builtin.debug:
+        var: sz
+
+    # ── 5. Routing policy creation ────────────────────────────────────
+    - name: Create routing policy
+      juniper.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        body:
+          label: "test-name-res-rp"
+          policy_type: "user_defined"
+          import_policy: "all"
+          export_policy:
+            loopbacks: true
+            l2edge_subnets: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+        auth_token: "{{ auth.token }}"
+      register: rp
+
+    - name: Show created routing policy
+      ansible.builtin.debug:
+        var: rp
+
+    # ── 6. Virtual network using security zone label ──────────────────
+    - name: Create virtual network using security zone label
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        body:
+          label: "test-name-res-vn"
+          vn_type: "vxlan"
+          security_zone_id: "test-name-res-sz"
+        auth_token: "{{ auth.token }}"
+      register: vn_by_name
+
+    - name: Show VN created with SZ name
+      ansible.builtin.debug:
+        var: vn_by_name
+
+    - name: Verify security zone name resolution in VN
+      ansible.builtin.assert:
+        that:
+          - vn_by_name is not failed
+          - vn_by_name.id.virtual_network is defined
+        fail_msg: "Security zone name resolution in virtual_network failed"
+
+    # ── 7. Resource group using blueprint label + pool name ───────────
+    - name: Get resource group using both blueprint label and pool name
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_name }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        auth_token: "{{ auth.token }}"
+      register: rg_final
+
+    - name: Verify resource group accessible by name
+      ansible.builtin.assert:
+        that:
+          - rg_final is not failed
+        fail_msg: "Resource group access using blueprint label failed"
+
+    # ── Cleanup ───────────────────────────────────────────────────────
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: bp_delete
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"

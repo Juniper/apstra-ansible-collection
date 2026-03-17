@@ -92,6 +92,57 @@
       ansible.builtin.debug:
         var: snmp_bp_import
 
+    # ── Name Resolution: import catalog configlet by display_name ───
+
+    - name: Remove SNMP import for re-import by name test
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ snmp_bp_import.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Import catalog configlet by display_name (name resolution)
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          configlet: "test_catalog_snmp"
+          condition: 'role in ["spine", "leaf"]'
+          label: "test_catalog_snmp_by_name"
+        auth_token: "{{ auth.token }}"
+      register: snmp_import_by_name
+
+    - name: Verify configlet display_name resolution
+      ansible.builtin.assert:
+        that:
+          - snmp_import_by_name is not failed
+        fail_msg: "Catalog configlet display_name resolution failed"
+        success_msg: "PASSED: Catalog configlet imported by display_name"
+
+    - name: Remove configlet imported by name
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          configlet: "{{ snmp_import_by_name.id.configlet }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Re-import SNMP configlet for remaining tests
+      juniper.apstra.configlets:
+        type: blueprint
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          configlet: "{{ catalog_create.id.configlet }}"
+          condition: 'role in ["spine", "leaf"]'
+          label: "test_catalog_snmp"
+        auth_token: "{{ auth.token }}"
+      register: snmp_bp_import
+
     - name: Update catalog configlet
       juniper.apstra.configlets:
         type: catalog

@@ -18,6 +18,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_property_set import (
     reimport_blueprint_property_set,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_property_set_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -183,6 +186,15 @@ EXAMPLES = """
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
     body:
       id: "dcqcn"
+    state: present
+
+# Import using property set label instead of UUID
+- name: Import property set by name
+  juniper.apstra.property_set:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      id: "my_custom_ps"
     state: present
 
 # Blueprint scope -- partial import with specific keys
@@ -366,8 +378,12 @@ def _handle_global_property_set(module, client_factory, id, body, state, result)
             result["response"] = created
             result["msg"] = f"{leaf_object_type} created successfully"
 
-        # Return the final object state
-        if id and id.get(leaf_object_type):
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result[leaf_object_type] = current_object
+        elif id and id.get(leaf_object_type):
             result[leaf_object_type] = client_factory.object_request(
                 object_type=object_type,
                 op="get",
@@ -404,7 +420,9 @@ def _handle_blueprint_property_set(module, client_factory, id, body, state, resu
     current_object = None
     if object_id is None:
         if (body is not None) and ("id" in body):
-            # Datacenter import: check if the global property set is
+            # Datacenter import: resolve property set name to UUID if needed
+            body["id"] = resolve_property_set_id(client_factory, body["id"])
+            # Check if the global property set is
             # already imported into the blueprint using body["id"].
             try:
                 check_id = dict(id)
@@ -473,8 +491,12 @@ def _handle_blueprint_property_set(module, client_factory, id, body, state, resu
             result["response"] = created
             result["msg"] = f"{leaf_object_type} created successfully"
 
-        # Return the final object state (may take a few tries)
-        if id.get(leaf_object_type):
+        # Return the final object state (avoid re-reading after updates
+        # because SDK may return stale cached data; for creates, fetch
+        # the full server-populated object)
+        if current_object is not None:
+            result[leaf_object_type] = current_object
+        elif id.get(leaf_object_type):
             result[leaf_object_type] = client_factory.object_request(
                 object_type=object_type,
                 op="get",
@@ -518,6 +540,10 @@ def main():
         id = module.params.get("id", None) or {}
         body = module.params.get("body", None)
         state = module.params["state"]
+
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
 
         # Determine scope: global vs blueprint
         is_blueprint_scope = "blueprint" in id

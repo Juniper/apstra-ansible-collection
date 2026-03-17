@@ -238,6 +238,46 @@
           - ct_delete_idempotent.changed == false
         fail_msg: "Delete idempotency failed"
 
+    # ── Test 6: Create CT using security zone label (name resolution) ─
+    - name: "Test 6 - Create CT using security zone label"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "CT-Name-Res-Test"
+          type: interface
+          description: "CT using security zone label"
+          primitives:
+            ip_links:
+              named_link:
+                security_zone: "ct-test-sz"
+                interface_type: tagged
+                vlan_id: 300
+                ipv4_addressing_type: numbered
+                ipv6_addressing_type: none
+        state: present
+      register: ct_name_res
+
+    - name: Assert CT with name resolution was created
+      ansible.builtin.assert:
+        that:
+          - ct_name_res is not failed
+          - ct_name_res.ct_id is defined
+        fail_msg: "Test 6 FAILED: Security zone label resolution in CT"
+        success_msg: "Test 6 PASSED: CT created using security zone label"
+
+    - name: Delete name-resolved CT
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "CT-Name-Res-Test"
+        state: absent
+
     # ── Cleanup: Delete blueprint ─────────────────────────────────────
     - name: Unlock the blueprint
       juniper.apstra.blueprint:

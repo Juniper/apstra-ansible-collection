@@ -272,6 +272,9 @@ def main():
         # Validate params
         id_param = module.params["id"] or {}
         blueprint_id = id_param.get("blueprint")
+        if blueprint_id:
+            blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+            id_param["blueprint"] = blueprint_id
         ct_id = id_param.get("ct_id")
         ct_name = id_param.get("ct_name")
         body = module.params["body"] or {}

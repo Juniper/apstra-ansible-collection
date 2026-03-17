@@ -122,14 +122,14 @@ EXAMPLES = """
 
 # ── Assign using node labels instead of UUIDs ─────────────────────
 
-- name: Assign interface maps by node label
+- name: Assign interface maps by node label and IM label
   juniper.apstra.interface_map:
     id:
-      blueprint: "{{ blueprint_id }}"
+      blueprint: "my-blueprint"
     body:
       assignments:
-        spine1: "Juniper_vJunos-switch_vJunos"
-        leaf1: "Juniper_vJunos-switch_vJunos"
+        spine1: "my_spine_ifmap"
+        leaf1: "my_leaf_ifmap"
     state: present
 
 # ── Assign different maps per role ────────────────────────────────
@@ -243,16 +243,46 @@ def _resolve_node_label(client_factory, blueprint_id, label):
     return None
 
 
+_UUID_RE = __import__("re").compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    __import__("re").IGNORECASE,
+)
+
+
+def _resolve_im_label(client_factory, im_ref):
+    """Resolve an interface-map label to its UUID.
+
+    If *im_ref* already looks like a UUID it is returned as-is.
+    Otherwise all design interface maps are listed and the one whose
+    ``label`` matches is returned.  Returns the original *im_ref*
+    unchanged if no match is found.
+    """
+    if not im_ref or _UUID_RE.match(str(im_ref)):
+        return im_ref
+
+    client = _get_l3clos_client(client_factory)
+    result = client.request("/design/interface-maps", method="GET")
+    items = (result or {}).get("items", [])
+    for item in items:
+        if item.get("label") == im_ref:
+            return item["id"]
+
+    # Not found — return as-is and let the API report the error
+    return im_ref
+
+
 def _resolve_assignments(module, client_factory, blueprint_id, desired, current):
     """Resolve human-readable names in *desired* assignments to IDs.
 
     * Node keys that don't appear in the *current* assignments dict
       are treated as labels and resolved via a blueprint graph query.
-    * Interface-map values are passed through as-is because the
-      Apstra API already accepts interface-map labels.
+    * Interface-map values that are not UUIDs are resolved by label
+      from the design interface-maps catalog.
 
-    Returns a new dict with all node keys resolved to graph IDs.
+    Returns a new dict with all node keys and IM values resolved to IDs.
     """
+    # Pre-resolve unique IM labels (avoid repeated API calls)
+    im_cache = {}
     resolved = {}
     for node_ref, im_ref in desired.items():
         # ── Resolve node key ─────────────────────────────────────
@@ -270,7 +300,16 @@ def _resolve_assignments(module, client_factory, blueprint_id, desired, current)
                 # and let the API handle the error if it's invalid
                 node_id = node_ref
 
-        resolved[node_id] = im_ref
+        # ── Resolve IM value ─────────────────────────────────────
+        if im_ref and im_ref not in im_cache:
+            resolved_im = _resolve_im_label(client_factory, im_ref)
+            if resolved_im != im_ref:
+                module.debug(
+                    f"Resolved interface-map label '{im_ref}' → '{resolved_im}'"
+                )
+            im_cache[im_ref] = resolved_im
+
+        resolved[node_id] = im_cache.get(im_ref, im_ref)
 
     return resolved
 

@@ -204,6 +204,10 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Coerce integer fields that the API requires as int, not str
         if body:
             for int_field in ("vni_id", "vlan_id"):
@@ -274,10 +278,15 @@ def main():
                     id, leaf_object_type, tags
                 )
 
-            # Return the final object state (may take a few tries)
-            result[leaf_object_type] = client_factory.object_request(
-                object_type=object_type, op="get", id=id, retry=10, retry_delay=3
-            )
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            else:
+                result[leaf_object_type] = client_factory.object_request(
+                    object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+                )
 
         # If we still don't have an id, there's a problem
         if id is None:

@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -155,6 +158,21 @@ EXAMPLES = """
         - "PPbnMs25oIuO8WHldA"
     state: present
 
+# Use system node labels instead of graph node IDs for local_gw_nodes
+- name: Create external gateway using node names
+  juniper.apstra.external_gateway:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      gw_name: "dc2_border_gw"
+      gw_ip: "10.1.0.1"
+      gw_asn: 65500
+      local_gw_nodes:
+        - "border-leaf-1"
+        - "border-leaf-2"
+      ttl: 2
+    state: present
+
 # Delete an external gateway
 - name: Delete external gateway
   juniper.apstra.external_gateway:
@@ -268,6 +286,10 @@ def main():
         body = module.params.get("body", None)
         state = module.params["state"]
 
+        # Resolve blueprint name to ID if needed
+        if "blueprint" in id:
+            id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
         # Coerce integer fields — Ansible may pass them as strings
         # when values come from Jinja2 templating
         _INT_FIELDS = ("gw_asn", "ttl", "keepalive_timer", "holdtime_timer")
@@ -280,6 +302,15 @@ def main():
                         raise ValueError(
                             f"'{field}' must be an integer, got: {body[field]!r}"
                         )
+
+            # Resolve local_gw_nodes system labels to graph node UUIDs
+            if "local_gw_nodes" in body and isinstance(body["local_gw_nodes"], list):
+                bp_id = id.get("blueprint")
+                if bp_id:
+                    body["local_gw_nodes"] = [
+                        resolve_system_node_id(client_factory, bp_id, node)
+                        for node in body["local_gw_nodes"]
+                    ]
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
@@ -376,8 +407,12 @@ def main():
                 result["response"] = created
                 result["msg"] = f"{leaf_object_type} created successfully"
 
-            # Return the final object state (may take a few tries)
-            if id.get(leaf_object_type):
+            # Return the final object state (avoid re-reading after updates
+            # because SDK may return stale cached data; for creates, fetch
+            # the full server-populated object)
+            if current_object is not None:
+                result[leaf_object_type] = current_object
+            elif id.get(leaf_object_type):
                 final_obj = client_factory.object_request(
                     object_type=object_type,
                     op="get",

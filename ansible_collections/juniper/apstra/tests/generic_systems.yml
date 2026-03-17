@@ -87,6 +87,10 @@
           {{ system_nodes_qe.nodes | dict2items
              | selectattr('value.role', 'equalto', 'spine')
              | map(attribute='value.id') | list }}
+        leaf_labels: >-
+          {{ system_nodes_qe.nodes | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.label') | list }}
       when: not use_existing_blueprint | bool
 
     - name: Display discovered nodes
@@ -548,6 +552,55 @@
           - not gs_delete_idem.changed
         fail_msg: "TEST 8 FAILED: Delete idempotency"
         success_msg: "TEST 8 PASSED: Delete idempotency - no change"
+
+    # ══════════════════════════════════════════════════════════════════
+    #  TEST 8b: Name Resolution — create GS using leaf label
+    # ══════════════════════════════════════════════════════════════════
+
+    - name: "Cleanup stale name-res GS if present"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-name-res"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+      when: not use_existing_blueprint | bool
+
+    - name: "TEST 8b - Create GS using leaf label (name resolution)"
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "test-gs-name-res"
+          hostname: "test-gs-name-res"
+          links:
+            - target_switch_id: "{{ leaf_labels[0] }}"
+              target_switch_if_name: "{{ test_if_name_1 }}"
+              target_switch_if_transform_id: "{{ test_if_transform_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_name_res
+      when: not use_existing_blueprint | bool
+
+    - name: Verify GS created with leaf label resolution
+      ansible.builtin.assert:
+        that:
+          - gs_name_res is not failed
+          - gs_name_res.system_id is defined
+        fail_msg: "TEST 8b FAILED: Leaf label resolution in generic_systems"
+        success_msg: "TEST 8b PASSED: GS created using leaf label"
+      when: not use_existing_blueprint | bool
+
+    - name: Delete name-resolved GS
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ gs_name_res.system_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      when: not use_existing_blueprint | bool
 
     # ══════════════════════════════════════════════════════════════════
     #  Cleanup stale LAG GS from prior failed runs

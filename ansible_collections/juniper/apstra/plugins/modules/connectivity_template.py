@@ -28,6 +28,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_parser im
     parse_ct_export,
     normalize_for_compare,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_ct_primitives,
+)
 
 
 DOCUMENTATION = """
@@ -218,6 +221,33 @@ EXAMPLES = """
                     rp_to_attach: "{{ routing_policy_id }}"
     state: present
   register: ct_result
+
+# Use human-readable names instead of IDs — security zone, routing policy,
+# and virtual network labels are resolved automatically
+- name: Create CT using names instead of IDs
+  juniper.apstra.connectivity_template:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      name: "BGP-Named"
+      type: interface
+      primitives:
+        ip_links:
+          named_link:
+            security_zone: "my-routing-zone"
+            interface_type: tagged
+            vlan_id: 100
+            ipv4_addressing_type: numbered
+            ipv6_addressing_type: none
+            bgp_peering_generic_systems:
+              peer1:
+                routing_policies:
+                  rp1:
+                    rp_to_attach: "my-routing-policy"
+        virtual_network_singles:
+          vn1:
+            vn_node_id: "my-virtual-network"
+    state: present
 
 # Interface CT: IP Link with Static Route child
 - name: Create IP Link with Static Route CT
@@ -831,6 +861,8 @@ def main():
         blueprint_id = id_param.get("blueprint")
         if not blueprint_id:
             raise ValueError("'id.blueprint' is required")
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
         ct_id = id_param.get("ct_id")
         name = body.get("name")
         ct_type = body.get("type")
@@ -863,6 +895,10 @@ def main():
                 validate_primitives(ct_type, primitives)
             except CTValidationError as e:
                 raise ValueError(str(e))
+
+            # Resolve name references in primitives (security_zone,
+            # routing_policy, virtual_network labels → UUIDs)
+            resolve_ct_primitives(client_factory, blueprint_id, primitives)
 
             ct_name = name or (
                 current_parsed.get("name") if current_parsed else "unnamed"

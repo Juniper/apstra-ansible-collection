@@ -435,70 +435,9 @@ node:
     type: dict
 """
 
-
-# ──────────────────────────────────────────────────────────────────
-#  Template name resolution
-# ──────────────────────────────────────────────────────────────────
-
-
-def _resolve_template_id(client_factory, template_ref):
-    """Resolve a template reference to a valid template ID.
-
-    Users may supply either the exact template ID (e.g. ``L2_Virtual_EVPN``)
-    or the human-readable display name (e.g. ``L2 Virtual EVPN``).
-
-    Resolution order:
-      1. Try ``template_ref`` as-is — if a template with that ID exists, return it.
-      2. Search all templates for one whose ``display_name`` matches
-         ``template_ref`` (case-insensitive).
-      3. Raise ``ValueError`` if no match is found.
-
-    :param client_factory: An ``ApstraClientFactory`` instance.
-    :param template_ref: The template ID or display name provided by the user.
-    :return: The resolved template ID string.
-    :raises ValueError: If no matching template is found.
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request("/design/templates")
-    if resp.status_code != 200:
-        raise Exception(
-            f"Failed to list design templates: {resp.status_code} {resp.text}"
-        )
-    try:
-        data = resp.json()
-    except Exception:
-        data = {}
-    templates = data.get("items", [])
-
-    # 1. Exact ID match
-    for tmpl in templates:
-        if tmpl.get("id") == template_ref:
-            return template_ref
-
-    # 2. Case-insensitive display_name match
-    ref_lower = template_ref.lower()
-    matches = [
-        tmpl
-        for tmpl in templates
-        if (tmpl.get("display_name") or "").lower() == ref_lower
-    ]
-    if len(matches) == 1:
-        return matches[0]["id"]
-    if len(matches) > 1:
-        ids = [m["id"] for m in matches]
-        raise ValueError(
-            f"Multiple templates match display_name '{template_ref}': {ids}. "
-            "Please use the exact template ID instead."
-        )
-
-    # 3. No match found — build a helpful error message
-    available = [
-        f"  - {t.get('id')!r} ({t.get('display_name', '')})" for t in templates
-    ]
-    raise ValueError(
-        f"Template '{template_ref}' not found. "
-        f"Available templates:\n" + "\n".join(available)
-    )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_template_id as _resolve_template_id,
+)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -778,6 +717,11 @@ def main():
         lock_state = module.params["lock_state"]
         lock_timeout = module.params["lock_timeout"]
         commit_timeout = module.params["commit_timeout"]
+
+        # Resolve blueprint name to ID if needed
+        if blueprint_id:
+            blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+            id["blueprint"] = blueprint_id
 
         # ── state=queried ─────────────────────────────────────────
         if state == "queried":
