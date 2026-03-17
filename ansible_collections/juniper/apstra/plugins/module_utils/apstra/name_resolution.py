@@ -306,6 +306,18 @@ def resolve_security_zone_id(client_factory, blueprint_id, sz_ref):
         if (sz.get("label") or "").lower() == ref_lower:
             return sz["id"]
 
+    # VRF name match (e.g. "default" for the default routing zone)
+    for r in results:
+        sz = r.get("sz", {})
+        if sz.get("vrf_name") == sz_ref:
+            return sz["id"]
+
+    # Case-insensitive vrf_name fallback
+    for r in results:
+        sz = r.get("sz", {})
+        if (sz.get("vrf_name") or "").lower() == ref_lower:
+            return sz["id"]
+
     available = [r.get("sz", {}).get("label", "") for r in results]
     raise ValueError(
         f"Security zone '{sz_ref}' not found in blueprint. " f"Available: {available}"
