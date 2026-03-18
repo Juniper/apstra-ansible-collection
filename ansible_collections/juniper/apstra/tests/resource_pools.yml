@@ -1077,9 +1077,91 @@
         success_msg: "Integer pool correctly rejected subnets with a clear error message"
         fail_msg: "Integer pool should have rejected subnets body"
 
+    # ── Non-Existent Pool Assignment Tests ──────────────────────────────
+    # These tests verify that assigning a non-existent (dummy) resource
+    # pool to a blueprint is properly rejected with a clear error message.
+
+    # Test: Assign a non-existent pool by fake display name
+    - name: "NEGATIVE - Assign non-existent ASN pool by name (should fail)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
+        body:
+          pool_ids:
+            - "does-not-exist-pool"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_assign_by_name
+      ignore_errors: true
+      when: asn_resource_group is defined and asn_resource_group
+
+    - name: Assert non-existent pool by name was rejected
+      ansible.builtin.assert:
+        that:
+          - neg_assign_by_name is failed
+          - "'not found' in neg_assign_by_name.msg"
+          - "'ASN' in neg_assign_by_name.msg"
+        success_msg: "Non-existent pool by name correctly rejected with a clear error message"
+        fail_msg: "Assigning a non-existent pool by name should have been rejected"
+      when: neg_assign_by_name is defined and neg_assign_by_name is not skipped
+
+    # Test: Assign a non-existent pool by fake UUID
+    - name: "NEGATIVE - Assign non-existent ASN pool by UUID (should fail)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "asn"
+          group_name: "{{ asn_resource_group.name }}"
+        body:
+          pool_ids:
+            - "00000000-0000-0000-0000-000000000000"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_assign_by_uuid
+      ignore_errors: true
+      when: asn_resource_group is defined and asn_resource_group
+
+    - name: Assert non-existent pool by UUID was rejected
+      ansible.builtin.assert:
+        that:
+          - neg_assign_by_uuid is failed
+          - "'does not exist' in neg_assign_by_uuid.msg"
+          - "'ASN' in neg_assign_by_uuid.msg"
+        success_msg: "Non-existent pool by UUID correctly rejected with a clear error message"
+        fail_msg: "Assigning a non-existent pool by UUID should have been rejected"
+      when: neg_assign_by_uuid is defined and neg_assign_by_uuid is not skipped
+
+    # Test: Assign a non-existent IP pool by fake UUID
+    - name: "NEGATIVE - Assign non-existent IP pool by UUID (should fail)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          group_type: "ip"
+          group_name: "{{ ip_resource_group.name }}"
+        body:
+          pool_ids:
+            - "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        state: present
+        auth_token: "{{ auth_result.token }}"
+      register: neg_assign_ip_uuid
+      ignore_errors: true
+      when: ip_resource_group is defined and ip_resource_group
+
+    - name: Assert non-existent IP pool by UUID was rejected
+      ansible.builtin.assert:
+        that:
+          - neg_assign_ip_uuid is failed
+          - "'does not exist' in neg_assign_ip_uuid.msg"
+          - "'IP' in neg_assign_ip_uuid.msg"
+        success_msg: "Non-existent IP pool by UUID correctly rejected with a clear error message"
+        fail_msg: "Assigning a non-existent IP pool by UUID should have been rejected"
+      when: neg_assign_ip_uuid is defined and neg_assign_ip_uuid is not skipped
+
     - name: "SUMMARY - All negative validation tests passed"
       ansible.builtin.debug:
-        msg: "All input validation tests passed - the module correctly rejects mismatched pool type/body combinations"
+        msg: "All input validation tests passed - the module correctly rejects mismatched pool type/body combinations and non-existent pool assignments"
 
     # ── Cleanup ─────────────────────────────────────────────────────────
 

@@ -199,27 +199,32 @@ def _list_pools(client_factory, pool_type):
     return result if isinstance(result, list) else []
 
 
-def resolve_pool_id(client_factory, pool_ref, pool_type):
-    """Resolve a single pool reference (UUID or display_name) to its ID.
+def _resolve_pool_ref(pool_ref, pool_type, pools):
+    """Resolve a single pool reference against a pre-fetched pool list.
 
-    :param client_factory: An ``ApstraClientFactory`` instance.
     :param pool_ref: The pool UUID or display_name.
     :param pool_type: The pool type ('asn', 'ip', 'ipv6', 'vni', 'vlan').
+    :param pools: Pre-fetched list of pool dicts with 'id' and 'display_name'.
     :return: The resolved pool ID string.
+    :raises ValueError: If the pool reference does not match any existing pool.
     """
     if not pool_ref:
         return pool_ref
 
-    # Fast path: already a UUID
-    if _is_uuid(pool_ref):
-        return pool_ref
-
-    pools = _list_pools(client_factory, pool_type)
-
-    # Try exact ID match (some pool IDs are human-readable strings)
+    # Check by exact ID match (covers both UUIDs and human-readable IDs)
     for pool in pools:
         if pool.get("id") == pool_ref:
             return pool_ref
+
+    # If it looks like a UUID but didn't match any pool ID, it doesn't exist
+    if _is_uuid(pool_ref):
+        available = [
+            f"  - {p.get('display_name', '')} (id={p.get('id', '')})" for p in pools
+        ]
+        raise ValueError(
+            f"{pool_type.upper()} pool with ID '{pool_ref}' does not exist. "
+            f"Available {pool_type} pools:\n" + "\n".join(available)
+        )
 
     # Case-insensitive display_name match
     ref_lower = str(pool_ref).lower()
@@ -243,17 +248,38 @@ def resolve_pool_id(client_factory, pool_ref, pool_type):
     )
 
 
+def resolve_pool_id(client_factory, pool_ref, pool_type):
+    """Resolve a single pool reference (UUID or display_name) to its ID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param pool_ref: The pool UUID or display_name.
+    :param pool_type: The pool type ('asn', 'ip', 'ipv6', 'vni', 'vlan').
+    :return: The resolved pool ID string.
+    :raises ValueError: If the pool reference does not match any existing pool.
+    """
+    if not pool_ref:
+        return pool_ref
+
+    pools = _list_pools(client_factory, pool_type)
+    return _resolve_pool_ref(pool_ref, pool_type, pools)
+
+
 def resolve_pool_ids(client_factory, pool_refs, pool_type):
     """Resolve a list of pool references to their IDs.
+
+    Fetches the pool list once and validates that every reference
+    (UUID or display_name) corresponds to an existing pool.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param pool_refs: List of pool UUIDs or display_names.
     :param pool_type: The pool type ('asn', 'ip', 'ipv6', 'vni', 'vlan').
     :return: List of resolved pool ID strings.
+    :raises ValueError: If any pool reference does not match an existing pool.
     """
     if not pool_refs:
         return pool_refs
-    return [resolve_pool_id(client_factory, ref, pool_type) for ref in pool_refs]
+    pools = _list_pools(client_factory, pool_type)
+    return [_resolve_pool_ref(ref, pool_type, pools) for ref in pool_refs]
 
 
 # ──────────────────────────────────────────────────────────────────
