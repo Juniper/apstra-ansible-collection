@@ -1332,7 +1332,7 @@
       loop: "{{ virtual_networks | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
-      register: vn_results
+      register: vn_results_fallback
       when: esi_pair_label is not defined
 
     - name: "Phase 15e — Assert every VN has non-empty bound_to with correct vlan_id"
@@ -1352,11 +1352,15 @@
           bound_to={{ item.virtual_network.bound_to | length }} entries,
           vlan_id={{ item.virtual_network.bound_to[0].vlan_id }} (global vlan_id confirmed).
           {{ '(ESI pair expanded to redundancy_group node).' if esi_pair_label is defined else '(individual leaf nodes merged by Apstra).' }}
-      loop: "{{ vn_results.results }}"
+      loop: >-
+        {{
+          vn_results.results
+          if (esi_pair_label is defined and vn_results is defined)
+          else vn_results_fallback.results
+        }}
       loop_control:
         label: "{{ item.virtual_network.label | default(item.item.key) }}"
       when:
-        - vn_results is defined
         - not (item.skipped | default(false))
 
     # ═══════════════════════════════════════════════════════════════════════════
