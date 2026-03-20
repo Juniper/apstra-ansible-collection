@@ -436,6 +436,65 @@ def resolve_system_node_id(client_factory, blueprint_id, node_ref):
     )
 
 
+def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
+    """Check if *node_ref* is a redundancy-group (ESI/MLAG pair) and return
+    the graph node IDs of its member systems.
+
+    Used by the ``virtual_network`` module to transparently expand a
+    redundancy-group label in ``bound_to.system_id`` into the individual
+    member device IDs that the Apstra API expects.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param node_ref: A system node label/ID or redundancy-group label/ID.
+    :return: Sorted list of member system node IDs if *node_ref* identifies
+             a redundancy group, or ``None`` if it does not (caller should
+             fall back to regular :func:`resolve_system_node_id`).
+    """
+    if not node_ref:
+        return None
+
+    results = _run_qe(
+        client_factory,
+        blueprint_id,
+        "node('redundancy_group', name='rg').out('composed_of').node('system', name='mbr')",
+    )
+    if not results:
+        return None
+
+    # Build lookup structures: rg_id → {label, members[]}
+    rg_map = {}
+    for r in results:
+        rg = r.get("rg", {})
+        rg_id = rg.get("id")
+        mbr_id = r.get("mbr", {}).get("id")
+        if not rg_id or not mbr_id:
+            continue
+        if rg_id not in rg_map:
+            rg_map[rg_id] = {"label": rg.get("label", ""), "members": []}
+        rg_map[rg_id]["members"].append(mbr_id)
+
+    if not rg_map:
+        return None
+
+    # Exact ID match
+    if node_ref in rg_map:
+        return sorted(rg_map[node_ref]["members"])
+
+    # Exact label match
+    for rg_id, info in rg_map.items():
+        if info["label"] == node_ref:
+            return sorted(info["members"])
+
+    # Case-insensitive label fallback
+    ref_lower = node_ref.lower()
+    for rg_id, info in rg_map.items():
+        if info["label"].lower() == ref_lower:
+            return sorted(info["members"])
+
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────
 #  Virtual Network resolution  (Phase 4)
 # ──────────────────────────────────────────────────────────────────
