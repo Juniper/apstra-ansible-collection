@@ -283,3 +283,42 @@ def find_host_evpn_interfaces(client_factory, blueprint_id, host_labels=None):
             continue
         result[label] = intf_id
     return result
+
+
+def find_redundancy_groups(client_factory, blueprint_id):
+    """Discover all ESI / MLAG redundancy groups and their member systems.
+
+    Queries the blueprint graph for ``redundancy_group`` nodes and traverses
+    the outgoing ``composed_of`` edges to their member ``system`` nodes.
+
+    Args:
+        client_factory: ``ApstraClientFactory``.
+        blueprint_id: Blueprint UUID.
+
+    Returns:
+        dict: ``{rg_id: {"label": str, "members": [member_system_id, ...]}}`
+        where *members* is a **sorted** list of member system node IDs.
+        Returns an empty dict when the blueprint has no redundancy groups.
+    """
+    items = run_qe_query(
+        client_factory,
+        blueprint_id,
+        "node('redundancy_group', name='rg').out().node('system', name='mbr')",
+    )
+
+    rg_map = {}
+    for item in items:
+        rg = item.get("rg", {})
+        rg_id = rg.get("id")
+        mbr_id = item.get("mbr", {}).get("id")
+        if not rg_id or not mbr_id:
+            continue
+        if rg_id not in rg_map:
+            rg_map[rg_id] = {"label": rg.get("label", ""), "members": []}
+        rg_map[rg_id]["members"].append(mbr_id)
+
+    # Sort members for deterministic ordering
+    for info in rg_map.values():
+        info["members"] = sorted(info["members"])
+
+    return rg_map

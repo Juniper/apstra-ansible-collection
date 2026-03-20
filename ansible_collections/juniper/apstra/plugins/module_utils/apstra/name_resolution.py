@@ -444,6 +444,10 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
     redundancy-group label in ``bound_to.system_id`` into the individual
     member device IDs that the Apstra API expects.
 
+    Delegates the QE query and parsing to
+    :func:`~plugins.module_utils.apstra.bp_query.find_redundancy_groups`
+    which is the canonical owner of that logic in this collection.
+
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.
     :param node_ref: A system node label/ID or redundancy-group label/ID.
@@ -454,43 +458,29 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
     if not node_ref:
         return None
 
-    results = _run_qe(
-        client_factory,
-        blueprint_id,
-        "node('redundancy_group', name='rg').out('composed_of').node('system', name='mbr')",
+    # Deferred import to avoid circular dependencies at module load time
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_redundancy_groups,
     )
-    if not results:
-        return None
 
-    # Build lookup structures: rg_id → {label, members[]}
-    rg_map = {}
-    for r in results:
-        rg = r.get("rg", {})
-        rg_id = rg.get("id")
-        mbr_id = r.get("mbr", {}).get("id")
-        if not rg_id or not mbr_id:
-            continue
-        if rg_id not in rg_map:
-            rg_map[rg_id] = {"label": rg.get("label", ""), "members": []}
-        rg_map[rg_id]["members"].append(mbr_id)
-
+    rg_map = find_redundancy_groups(client_factory, blueprint_id)
     if not rg_map:
         return None
 
     # Exact ID match
     if node_ref in rg_map:
-        return sorted(rg_map[node_ref]["members"])
+        return rg_map[node_ref]["members"]
 
     # Exact label match
-    for rg_id, info in rg_map.items():
+    for info in rg_map.values():
         if info["label"] == node_ref:
-            return sorted(info["members"])
+            return info["members"]
 
     # Case-insensitive label fallback
     ref_lower = node_ref.lower()
-    for rg_id, info in rg_map.items():
+    for info in rg_map.values():
         if info["label"].lower() == ref_lower:
-            return sorted(info["members"])
+            return info["members"]
 
     return None
 
