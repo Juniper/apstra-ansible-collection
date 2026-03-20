@@ -7,8 +7,9 @@ Provides reusable helpers that run graph queries against an Apstra
 blueprint via the REST QE endpoint (POST /api/blueprints/{id}/qe).
 
 These helpers are consumed by:
-  - modules/blueprint_query.py  (playbook-facing module)
-  - modules/generic_systems.py  (internal node discovery)
+  - modules/blueprint.py         (blueprint facts gathering)
+  - modules/generic_systems.py   (internal node discovery)
+  - module_utils/apstra/name_resolution.py  (ESI group / system resolution)
   - Any other module that needs to discover blueprint topology
 
 Usage inside a module::
