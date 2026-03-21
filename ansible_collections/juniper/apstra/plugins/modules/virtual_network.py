@@ -317,6 +317,16 @@ def main():
                         client_factory, bp_id, body["security_zone_id"]
                     )
 
+            # Ensure Apstra generates the "Untagged VxLAN" connectivity template
+            # for vxlan virtual networks.  Without create_policy_untagged=True the
+            # auto-generated CT is not created, so host interfaces cannot be
+            # assigned to the VN.  The field is write-only (not returned by GET),
+            # so compare_and_update() silently skips it on updates, preserving
+            # full idempotency.  Callers may override by setting the field
+            # explicitly to False in the body.
+            if body.get("vn_type") == "vxlan" and "create_policy_untagged" not in body:
+                body["create_policy_untagged"] = True
+
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)
         if len(missing_id) > 1 or (

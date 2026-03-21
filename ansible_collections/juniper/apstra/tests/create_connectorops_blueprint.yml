@@ -1328,6 +1328,8 @@
           virtual_gateway_ipv4: "{{ item.value.gateway }}"
           vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to every bound_to entry
           l3_mtu: "{{ item.value.l3_mtu }}"
+          dhcp_service: "dhcpServiceDisabled"
+          create_policy_untagged: true   # generate 'Untagged VxLAN' CT so FT can assign VN to host interfaces
           bound_to: "{{ vn_esi_bound_to }}"
           # bound_to includes: ESI group (expands to leaf1+leaf2) + border leafs (leaf3border, leaf4border)
           # All leaf nodes need the VN IRB so that ConnectorOps SRX-based inter-VRF routing works.
@@ -1359,6 +1361,8 @@
           virtual_gateway_ipv4: "{{ item.value.gateway }}"
           vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to all bound_to entries
           l3_mtu: "{{ item.value.l3_mtu }}"
+          dhcp_service: "dhcpServiceDisabled"
+          create_policy_untagged: true   # generate 'Untagged VxLAN' CT so FT can assign VN to host interfaces
           bound_to: "{{ vn_fallback_bound_to }}"
           # bound_to includes: leaf1 + leaf2 + border leafs (leaf3border, leaf4border)
         state: present
@@ -1540,29 +1544,29 @@
       ansible.builtin.set_fact:
         token: "{{ auth.token }}"
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 21: Security Configlet
-    # ═══════════════════════════════════════════════════════════════════════════
-    - name: "Phase 21a — Create SRX security configlet (blueprint)"
-      juniper.apstra.configlets:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        type: blueprint
-        id:
-          blueprint: "{{ blueprint_label }}"
-        body:
-          label: "{{ configlet_label }}"
-          condition: '"srx" in tags'
-          configlet:
-            display_name: "{{ configlet_label }}"
-            generators:
-              - config_style: "junos"
-                section: "set_based_system"
-                template_text: "{{ configlet_template_text }}"
-                negation_template_text: ""
-                filename: ""
-        state: present
+    # # ═══════════════════════════════════════════════════════════════════════════
+    # # Phase 21: Security Configlet
+    # # ═══════════════════════════════════════════════════════════════════════════
+    # - name: "Phase 21a — Create SRX security configlet (blueprint)"
+    #   juniper.apstra.configlets:
+    #     api_url: "{{ api_url }}"
+    #     verify_certificates: "{{ verify_certs }}"
+    #     auth_token: "{{ token }}"
+    #     type: blueprint
+    #     id:
+    #       blueprint: "{{ blueprint_label }}"
+    #     body:
+    #       label: "{{ configlet_label }}"
+    #       condition: '"srx" in tags'
+    #       configlet:
+    #         display_name: "{{ configlet_label }}"
+    #         generators:
+    #           - config_style: "junos"
+    #             section: "set_based_system"
+    #             template_text: "{{ configlet_template_text }}"
+    #             negation_template_text: ""
+    #             filename: ""
+    #     state: present
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 22: Final Deploy
