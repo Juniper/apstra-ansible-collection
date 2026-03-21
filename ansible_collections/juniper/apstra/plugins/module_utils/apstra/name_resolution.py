@@ -436,6 +436,55 @@ def resolve_system_node_id(client_factory, blueprint_id, node_ref):
     )
 
 
+def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
+    """Check if *node_ref* is a redundancy-group (ESI/MLAG pair) and return
+    the graph node IDs of its member systems.
+
+    Used by the ``virtual_network`` module to transparently expand a
+    redundancy-group label in ``bound_to.system_id`` into the individual
+    member device IDs that the Apstra API expects.
+
+    Delegates the QE query and parsing to
+    :func:`~plugins.module_utils.apstra.bp_query.find_redundancy_groups`
+    which is the canonical owner of that logic in this collection.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param node_ref: A system node label/ID or redundancy-group label/ID.
+    :return: Sorted list of member system node IDs if *node_ref* identifies
+             a redundancy group, or ``None`` if it does not (caller should
+             fall back to regular :func:`resolve_system_node_id`).
+    """
+    if not node_ref:
+        return None
+
+    # Deferred import to avoid circular dependencies at module load time
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_redundancy_groups,
+    )
+
+    rg_map = find_redundancy_groups(client_factory, blueprint_id)
+    if not rg_map:
+        return None
+
+    # Exact ID match
+    if node_ref in rg_map:
+        return rg_map[node_ref]["members"]
+
+    # Exact label match
+    for info in rg_map.values():
+        if info["label"] == node_ref:
+            return info["members"]
+
+    # Case-insensitive label fallback
+    ref_lower = node_ref.lower()
+    for info in rg_map.values():
+        if info["label"].lower() == ref_lower:
+            return info["members"]
+
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────
 #  Virtual Network resolution  (Phase 4)
 # ──────────────────────────────────────────────────────────────────

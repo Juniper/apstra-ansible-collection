@@ -18,6 +18,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_system_node_id,
     resolve_security_zone_id,
+    resolve_esi_member_ids,
 )
 
 DOCUMENTATION = """
@@ -125,6 +126,36 @@ EXAMPLES = """
           vlan_id: 100
     state: present
 
+# Global vlan_id — applies to every bound_to entry that has no per-device override
+- name: Create virtual network with global VLAN ID
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "prod-vn"
+      vn_type: "vxlan"
+      vlan_id: 100
+      bound_to:
+        - system_id: "leaf1"
+        - system_id: "leaf2"
+        - system_id: "leaf3"
+          vlan_id: 200    # per-device override wins
+    state: present
+
+# ESI pair expansion — specify the redundancy-group name; the module expands
+# it into the two member devices automatically
+- name: Create virtual network bound to ESI pair
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "esi-vn"
+      vn_type: "vxlan"
+      vlan_id: 300
+      bound_to:
+        - system_id: "apstra_esi_001_leaf_pair1"   # ESI redundancy group
+    state: present
+
 - name: Delete a virtual network
   juniper.apstra.virtual_network:
     id:
@@ -216,29 +247,67 @@ def main():
         # Coerce integer fields that the API requires as int, not str
         # Note: vn_id must remain a string per the API spec
         if body:
-            for int_field in ("vlan_id", "l3_mtu"):
+            for int_field in ("l3_mtu",):
                 if int_field in body and body[int_field] is not None:
                     body[int_field] = int(body[int_field])
             # Ensure vn_id is a string
             if "vn_id" in body and body["vn_id"] is not None:
                 body["vn_id"] = str(body["vn_id"])
-            # Ensure bound_to items are dicts ({system_id: ...})
+            # Feature: consume top-level vlan_id as global default for bound_to
+            # entries.  The value is stripped from body before the API call so it
+            # is never forwarded to Apstra as a VN-level field.
+            # When bound_to is absent, vlan_id is kept in body and passed through
+            # to the API as a VN-level field (existing behaviour).
+            global_vlan_id = None
+            if "vlan_id" in body and "bound_to" in body:
+                global_vlan_id = body.pop("vlan_id")
+                if global_vlan_id is not None:
+                    global_vlan_id = int(global_vlan_id)
+            elif "vlan_id" in body and body["vlan_id"] is not None:
+                body["vlan_id"] = int(body["vlan_id"])
+
+            # Process bound_to: normalise, apply global vlan_id default,
+            # expand ESI redundancy groups, and resolve system names to IDs.
             if "bound_to" in body and isinstance(body["bound_to"], list):
-                coerced = []
-                for entry in body["bound_to"]:
-                    if isinstance(entry, str):
-                        coerced.append({"system_id": entry})
-                    else:
-                        coerced.append(entry)
-                body["bound_to"] = coerced
-                # Resolve system_id names to graph node UUIDs
                 bp_id = id.get("blueprint")
-                if bp_id:
-                    for item in body["bound_to"]:
-                        if "system_id" in item:
-                            item["system_id"] = resolve_system_node_id(
-                                client_factory, bp_id, item["system_id"]
+                expanded = []
+                for entry in body["bound_to"]:
+                    # Normalise string shorthand
+                    if isinstance(entry, str):
+                        entry = {"system_id": entry}
+                    else:
+                        entry = dict(entry)  # shallow copy — avoid mutating params
+
+                    # Coerce per-entry vlan_id to int
+                    if "vlan_id" in entry and entry["vlan_id"] is not None:
+                        entry["vlan_id"] = int(entry["vlan_id"])
+
+                    # Apply global vlan_id when the entry carries no override
+                    if global_vlan_id is not None and "vlan_id" not in entry:
+                        entry["vlan_id"] = global_vlan_id
+
+                    if "system_id" in entry and bp_id:
+                        sys_ref = entry["system_id"]
+                        # Check if this is an ESI/MLAG redundancy group:
+                        # if so, expand into one entry per member device.
+                        member_ids = resolve_esi_member_ids(
+                            client_factory, bp_id, sys_ref
+                        )
+                        if member_ids is not None:
+                            for mbr_id in member_ids:
+                                mbr_entry = dict(entry)
+                                mbr_entry["system_id"] = mbr_id
+                                expanded.append(mbr_entry)
+                        else:
+                            # Regular system node — resolve label to graph ID
+                            entry["system_id"] = resolve_system_node_id(
+                                client_factory, bp_id, sys_ref
                             )
+                            expanded.append(entry)
+                    else:
+                        expanded.append(entry)
+
+                body["bound_to"] = expanded
 
             # Resolve security_zone_id by label if needed
             if "security_zone_id" in body:
@@ -247,6 +316,16 @@ def main():
                     body["security_zone_id"] = resolve_security_zone_id(
                         client_factory, bp_id, body["security_zone_id"]
                     )
+
+            # Ensure Apstra generates the "Untagged VxLAN" connectivity template
+            # for vxlan virtual networks.  Without create_policy_untagged=True the
+            # auto-generated CT is not created, so host interfaces cannot be
+            # assigned to the VN.  The field is write-only (not returned by GET),
+            # so compare_and_update() silently skips it on updates, preserving
+            # full idempotency.  Callers may override by setting the field
+            # explicitly to False in the body.
+            if body.get("vn_type") == "vxlan" and "create_policy_untagged" not in body:
+                body["create_policy_untagged"] = True
 
         # Validate the id
         missing_id = client_factory.validate_id(object_type, id)

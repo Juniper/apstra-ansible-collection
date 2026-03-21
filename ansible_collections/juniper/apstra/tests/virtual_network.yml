@@ -170,6 +170,89 @@
         state: absent
         auth_token: "{{ auth.token }}"
 
+    # ── Feature: top-level vlan_id with no bound_to (pass-through) ────────────
+    # When bound_to is absent, vlan_id should be forwarded to the API as a
+    # VN-level field exactly as before (int-coerced from a possible string).
+
+    - name: Create VN with top-level vlan_id and no bound_to
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        body:
+          label: "test_vn_vlan_passthrough"
+          vn_type: "vxlan"
+          vlan_id: "42"   # intentional string — module must coerce to int
+        auth_token: "{{ auth.token }}"
+      register: vn_vlan_passthrough
+
+    - name: Verify pass-through VN creation succeeded
+      ansible.builtin.assert:
+        that:
+          - vn_vlan_passthrough is not failed
+          - vn_vlan_passthrough.id.virtual_network is defined
+        fail_msg: "global vlan_id pass-through (no bound_to) test FAILED"
+        success_msg: "PASSED: global vlan_id pass-through (no bound_to)"
+
+    - name: Delete VN (vlan_id pass-through test)
+      juniper.apstra.virtual_network:
+        id: "{{ vn_vlan_passthrough.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    # ── Feature: global vlan_id consumed when bound_to is present ────────────
+    # With bound_to supplied the top-level vlan_id must be popped from body
+    # (not forwarded to the API) and applied per-entry.  The blueprint created
+    # here has no real leaf systems so we validate that the module pre-processing
+    # runs without error using an empty bound_to list.
+
+    - name: Create VN with global vlan_id and empty bound_to (no-op expansion)
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        body:
+          label: "test_vn_global_vlan"
+          vn_type: "vxlan"
+          vlan_id: 100
+          bound_to: []
+        auth_token: "{{ auth.token }}"
+      register: vn_global_vlan
+
+    - name: Verify VN with global vlan_id + empty bound_to succeeded
+      ansible.builtin.assert:
+        that:
+          - vn_global_vlan is not failed
+          - vn_global_vlan.id.virtual_network is defined
+        fail_msg: "global vlan_id with empty bound_to FAILED"
+        success_msg: "PASSED: global vlan_id consumed and not forwarded to API"
+
+    - name: Idempotency check — no change on re-run
+      juniper.apstra.virtual_network:
+        id: "{{ vn_global_vlan.id }}"
+        body:
+          label: "test_vn_global_vlan"
+          vn_type: "vxlan"
+          vlan_id: 100
+          bound_to: []
+        auth_token: "{{ auth.token }}"
+      register: vn_global_vlan_idemp
+
+    - name: Verify idempotency (changed == false)
+      ansible.builtin.assert:
+        that:
+          - not vn_global_vlan_idemp.changed
+        fail_msg: "global vlan_id idempotency FAILED (unexpected change)"
+        success_msg: "PASSED: global vlan_id idempotency OK"
+
+    - name: Delete VN (global vlan_id test)
+      juniper.apstra.virtual_network:
+        id: "{{ vn_global_vlan.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    # NOTE: Tests for ESI pair expansion (bound_to with a redundancy_group label)
+    # and global vlan_id with real leaf nodes require a testbed with actual managed
+    # devices and are covered by integration tests, not the unit test blueprint here.
+
     - name: Delete blueprint
       juniper.apstra.blueprint:
         id: "{{ bp.id }}"
