@@ -1276,6 +1276,39 @@
           — each VN bound_to entry will be expanded to its member leaves by the module.
       when: esi_pair_label is defined
 
+    # Build the bound_to system list: ESI group (expands to leaf1/leaf2) + border leafs.
+    # VNs must be bound to ALL leaf nodes so that IRB interfaces exist on every leaf
+    # that needs to participate in EVPN routing — including the border leafs that peer
+    # with the SRX external routers for inter-VRF (ConnectorOps) traffic.
+    - name: "Phase 15c.2 — Init VN bound_to with ESI group entry"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_esi_bound_to:
+          - system_id: "{{ esi_pair_label }}"
+      when: esi_pair_label is defined
+
+    - name: "Phase 15c.2b — Append each border leaf to vn_esi_bound_to"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_esi_bound_to: "{{ vn_esi_bound_to + [{'system_id': item}] }}"
+      loop: "{{ border_leaf_names }}"
+      when: esi_pair_label is defined
+
+    - name: "Phase 15c.3 — Init fallback bound_to with leaf1 + leaf2 entries"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_fallback_bound_to:
+          - system_id: "{{ topology_name }}-leaf1"
+          - system_id: "{{ topology_name }}-leaf2"
+      when: esi_pair_label is not defined
+
+    - name: "Phase 15c.3b — Append each border leaf to vn_fallback_bound_to"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_fallback_bound_to: "{{ vn_fallback_bound_to + [{'system_id': item}] }}"
+      loop: "{{ border_leaf_names }}"
+      when: esi_pair_label is not defined
+
     - name: "Phase 15d — Create virtual network with ESI expansion + global vlan_id: {{ item.key }}"
       tags: [phase15_vn]
       juniper.apstra.virtual_network:
@@ -1295,8 +1328,9 @@
           virtual_gateway_ipv4: "{{ item.value.gateway }}"
           vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to every bound_to entry
           l3_mtu: "{{ item.value.l3_mtu }}"
-          bound_to:
-            - system_id: "{{ esi_pair_label }}"  # ESI group: module expands to both member leaves
+          bound_to: "{{ vn_esi_bound_to }}"
+          # bound_to includes: ESI group (expands to leaf1+leaf2) + border leafs (leaf3border, leaf4border)
+          # All leaf nodes need the VN IRB so that ConnectorOps SRX-based inter-VRF routing works.
         state: present
       loop: "{{ virtual_networks | dict2items }}"
       loop_control:
@@ -1305,7 +1339,7 @@
       when: esi_pair_label is defined
 
     # Fallback: when no ESI redundancy groups exist, create VNs bound to
-    # individual leaf nodes.  This still validates the global vlan_id feature.
+    # individual leaf nodes + border leafs.  This still validates the global vlan_id feature.
     - name: "Phase 15d.2 — Create VN with global vlan_id (no ESI, individual leaves): {{ item.key }}"
       tags: [phase15_vn]
       juniper.apstra.virtual_network:
@@ -1323,11 +1357,10 @@
           virtual_gateway_ipv4_enabled: true
           ipv4_subnet: "{{ item.value.subnet }}"
           virtual_gateway_ipv4: "{{ item.value.gateway }}"
-          vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to both bound_to entries
+          vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to all bound_to entries
           l3_mtu: "{{ item.value.l3_mtu }}"
-          bound_to:
-            - system_id: "{{ topology_name }}-leaf1"   # individual leaf labels
-            - system_id: "{{ topology_name }}-leaf2"
+          bound_to: "{{ vn_fallback_bound_to }}"
+          # bound_to includes: leaf1 + leaf2 + border leafs (leaf3border, leaf4border)
         state: present
       loop: "{{ virtual_networks | dict2items }}"
       loop_control:
