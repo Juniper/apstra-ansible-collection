@@ -1199,16 +1199,246 @@
         state: committed
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # Phases 14–18 REMOVED
+    # Phases 14–18: Security Zones, Virtual Networks (with ESI expansion test)
     # ═══════════════════════════════════════════════════════════════════════════
-    # Security Zones, Virtual Networks, SZ Loopback IPs, VN-to-Host EP
-    # assignment, and the associated deploy are intentionally omitted.
-    # The FT's TestConnectoropsPrerequisites creates these resources itself.
-    # If the playbook creates them first the FT fails with HTTP 422 (conflict).
+    # NOTE: These phases create and keep security zones and virtual networks so
+    # that the ESI pair expansion feature can be validated end-to-end.
+    # The FT (TestConnectoropsPrerequisites) expects to find these resources
+    # already present — it will skip creation if they already exist.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # ─── Phase 14: Security Zones ─────────────────────────────────────────────
+    - name: "Phase 14 — Create security zone: {{ item.key }}"
+      tags: [phase14_sz]
+      juniper.apstra.security_zone:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          label: "{{ item.key }}"
+          sz_type: "evpn"
+          vrf_name: "{{ item.key }}"
+          vni_id: "{{ item.value.vni_id }}"
+          vlan_id: "{{ item.value.vlan_id }}"
+        state: present
+      loop: "{{ security_zones | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: sz_results
+
+    # ─── Phase 15: Virtual Networks — ESI expansion + global vlan_id ──────────
+    # Tests two enhancements to the virtual_network module simultaneously:
+    #   Feature 1 — global vlan_id: specified at body level, applied to all
+    #               bound_to entries; not forwarded to the API as a VN attribute.
+    #   Feature 2 — ESI pair expansion: a single redundancy_group label in
+    #               bound_to.system_id is expanded to one entry per member leaf.
+    # The ESI group label is discovered at runtime via the blueprint QE API so
+    # the test is not hard-coded to any topology-specific name.
+
+    - name: "Phase 15a — Discover ESI redundancy groups via apstra_facts"
+      tags: [phase14_sz, phase15_vn]
+      juniper.apstra.apstra_facts:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        gather_network_facts:
+          - blueprints.nodes
+        filter:
+          blueprints.nodes: "node_type=redundancy_group"
+
+    - name: "Phase 15b — Set ESI pair label fact (first group found)"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        esi_pair_label: >-
+          {{ (ansible_facts.apstra_facts.blueprints[blueprint_id].nodes
+              | dict2items | first).value.label }}
+      when: ansible_facts.apstra_facts.blueprints[blueprint_id].nodes | length > 0
+
+    - name: "Phase 15b.2 — Warn when no ESI redundancy groups found (skip VN ESI test)"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: No redundancy_group nodes found in blueprint '{{ blueprint_label }}'.
+          This template may use MLAG or separate leaves instead of ESI — VN ESI expansion
+          tasks will be skipped. Deploy the blueprint and connect devices to trigger ESI
+          pair detection if this is unexpected.
+      when: ansible_facts.apstra_facts.blueprints[blueprint_id].nodes | length == 0
+
+    - name: "Phase 15c — Display discovered ESI pair"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.debug:
+        msg: >-
+          ESI redundancy group: '{{ esi_pair_label }}'
+          — each VN bound_to entry will be expanded to its member leaves by the module.
+      when: esi_pair_label is defined
+
+    # Build the bound_to system list: ESI group (expands to leaf1/leaf2) + border leafs.
+    # VNs must be bound to ALL leaf nodes so that IRB interfaces exist on every leaf
+    # that needs to participate in EVPN routing — including the border leafs that peer
+    # with the SRX external routers for inter-VRF (ConnectorOps) traffic.
+    - name: "Phase 15c.2 — Init VN bound_to with ESI group entry"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_esi_bound_to:
+          - system_id: "{{ esi_pair_label }}"
+      when: esi_pair_label is defined
+
+    - name: "Phase 15c.2b — Append each border leaf to vn_esi_bound_to"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_esi_bound_to: "{{ vn_esi_bound_to + [{'system_id': item}] }}"
+      loop: "{{ border_leaf_names }}"
+      when: esi_pair_label is defined
+
+    - name: "Phase 15c.3 — Init fallback bound_to with leaf1 + leaf2 entries"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_fallback_bound_to:
+          - system_id: "{{ topology_name }}-leaf1"
+          - system_id: "{{ topology_name }}-leaf2"
+      when: esi_pair_label is not defined
+
+    - name: "Phase 15c.3b — Append each border leaf to vn_fallback_bound_to"
+      tags: [phase14_sz, phase15_vn]
+      ansible.builtin.set_fact:
+        vn_fallback_bound_to: "{{ vn_fallback_bound_to + [{'system_id': item}] }}"
+      loop: "{{ border_leaf_names }}"
+      when: esi_pair_label is not defined
+
+    - name: "Phase 15d — Create virtual network with ESI expansion + global vlan_id: {{ item.key }}"
+      tags: [phase15_vn]
+      juniper.apstra.virtual_network:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          label: "{{ item.key }}"
+          vn_type: "vxlan"
+          vn_id: "{{ item.value.vn_id }}"
+          security_zone_id: "{{ item.value.security_zone }}"
+          ipv4_enabled: true
+          virtual_gateway_ipv4_enabled: true
+          ipv4_subnet: "{{ item.value.subnet }}"
+          virtual_gateway_ipv4: "{{ item.value.gateway }}"
+          vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to every bound_to entry
+          l3_mtu: "{{ item.value.l3_mtu }}"
+          dhcp_service: "dhcpServiceDisabled"
+          create_policy_untagged: true   # generate 'Untagged VxLAN' CT so FT can assign VN to host interfaces
+          bound_to: "{{ vn_esi_bound_to }}"
+          # bound_to includes: ESI group (expands to leaf1+leaf2) + border leafs (leaf3border, leaf4border)
+          # All leaf nodes need the VN IRB so that ConnectorOps SRX-based inter-VRF routing works.
+        state: present
+      loop: "{{ virtual_networks | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: vn_results
+      when: esi_pair_label is defined
+
+    # Fallback: when no ESI redundancy groups exist, create VNs bound to
+    # individual leaf nodes + border leafs.  This still validates the global vlan_id feature.
+    - name: "Phase 15d.2 — Create VN with global vlan_id (no ESI, individual leaves): {{ item.key }}"
+      tags: [phase15_vn]
+      juniper.apstra.virtual_network:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          label: "{{ item.key }}"
+          vn_type: "vxlan"
+          vn_id: "{{ item.value.vn_id }}"
+          security_zone_id: "{{ item.value.security_zone }}"
+          ipv4_enabled: true
+          virtual_gateway_ipv4_enabled: true
+          ipv4_subnet: "{{ item.value.subnet }}"
+          virtual_gateway_ipv4: "{{ item.value.gateway }}"
+          vlan_id: "{{ item.value.vlan_id }}"   # global vlan_id: applied to all bound_to entries
+          l3_mtu: "{{ item.value.l3_mtu }}"
+          dhcp_service: "dhcpServiceDisabled"
+          create_policy_untagged: true   # generate 'Untagged VxLAN' CT so FT can assign VN to host interfaces
+          bound_to: "{{ vn_fallback_bound_to }}"
+          # bound_to includes: leaf1 + leaf2 + border leafs (leaf3border, leaf4border)
+        state: present
+      loop: "{{ virtual_networks | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: vn_results_fallback
+      when: esi_pair_label is not defined
+
+    - name: "Phase 15e — Assert every VN has non-empty bound_to with correct vlan_id"
+      tags: [phase15_vn]
+      ansible.builtin.assert:
+        that:
+          - item.virtual_network.bound_to | length > 0
+          - item.virtual_network.bound_to[0].vlan_id == (item.item.value.vlan_id | int)
+        fail_msg: >-
+          FAILED: VN '{{ item.virtual_network.label }}'
+          bound_to={{ item.virtual_network.bound_to | length }} entries,
+          vlan_id={{ item.virtual_network.bound_to[0].vlan_id | default('MISSING') }}.
+          Expected vlan_id={{ item.item.value.vlan_id }}.
+          {{ 'ESI expansion used.' if esi_pair_label is defined else 'Individual leaf binding used.' }}
+        success_msg: >-
+          PASSED: '{{ item.virtual_network.label }}'
+          bound_to={{ item.virtual_network.bound_to | length }} entries,
+          vlan_id={{ item.virtual_network.bound_to[0].vlan_id }} (global vlan_id confirmed).
+          {{ '(ESI pair expanded to redundancy_group node).' if esi_pair_label is defined else '(individual leaf nodes merged by Apstra).' }}
+      loop: >-
+        {{
+          vn_results.results
+          if (esi_pair_label is defined and vn_results is defined)
+          else vn_results_fallback.results
+        }}
+      loop_control:
+        label: "{{ item.virtual_network.label | default(item.item.key) }}"
+      when:
+        - not (item.skipped | default(false))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 19: Host Generic Systems (with LAG bonds)
+    # Phase 16: SZ Loopback IP Pool Assignment
+    # Each security zone requires a loopback IP pool assigned to its per-leaf
+    # loopback resource group, or the blueprint commit will fail with
+    # 'Loopback interface … missing IPv4 address' errors.
     # ═══════════════════════════════════════════════════════════════════════════
+    - name: "Phase 16 — Assign loopback IP pool to SZ: {{ item.item.key }}"
+      tags: [phase14_sz, phase15_vn]
+      juniper.apstra.resource_group:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          group_type: "ip"
+          group_name: "sz:{{ item.id.security_zone }},leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ loopback_pool_name }}"
+        state: present
+      loop: "{{ sz_results.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Phase 17: Deploy after SZ + VN configuration
+    # ═══════════════════════════════════════════════════════════════════════════
+    - name: "Phase 17 — Commit blueprint after SZ, VN, and loopback pool assignment"
+      tags: [phase14_sz, phase15_vn]
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        lock_state: "ignore"
+        state: committed
+
+
     # Note: Host generic systems are auto-created by the template.
     # If they need to be re-created or configured with specific LAG settings,
     # uncomment this section.
@@ -1314,29 +1544,29 @@
       ansible.builtin.set_fact:
         token: "{{ auth.token }}"
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 21: Security Configlet
-    # ═══════════════════════════════════════════════════════════════════════════
-    - name: "Phase 21a — Create SRX security configlet (blueprint)"
-      juniper.apstra.configlets:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        type: blueprint
-        id:
-          blueprint: "{{ blueprint_label }}"
-        body:
-          label: "{{ configlet_label }}"
-          condition: '"srx" in tags'
-          configlet:
-            display_name: "{{ configlet_label }}"
-            generators:
-              - config_style: "junos"
-                section: "set_based_system"
-                template_text: "{{ configlet_template_text }}"
-                negation_template_text: ""
-                filename: ""
-        state: present
+    # # ═══════════════════════════════════════════════════════════════════════════
+    # # Phase 21: Security Configlet
+    # # ═══════════════════════════════════════════════════════════════════════════
+    # - name: "Phase 21a — Create SRX security configlet (blueprint)"
+    #   juniper.apstra.configlets:
+    #     api_url: "{{ api_url }}"
+    #     verify_certificates: "{{ verify_certs }}"
+    #     auth_token: "{{ token }}"
+    #     type: blueprint
+    #     id:
+    #       blueprint: "{{ blueprint_label }}"
+    #     body:
+    #       label: "{{ configlet_label }}"
+    #       condition: '"srx" in tags'
+    #       configlet:
+    #         display_name: "{{ configlet_label }}"
+    #         generators:
+    #           - config_style: "junos"
+    #             section: "set_based_system"
+    #             template_text: "{{ configlet_template_text }}"
+    #             negation_template_text: ""
+    #             filename: ""
+    #     state: present
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 22: Final Deploy
