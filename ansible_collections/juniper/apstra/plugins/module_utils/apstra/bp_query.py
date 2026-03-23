@@ -323,3 +323,49 @@ def find_redundancy_groups(client_factory, blueprint_id):
         info["members"] = sorted(info["members"])
 
     return rg_map
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Endpoint-policy / CT application-point query
+# ──────────────────────────────────────────────────────────────────
+
+
+def get_ct_application_point_ids(client_factory, blueprint_id, ct_id):
+    """Return all valid interface application-point node IDs for a CT.
+
+    Fetches the CT application-points tree via the endpoint-policy client
+    (``GET /api/blueprints/{bp_id}/endpoint-policies/{ct_id}/application-points``)
+    and returns a flat list of every ``type="interface"`` node ID found
+    anywhere in the tree.
+
+    Args:
+        client_factory: ``ApstraClientFactory``.
+        blueprint_id: Blueprint UUID.
+        ct_id: The CT (batch endpoint-policy) UUID.
+
+    Returns:
+        list[str]: Interface node IDs that are valid application points.
+    """
+    ep_client = client_factory.get_endpointpolicy_client()
+    ap_tree = (
+        ep_client.blueprints[blueprint_id]
+        .endpoint_policies[ct_id]
+        .application_points.get()
+    )
+
+    results = []
+
+    def _walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "interface" and node.get("id"):
+            results.append(node["id"])
+        for child in node.get("children", []):
+            _walk(child)
+        ap = node.get("application_points")
+        if isinstance(ap, dict):
+            for child in ap.get("children", []):
+                _walk(child)
+
+    _walk(ap_tree)
+    return results

@@ -486,6 +486,93 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  Interface / application-point resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
+    """Resolve an application-point reference to a blueprint interface node ID.
+
+    Accepts one of the following forms:
+
+    * A raw string graph node ID (pass-through, no API call performed).
+    * A dict ``{"system": "<system_label_or_id>", "if_name": "<if_name>"}``
+      which is resolved via a QE graph query.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param ap_ref: A raw string node ID or a resolution dict.
+    :return: The resolved interface graph node ID string.
+    :raises ValueError: If the system or interface cannot be found.
+    """
+    if not ap_ref:
+        return ap_ref
+
+    if isinstance(ap_ref, str):
+        return ap_ref  # already a raw node ID — pass through unchanged
+
+    system_ref = ap_ref.get("system")
+    if_name = ap_ref.get("if_name")
+    if not system_ref or not if_name:
+        raise ValueError(
+            "Interface reference dict must have 'system' and 'if_name' keys, "
+            f"got: {ap_ref}"
+        )
+
+    qry = (
+        'node(type="system", name="sys")'
+        '.out(type="hosted_interfaces")'
+        f'.node(type="interface", if_name="{if_name}", name="intf")'
+    )
+    results = _run_qe(client_factory, blueprint_id, qry)
+
+    if results:
+        # Exact label or ID match
+        for r in results:
+            sys_node = r.get("sys", {})
+            if sys_node.get("label") == system_ref or sys_node.get("id") == system_ref:
+                return r["intf"]["id"]
+
+        # Case-insensitive label fallback
+        ref_lower = str(system_ref).lower()
+        for r in results:
+            sys_node = r.get("sys", {})
+            if (sys_node.get("label") or "").lower() == ref_lower:
+                return r["intf"]["id"]
+
+    available_systems = sorted(
+        {r.get("sys", {}).get("label", "") for r in (results or [])} - {""}
+    )
+    raise ValueError(
+        f"Interface '{if_name}' on system '{system_ref}' not found in blueprint "
+        f"'{blueprint_id}'. "
+        + (
+            f"Systems with that interface: {available_systems}"
+            if available_systems
+            else "No systems have an interface with that name."
+        )
+    )
+
+
+def resolve_application_point_ids(client_factory, blueprint_id, ap_refs):
+    """Resolve a list of application-point references to interface node IDs.
+
+    Each entry may be a raw string graph node ID or a resolution dict
+    ``{"system": "<label_or_id>", "if_name": "<if_name>"}``.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param ap_refs: List of raw string IDs or resolution dicts.
+    :return: List of resolved interface graph node ID strings.
+    """
+    if not ap_refs:
+        return ap_refs
+    return [
+        resolve_interface_node_id(client_factory, blueprint_id, ref) for ref in ap_refs
+    ]
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Virtual Network resolution  (Phase 4)
 # ──────────────────────────────────────────────────────────────────
 

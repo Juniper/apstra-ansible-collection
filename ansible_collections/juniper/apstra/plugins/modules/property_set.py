@@ -129,8 +129,18 @@ EXAMPLES = """
     state: present
   register: global_ps
 
-# Global scope -- update a property set
-- name: Update global property set
+# Global scope -- update a property set by label (label must be in body)
+- name: Update global property set by label
+  juniper.apstra.property_set:
+    body:
+      label: "my_custom_ps"
+      values:
+        ntp_server: "10.0.0.2"
+        mtu: 9200
+    state: present
+
+# Global scope -- update a property set by ID (no label required in body)
+- name: Update global property set by ID
   juniper.apstra.property_set:
     id:
       property_set: "{{ global_ps.id.property_set }}"
@@ -161,8 +171,18 @@ EXAMPLES = """
     state: present
   register: yaml_ps
 
-# Global scope -- update using values_yaml
-- name: Update global property set with YAML string
+# Global scope -- update using values_yaml (label must be in body to identify record)
+- name: Update global property set with YAML string by label
+  juniper.apstra.property_set:
+    body:
+      label: "my_yaml_ps"
+      values_yaml: |
+        ntp_server: 10.0.0.2
+        mtu: 9200
+    state: present
+
+# Global scope -- update using values_yaml by ID
+- name: Update global property set with YAML string by ID
   juniper.apstra.property_set:
     id:
       property_set: "{{ yaml_ps.id.property_set }}"
@@ -172,11 +192,18 @@ EXAMPLES = """
         mtu: 9200
     state: present
 
-# Global scope -- delete a property set
-- name: Delete global property set
+# Global scope -- delete a property set by ID
+- name: Delete global property set by ID
   juniper.apstra.property_set:
     id:
       property_set: "{{ global_ps.id.property_set }}"
+    state: absent
+
+# Global scope -- delete a property set by label
+- name: Delete global property set by label
+  juniper.apstra.property_set:
+    body:
+      label: "my_custom_ps"
     state: absent
 
 # Blueprint scope -- import a global property set into a blueprint
@@ -393,8 +420,21 @@ def _handle_global_property_set(module, client_factory, id, body, state, result)
             )
 
     elif state == "absent":
+        # If no id.property_set provided, try to resolve by body.label
         if id is None or leaf_object_type not in id:
-            raise ValueError(f"Must specify '{leaf_object_type}' in id to delete")
+            if body and "label" in body:
+                all_ps = client_factory.object_request(object_type, "get", {})
+                if isinstance(all_ps, list):
+                    for ps in all_ps:
+                        if ps.get("label") == body["label"]:
+                            if id is None:
+                                id = {}
+                            id[leaf_object_type] = ps["id"]
+                            break
+            if id is None or leaf_object_type not in id:
+                raise ValueError(
+                    f"Must specify '{leaf_object_type}' in id or 'label' in body to delete"
+                )
         client_factory.object_request(object_type, "delete", id)
         result["changed"] = True
         result["msg"] = f"{leaf_object_type} deleted successfully"
