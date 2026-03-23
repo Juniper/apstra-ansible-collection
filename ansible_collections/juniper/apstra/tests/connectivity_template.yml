@@ -278,6 +278,263 @@
           name: "CT-Name-Res-Test"
         state: absent
 
+    # ── Tests 7-10: connectivity_template_assignment ──────────────────
+    # Create a simple CT, discover a real interface via QE, then test:
+    #   7  - Assign by raw node ID
+    #   8  - Assign idempotency (no change on re-run)
+    #   9  - Assign using {system, if_name} dict (name resolution feature)
+    #   10 - Unassign
+
+    - name: "Test 7 setup - Create CT for assignment tests"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "CT-Assignment-Test"
+          type: interface
+          description: "Simple CT for assignment module tests"
+          primitives:
+            ip_links:
+              assign_link:
+                security_zone: "ct-test-sz"
+                interface_type: tagged
+                vlan_id: 400
+                ipv4_addressing_type: numbered
+                ipv6_addressing_type: none
+        state: present
+      register: ct_for_assign
+
+    - name: Assert CT for assignment created
+      ansible.builtin.assert:
+        that:
+          - ct_for_assign.ct_id is defined
+        fail_msg: "Failed to create CT for assignment tests"
+
+    - name: "Test 7 setup - Query CT's valid application points"
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          endpoint_policy: "{{ ct_for_assign.ct_id }}"
+        gather_network_facts:
+          - endpoint_policy.application_point_ids
+      register: ap_facts
+
+    - name: "Set _all_ap_ids from CT application-points query"
+      ansible.builtin.set_fact:
+        _all_ap_ids: "{{ ap_facts.ansible_facts.apstra_facts['endpoint_policy.application_point_ids'] }}"
+
+    - name: "Set raw-ID test fact (first valid application point ID)"
+      ansible.builtin.set_fact:
+        assign_raw_if_id: "{{ _all_ap_ids[0] }}"
+      when: _all_ap_ids | length > 0
+
+    - name: "Warn if no valid application points found"
+      ansible.builtin.debug:
+        msg: "WARNING: CT has no valid application points — skipping assignment tests"
+      when: _all_ap_ids | length == 0
+
+    - name: "Test 7 setup - Query interfaces to find one with if_name set"
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+        gather_network_facts:
+          - blueprints.qe
+        filter:
+          blueprints.qe: >-
+            node(type="system", name="sys")
+            .out(type="hosted_interfaces")
+            .node(type="interface", name="intf")
+      register: qe_intf_facts
+      when: assign_raw_if_id is defined
+
+    - name: "Filter QE results for interfaces with if_name in valid AP IDs"
+      ansible.builtin.set_fact:
+        qe_intf_with_name: >-
+          {{ qe_intf_facts.ansible_facts.apstra_facts['blueprints.qe']
+             | selectattr('intf.id', 'in', _all_ap_ids)
+             | selectattr('intf.if_name', 'defined')
+             | selectattr('intf.if_name', '!=', None)
+             | selectattr('intf.if_name', '!=', '')
+             | list }}
+      when: assign_raw_if_id is defined
+
+    - name: "Set dict-resolution test facts (first valid AP with if_name)"
+      ansible.builtin.set_fact:
+        assign_dict_if_id: "{{ qe_intf_with_name[0].intf.id }}"
+        assign_dict_sys_label: "{{ qe_intf_with_name[0].sys.label }}"
+        assign_dict_if_name: "{{ qe_intf_with_name[0].intf.if_name }}"
+      when: assign_raw_if_id is defined and qe_intf_with_name | length > 0
+
+    - name: "Show interfaces selected for assignment tests"
+      ansible.builtin.debug:
+        msg: >-
+          Raw-ID test: interface node {{ assign_raw_if_id | default('N/A') }}.
+          Dict-resolution test: {% if assign_dict_if_name is defined %}interface
+          '{{ assign_dict_if_name }}' on '{{ assign_dict_sys_label }}'
+          (node ID {{ assign_dict_if_id }}){% else %}SKIPPED — no valid APs
+          have if_name in this blueprint{% endif %}
+
+    # ── Test 7: Assign by raw node ID ────────────────────────────────
+    - name: "Test 7 - Assign CT to interface by raw node ID"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_raw_if_id }}"
+        state: present
+      register: ct_assign_raw
+      when: assign_raw_if_id is defined
+
+    - name: Assert CT assigned by raw ID
+      ansible.builtin.assert:
+        that:
+          - ct_assign_raw.changed
+          - ct_assign_raw.applied | length == 1
+        fail_msg: "Test 7 FAILED: CT assignment by raw node ID did not report changed"
+        success_msg: "Test 7 PASSED: CT assigned by raw interface node ID"
+      when: assign_raw_if_id is defined
+
+    # ── Test 8: Assign idempotency ────────────────────────────────────
+    - name: "Test 8 - Re-assign CT (idempotent, no change expected)"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_raw_if_id }}"
+        state: present
+      register: ct_assign_idempotent
+      when: assign_raw_if_id is defined
+
+    - name: Assert CT assignment is idempotent
+      ansible.builtin.assert:
+        that:
+          - not ct_assign_idempotent.changed
+        fail_msg: "Test 8 FAILED: CT re-assignment should be idempotent"
+        success_msg: "Test 8 PASSED: CT assignment is idempotent"
+      when: assign_raw_if_id is defined
+
+    # ── Test 9: Assign using {system, if_name} dict ───────────────────
+    # This test requires an interface with if_name populated.
+    # In bare template blueprints (no interface-map assigned) if_name
+    # is NULL — the test is skipped when that is the case.
+    - name: "Test 9 - NOTE: dict resolution skipped (no if_name in this blueprint)"
+      ansible.builtin.debug:
+        msg: >-
+          Test 9 SKIPPED: {system, if_name} dict resolution requires a
+          blueprint with interface maps assigned (if_name populated).
+          Blueprint '{{ blueprint_id }}' has no interfaces with if_name set.
+      when: qe_intf_with_name | length == 0
+
+    - name: "Test 9 - Unassign raw ID first (so dict can re-assign)"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_dict_if_id }}"
+        state: absent
+      when: assign_dict_if_name is defined
+
+    - name: "Test 9 - Assign CT using {system, if_name} dict (name resolution)"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - system: "{{ assign_dict_sys_label }}"
+              if_name: "{{ assign_dict_if_name }}"
+        state: present
+      register: ct_assign_dict
+      when: assign_dict_if_name is defined
+
+    - name: Assert CT assigned by dict resolves to correct interface node ID
+      ansible.builtin.assert:
+        that:
+          - ct_assign_dict.changed
+          - ct_assign_dict.applied | length == 1
+          - ct_assign_dict.applied[0] == assign_dict_if_id
+        fail_msg: >-
+          Test 9 FAILED: {system, if_name} dict did not resolve to expected
+          node ID {{ assign_dict_if_id }}
+        success_msg: "Test 9 PASSED: {system, if_name} dict correctly resolves to interface node ID"
+      when: assign_dict_if_name is defined
+
+    # ── Test 10: Unassign ─────────────────────────────────────────────
+    - name: "Test 10 - Unassign CT from interface (raw ID)"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_raw_if_id }}"
+        state: absent
+      register: ct_unassign
+      when: assign_raw_if_id is defined
+
+    - name: Assert CT was unassigned
+      ansible.builtin.assert:
+        that:
+          - ct_unassign.changed
+          - ct_unassign.unapplied | length == 1
+        fail_msg: "Test 10 FAILED: CT unassign did not report changed"
+        success_msg: "Test 10 PASSED: CT unassigned successfully"
+      when: assign_raw_if_id is defined
+
+    - name: "Test 10b - Unassign idempotency (no change expected)"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_raw_if_id }}"
+        state: absent
+      register: ct_unassign_idempotent
+      when: assign_raw_if_id is defined
+
+    - name: Assert unassign is idempotent
+      ansible.builtin.assert:
+        that:
+          - not ct_unassign_idempotent.changed
+        fail_msg: "Test 10b FAILED: CT unassign should be idempotent"
+        success_msg: "Test 10b PASSED: CT unassign is idempotent"
+      when: assign_raw_if_id is defined
+
+    - name: "Delete CT used for assignment tests"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "CT-Assignment-Test"
+        state: absent
+
     # ── Cleanup: Delete blueprint ─────────────────────────────────────
     - name: Unlock the blueprint
       juniper.apstra.blueprint:
@@ -303,4 +560,4 @@
 
     - name: "All tests passed!"
       ansible.builtin.debug:
-        msg: "All 5 connectivity_template tests passed successfully"
+        msg: "All 10 connectivity_template and connectivity_template_assignment tests passed successfully"

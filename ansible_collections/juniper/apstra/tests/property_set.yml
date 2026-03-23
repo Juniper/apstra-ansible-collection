@@ -63,6 +63,65 @@
       ansible.builtin.debug:
         var: global_ps_update
 
+    - name: Verify update-by-id changed
+      ansible.builtin.assert:
+        that:
+          - global_ps_update.changed
+        fail_msg: "Update by id.property_set should report changed"
+        success_msg: "PASSED: Update by id.property_set works"
+
+    - name: Verify update-by-id idempotency
+      juniper.apstra.property_set:
+        id:
+          property_set: "{{ global_ps.id.property_set }}"
+        body:
+          values:
+            test_key: "updated_value"
+            mtu: 9200
+        auth_token: "{{ auth.token }}"
+      register: global_ps_update_idempotent
+
+    - name: Assert update-by-id idempotent
+      ansible.builtin.assert:
+        that:
+          - not global_ps_update_idempotent.changed
+        fail_msg: "Update-by-id second run should be idempotent"
+        success_msg: "PASSED: Update-by-id is idempotent"
+
+    - name: Update global property set by label (new form)
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_global_ps"
+          values:
+            test_key: "label_updated_value"
+            mtu: 9300
+        auth_token: "{{ auth.token }}"
+      register: global_ps_update_by_label
+
+    - name: Assert update-by-label changed
+      ansible.builtin.assert:
+        that:
+          - global_ps_update_by_label.changed
+        fail_msg: "Update by body.label should report changed"
+        success_msg: "PASSED: Update by body.label works"
+
+    - name: Update global property set by label (idempotent)
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_global_ps"
+          values:
+            test_key: "label_updated_value"
+            mtu: 9300
+        auth_token: "{{ auth.token }}"
+      register: global_ps_update_by_label_idempotent
+
+    - name: Assert update-by-label idempotent
+      ansible.builtin.assert:
+        that:
+          - not global_ps_update_by_label_idempotent.changed
+        fail_msg: "Update-by-label second run should be idempotent"
+        success_msg: "PASSED: Update-by-label is idempotent"
+
     # ---- Global property set with values_yaml ----
 
     - name: Create global property set using values_yaml
@@ -319,6 +378,31 @@
         var: blueprint_delete
 
     # ---- Cleanup global property sets ----
+
+    # ---- Test label-based delete ----
+    - name: Create temp property set for label-delete test
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_label_delete_ps"
+          values:
+            temp_key: "temp_value"
+        auth_token: "{{ auth.token }}"
+      register: temp_ps_for_label_delete
+
+    - name: Delete temp property set by label (new feature)
+      juniper.apstra.property_set:
+        body:
+          label: "test_ansible_label_delete_ps"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: temp_ps_label_delete
+
+    - name: Assert label-based delete worked
+      ansible.builtin.assert:
+        that:
+          - temp_ps_label_delete.changed
+        fail_msg: "Delete by body.label should report changed"
+        success_msg: "PASSED: Delete by body.label works"
 
     - name: Delete global property set
       juniper.apstra.property_set:

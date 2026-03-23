@@ -15,6 +15,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     AOS_IMPORT_ERROR,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_application_point_ids,
+)
 
 if not AOS_IMPORT_ERROR:
     from aos.sdk.reference_design.extension.endpoint_policy import (
@@ -104,9 +107,13 @@ options:
   body:
     description:
       - The assignment payload.
-      - Must contain C(application_point_ids) list of interface node IDs
-        to assign the CT to (when state is present) or unassign from
-        (when state is absent).
+      - Must contain C(application_point_ids) list of application-point
+        references to assign the CT to (when state is present) or unassign
+        from (when state is absent).
+      - Each entry may be a raw blueprint graph node ID string
+        (e.g. C(G31G9dCSVcDS9PoeYg)) or a resolution dict with
+        C(system) and C(if_name) keys that is resolved to the
+        interface node ID via a QE graph query.
     type: dict
     required: true
   state:
@@ -121,9 +128,9 @@ options:
 """
 
 EXAMPLES = """
-# ── Assign by CT ID ──────────────────────────────────────────────────
+# ── Assign by CT ID using raw node IDs ───────────────────────────────
 
-- name: Assign CT to multiple interfaces
+- name: Assign CT to multiple interfaces (raw node IDs)
   juniper.apstra.connectivity_template_assignment:
     id:
       blueprint: "{{ blueprint_id }}"
@@ -134,19 +141,36 @@ EXAMPLES = """
         - "x2LgjvQJTCNdPBQL9A"
     state: present
 
-# ── Assign by CT name ────────────────────────────────────────────────
+# ── Assign by CT name using human-readable interface refs ─────────────
 
-- name: Assign BGP-2-SRX CT to interfaces
+- name: Assign BGP-2-SRX CT using system label + interface name
   juniper.apstra.connectivity_template_assignment:
     id:
       blueprint: "{{ blueprint_id }}"
       ct_name: "BGP-2-SRX"
     body:
       application_point_ids:
-        - "{{ interface_id }}"
+        - system: "leaf1"
+          if_name: "ge-0/0/1"
+        - system: "leaf2"
+          if_name: "ge-0/0/1"
     state: present
 
-# ── Unassign CT from interfaces ──────────────────────────────────────
+# ── Mixed refs: raw IDs and human-readable in the same list ───────────
+
+- name: Assign CT — mixed raw IDs and interface dicts
+  juniper.apstra.connectivity_template_assignment:
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_name: "My-CT"
+    body:
+      application_point_ids:
+        - "G31G9dCSVcDS9PoeYg"
+        - system: "spine1"
+          if_name: "et-0/0/0"
+    state: present
+
+# ── Unassign CT from interfaces ───────────────────────────────────────
 
 - name: Unassign CT from interfaces
   juniper.apstra.connectivity_template_assignment:
@@ -155,7 +179,8 @@ EXAMPLES = """
       ct_id: "{{ ct_id }}"
     body:
       application_point_ids:
-        - "G31G9dCSVcDS9PoeYg"
+        - system: "leaf1"
+          if_name: "ge-0/0/1"
     state: absent
 """
 
@@ -281,6 +306,11 @@ def main():
         application_point_ids = body.get("application_point_ids", [])
         state = module.params["state"]
 
+        # ── Resolve application point IDs (human-readable → node ID) ──
+        application_point_ids = resolve_application_point_ids(
+            client_factory, blueprint_id, application_point_ids
+        )
+
         # ── Resolve CT ID ─────────────────────────────────────────────
         if not ct_id:
             if ct_name:
@@ -305,15 +335,20 @@ def main():
         to_apply = []
         to_unapply = []
 
+        # Apstra reports assignment state as "used-directly" (directly assigned)
+        # or "used-indirectly" (inherited via a parent group).  Any "used*" state
+        # means the CT is already active on that application point.
+        _USED_STATES = {"used", "used-directly", "used-indirectly"}
+
         if state == "present":
             for intf_id in application_point_ids:
                 current = current_states.get(intf_id, "unused")
-                if current != "used":
+                if current not in _USED_STATES:
                     to_apply.append(intf_id)
         else:  # absent
             for intf_id in application_point_ids:
                 current = current_states.get(intf_id, "unused")
-                if current == "used":
+                if current in _USED_STATES:
                     to_unapply.append(intf_id)
 
         # ── Apply changes via batch API ───────────────────────────────

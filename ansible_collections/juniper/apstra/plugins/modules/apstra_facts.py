@@ -15,6 +15,10 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+    get_ct_application_point_ids,
+    run_qe_query,
+)
 
 DOCUMENTATION = """
 ---
@@ -123,6 +127,34 @@ EXAMPLES = """
     gather_network_facts:
       - all
     available_network_facts: true
+
+# Run an arbitrary QE graph query against a blueprint
+- name: Query interfaces with if_name set
+  juniper.apstra.apstra_facts:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    gather_network_facts:
+      - blueprints.qe
+    filter:
+      blueprints.qe: >
+        node(type="system", name="sys")
+        .out(type="hosted_interfaces")
+        .node(type="interface", name="intf")
+  register: qe_result
+# Result: qe_result.ansible_facts.apstra_facts['blueprints.qe']
+# is a list of dicts keyed by each named node in the query (sys, intf, etc.)
+
+# Get the flat list of valid interface application-point IDs for a CT
+- name: Get CT application point IDs
+  juniper.apstra.apstra_facts:
+    id:
+      blueprint: "{{ blueprint_id }}"
+      endpoint_policy: "{{ ct_id }}"
+    gather_network_facts:
+      - endpoint_policy.application_point_ids
+  register: ap_result
+# Result: ap_result.ansible_facts.apstra_facts['endpoint_policy.application_point_ids']
+# is a flat list of interface node ID strings
 """
 
 RETURN = """
@@ -188,27 +220,75 @@ def main():
         # The objects are nested, like 'blueprints', 'blueprints.config_templates', etc.
         # Need to get the list in topological sort order.
 
-        # Process the list of requested network objects
+        # Special gather types handled via bp_query utilities rather than
+        # the standard list_all_objects framework.
+        _SPECIAL_GATHER_TYPES = {
+            "blueprints.qe",
+            "endpoint_policy.application_point_ids",
+        }
+
+        # Split requested types into standard and special.
         requested_network_objects = []
+        special_types = []
         for object_type in module.params["gather_network_facts"]:
             if object_type == "all":
                 requested_network_objects = client_factory.network_objects
                 break
+            elif object_type in _SPECIAL_GATHER_TYPES:
+                special_types.append(object_type)
             elif object_type in client_factory.network_objects_set:
-                # Add object type to set
                 requested_network_objects.append(object_type)
             else:
                 module.fail_json(msg=f"Unsupported network object '{object_type}'")
 
-        # Iterate through the list of requested network objects and get everything.
-        id_param = module.params.get("id", {})
+        # Resolve blueprint name → ID once, shared by both paths.
+        id_param = module.params.get("id", {}) or {}
         if id_param and "blueprint" in id_param:
             id_param["blueprint"] = client_factory.resolve_blueprint_id(
                 id_param["blueprint"]
             )
+        filter_param = module.params.get("filter") or {}
+
+        # ── Handle special gather types ──────────────────────────────
+        special_facts = {}
+        for special_type in special_types:
+            if special_type == "blueprints.qe":
+                blueprint_id = id_param.get("blueprint")
+                qe_query_str = filter_param.get("blueprints.qe")
+                if not blueprint_id:
+                    module.fail_json(
+                        msg="'blueprints.qe' requires 'blueprint' in id"
+                    )
+                if not qe_query_str:
+                    module.fail_json(
+                        msg="'blueprints.qe' requires the query string in "
+                        "filter['blueprints.qe']"
+                    )
+                special_facts["blueprints.qe"] = run_qe_query(
+                    client_factory, blueprint_id, qe_query_str
+                )
+            elif special_type == "endpoint_policy.application_point_ids":
+                blueprint_id = id_param.get("blueprint")
+                ct_id = id_param.get("endpoint_policy")
+                if not blueprint_id:
+                    module.fail_json(
+                        msg="'endpoint_policy.application_point_ids' requires "
+                        "'blueprint' in id"
+                    )
+                if not ct_id:
+                    module.fail_json(
+                        msg="'endpoint_policy.application_point_ids' requires "
+                        "'endpoint_policy' in id"
+                    )
+                special_facts["endpoint_policy.application_point_ids"] = (
+                    get_ct_application_point_ids(client_factory, blueprint_id, ct_id)
+                )
+
+        # ── Handle standard gather types ─────────────────────────────
         object_map = client_factory.list_all_objects(
             requested_network_objects, id_param
         )
+        object_map.update(special_facts)
 
         # Structure used for gathered facts
         facts = {
