@@ -55,9 +55,18 @@
              | map(attribute='value.id')
              | list }}
 
-    - name: Show leaf node IDs
+    - name: Extract leaf node labels
+      ansible.builtin.set_fact:
+        leaf_labels: >-
+          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.label')
+             | list }}
+
+    - name: Show leaf node IDs and labels
       ansible.builtin.debug:
-        var: leaf_nodes
+        msg: "IDs: {{ leaf_nodes }} | Labels: {{ leaf_labels }}"
 
     # ==================================================================
     #  DOMAIN TESTS (type: domain)
@@ -162,13 +171,32 @@
           - icd_2.id.evpn_interconnect_group is defined
         fail_msg: "Second interconnect domain was not created"
 
+    # ---- Delete second domain by label (name-resolution test) ----
+
+    - name: Delete second interconnect domain by label (no explicit ID)
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id: "{{ bp.id }}"
+        body:
+          label: "test_icd_2"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: icd_2_delete_by_label
+
+    - name: Verify second domain deleted by label
+      ansible.builtin.assert:
+        that:
+          - icd_2_delete_by_label.changed
+        fail_msg: "Interconnect domain delete-by-label failed"
+        success_msg: "PASSED: Interconnect domain deleted by label (no explicit ID)"
+
     # ==================================================================
     #  GATEWAY TESTS (type: gateway — the default)
     # ==================================================================
 
-    # ---- Create interconnect gateway ----
+    # ---- Create interconnect gateway (using raw node IDs + domain UUID) ----
 
-    - name: Create interconnect gateway
+    - name: Create interconnect gateway (raw IDs)
       juniper.apstra.interconnect_gateway:
         id: "{{ bp.id }}"
         body:
@@ -265,11 +293,73 @@
           - icgw_update_by_name.changed
         fail_msg: "Interconnect gateway update by name lookup failed"
 
+    # ---- Name-resolution: create gateway using node labels + domain label ----
+
+    - name: "Name-resolution test: Create gateway using node labels and domain label"
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_labels"
+          gw_ip: "10.99.2.1"
+          gw_asn: 65501
+          evpn_interconnect_group_id: "test_icd_1"
+          local_gw_nodes: "{{ leaf_labels[:2] }}"
+          ttl: 3
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_by_labels
+
+    - name: Verify gateway created via label resolution
+      ansible.builtin.assert:
+        that:
+          - icgw_by_labels.changed
+          - icgw_by_labels.id.remote_gateway is defined
+        fail_msg: "Name-resolution gateway creation failed"
+        success_msg: "PASSED: Gateway created using node labels and domain label"
+
+    - name: "Name-resolution idempotency: Re-run with same labels (no change)"
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_labels"
+          gw_ip: "10.99.2.1"
+          gw_asn: 65501
+          evpn_interconnect_group_id: "test_icd_1"
+          local_gw_nodes: "{{ leaf_labels[:2] }}"
+          ttl: 3
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_by_labels_nochange
+
+    - name: Verify label-resolved gateway is idempotent
+      ansible.builtin.assert:
+        that:
+          - not icgw_by_labels_nochange.changed
+        fail_msg: "Name-resolution gateway should be idempotent"
+        success_msg: "PASSED: Label-resolved gateway is idempotent"
+
+    - name: Delete name-resolution test gateway
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ icgw_by_labels.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: icgw_by_labels_delete
+
+    - name: Verify name-resolution gateway was deleted
+      ansible.builtin.assert:
+        that:
+          - icgw_by_labels_delete.changed
+        fail_msg: "Name-resolution gateway was not deleted"
+
     # ==================================================================
-    #  CLEANUP (gateway first, then domains, then blueprint)
+    #  CLEANUP (gateway first, then domain, then blueprint)
     # ==================================================================
 
-    - name: Delete interconnect gateway
+    - name: Delete interconnect gateway (by explicit ID)
       juniper.apstra.interconnect_gateway:
         id:
           blueprint: "{{ bp.id.blueprint }}"
@@ -284,7 +374,7 @@
           - icgw_delete.changed
         fail_msg: "Interconnect gateway was not deleted"
 
-    - name: Delete first interconnect domain
+    - name: Delete first interconnect domain (by explicit ID)
       juniper.apstra.interconnect_gateway:
         type: domain
         id:
@@ -299,22 +389,8 @@
         that:
           - icd_delete.changed
         fail_msg: "First interconnect domain was not deleted"
-
-    - name: Delete second interconnect domain
-      juniper.apstra.interconnect_gateway:
-        type: domain
-        id:
-          blueprint: "{{ bp.id.blueprint }}"
-          evpn_interconnect_group: "{{ icd_2.id.evpn_interconnect_group }}"
-        state: absent
-        auth_token: "{{ auth.token }}"
-      register: icd_2_delete
-
-    - name: Verify second interconnect domain was deleted
-      ansible.builtin.assert:
-        that:
-          - icd_2_delete.changed
-        fail_msg: "Second interconnect domain was not deleted"
+    # NOTE: icd_2 (test_icd_2) was already deleted by label in the name-resolution
+    # test above \u2014 no separate cleanup needed here.
 
     - name: Unlock blueprint
       juniper.apstra.blueprint:

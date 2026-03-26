@@ -16,6 +16,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     singular_leaf_object_type,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_interconnect_domain_id,
     resolve_system_node_id,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interconnect_domain import (
@@ -143,12 +144,12 @@ options:
 EXAMPLES = """
 # ---- Interconnect Domain (type: domain) ----
 
-# Create an Interconnect Domain
+# Create an Interconnect Domain (blueprint may be name or UUID)
 - name: Create interconnect domain
   juniper.apstra.interconnect_gateway:
     type: domain
     id:
-      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+      blueprint: "my-datacenter-blueprint"
     body:
       label: "dci-domain-1"
       route_target: "65500:100"
@@ -166,9 +167,33 @@ EXAMPLES = """
       route_target: "65500:200"
       esi_mac: "02:00:00:00:00:01"
     state: present
+  register: icd_2
 
-# Delete an Interconnect Domain
-- name: Delete interconnect domain
+# Update a domain by providing its ID
+- name: Update interconnect domain route_target by ID
+  juniper.apstra.interconnect_gateway:
+    type: domain
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+      evpn_interconnect_group: "{{ icd.id.evpn_interconnect_group }}"
+    body:
+      label: "dci-domain-1"
+      route_target: "65500:101"
+    state: present
+
+# Update a domain by label (no ID needed — looked up automatically)
+- name: Update interconnect domain by label
+  juniper.apstra.interconnect_gateway:
+    type: domain
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    body:
+      label: "dci-domain-1"
+      route_target: "65500:102"
+    state: present
+
+# Delete a domain by explicit ID
+- name: Delete interconnect domain by ID
   juniper.apstra.interconnect_gateway:
     type: domain
     id:
@@ -176,10 +201,40 @@ EXAMPLES = """
       evpn_interconnect_group: "{{ icd.id.evpn_interconnect_group }}"
     state: absent
 
+# Delete a domain by label (no evpn_interconnect_group ID needed)
+- name: Delete interconnect domain by label
+  juniper.apstra.interconnect_gateway:
+    type: domain
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    body:
+      label: "dci-domain-2"
+    state: absent
+
 # ---- Interconnect Domain Gateway (type: gateway) ----
 
-# Create a gateway in an interconnect domain
-- name: Create interconnect gateway
+# Create a gateway — local_gw_nodes accepts system labels OR raw node IDs.
+# evpn_interconnect_group_id accepts the domain label OR its UUID.
+- name: Create interconnect gateway using system labels and domain label
+  juniper.apstra.interconnect_gateway:
+    id:
+      blueprint: "my-datacenter-blueprint"
+    body:
+      gw_name: "remote-dc2-gw"
+      gw_ip: "10.1.0.1"
+      gw_asn: 65500
+      evpn_interconnect_group_id: "dci-domain-1"
+      local_gw_nodes:
+        - "border-leaf-1"
+        - "border-leaf-2"
+      ttl: 2
+      keepalive_timer: 10
+      holdtime_timer: 30
+    state: present
+  register: icgw
+
+# Create a gateway using raw node IDs and domain UUID
+- name: Create interconnect gateway using raw IDs
   juniper.apstra.interconnect_gateway:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
@@ -189,15 +244,42 @@ EXAMPLES = """
       gw_asn: 65500
       evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
       local_gw_nodes:
-        - "leaf1"
-        - "leaf2"
+        - "PPbnMs25oIuO8WHldA"
+        - "QCbnMs25oIuO8WHldB"
       ttl: 2
-      keepalive_timer: 10
-      holdtime_timer: 30
     state: present
   register: icgw
 
-# Delete an interconnect gateway
+# Update a gateway by providing its ID
+- name: Update interconnect gateway by ID
+  juniper.apstra.interconnect_gateway:
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+      remote_gateway: "{{ icgw.id.remote_gateway }}"
+    body:
+      gw_name: "remote-dc2-gw"
+      gw_ip: "10.1.0.2"
+      gw_asn: 65500
+      evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
+      local_gw_nodes:
+        - "border-leaf-1"
+    state: present
+
+# Update a gateway by name lookup (no remote_gateway ID needed)
+- name: Update interconnect gateway by gw_name
+  juniper.apstra.interconnect_gateway:
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    body:
+      gw_name: "remote-dc2-gw"
+      gw_ip: "10.1.0.3"
+      gw_asn: 65500
+      evpn_interconnect_group_id: "dci-domain-1"
+      local_gw_nodes:
+        - "border-leaf-1"
+    state: present
+
+# Delete an interconnect gateway by ID
 - name: Delete interconnect gateway
   juniper.apstra.interconnect_gateway:
     id:
@@ -359,8 +441,20 @@ def _run_domain(module, client_factory, result):
                 result[leaf_object_type] = final_obj
 
     elif state == "absent":
+        # Allow delete by label: look up domain_id from body.label when
+        # id.evpn_interconnect_group is not provided.
         if domain_id is None:
-            raise ValueError(f"Must specify '{leaf_object_type}' in id to delete")
+            if body is not None and "label" in body:
+                found = find_interconnect_domain_by_label(
+                    client_factory, blueprint_id, body["label"]
+                )
+                if found:
+                    domain_id = found["id"]
+                    id[leaf_object_type] = domain_id
+            if domain_id is None:
+                raise ValueError(
+                    f"Must specify '{leaf_object_type}' in id or 'label' in body to delete"
+                )
         delete_interconnect_domain(client_factory, blueprint_id, domain_id)
         result["changed"] = True
         result["msg"] = f"{leaf_object_type} deleted successfully"
@@ -403,6 +497,12 @@ def _run_gateway(module, client_factory, result):
                 resolve_system_node_id(client_factory, bp_id, node)
                 for node in body["local_gw_nodes"]
             ]
+
+        # Resolve evpn_interconnect_group_id from label to ID
+        if "evpn_interconnect_group_id" in body and body["evpn_interconnect_group_id"]:
+            body["evpn_interconnect_group_id"] = resolve_interconnect_domain_id(
+                client_factory, bp_id, body["evpn_interconnect_group_id"]
+            )
 
         # Validate evpn_interconnect_group_id on create
         if state == "present" and "evpn_interconnect_group_id" not in body:
