@@ -4,6 +4,17 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.7
+======
+
+Minor Changes
+-------------
+- Added ``.ansible-lint`` configuration to exclude ``tests/`` directory from ansible-lint to resolve import errors on Ansible Automation Platform.
+- Fixed ``yaml[line-length]`` violations in ``tests/configlets.yml`` and ``tests/create_connectorops_blueprint.yml``.
+- Fixed ``jinja[spacing]`` warnings in ``tests/customize_connectivity_template.yml``.
+- Replaced ``ignore_errors: true`` with ``failed_when: false`` in test playbooks (``generic_systems.yml``, ``resource_pools.yml``, ``rollback.yml``, ``system_agents.yml``, ``teardown_connectorops_blueprint.yml``) to satisfy ansible-lint ``ignore-errors`` rule.
+- Fixed ``name[template]`` lint violation in ``tests/teardown_connectorops_blueprint.yml``.
+
 v1.0.6
 ======
 
