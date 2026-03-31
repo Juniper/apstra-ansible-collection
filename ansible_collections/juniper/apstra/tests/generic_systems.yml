@@ -293,7 +293,7 @@
           name: "test-gs-tf-001-updated"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: "Cleanup stale GS (test-gs-tf-001) if present"
       juniper.apstra.generic_systems:
@@ -303,7 +303,7 @@
           name: "test-gs-tf-001"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     # ══════════════════════════════════════════════════════════════════
     #  TEST 1: Create generic system with a single link
@@ -565,7 +565,7 @@
           name: "test-gs-name-res"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
       when: not use_existing_blueprint | bool
 
     - name: "TEST 8b - Create GS using leaf label (name resolution)"
@@ -614,7 +614,7 @@
           name: "test-lag-server-tf"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     # ══════════════════════════════════════════════════════════════════
     #  TEST 9: Create generic system with dual LAG links
@@ -738,7 +738,7 @@
           name: "test-ext-gs-tf-updated"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: "Cleanup stale external GS (test-ext-gs-tf) if present"
       juniper.apstra.generic_systems:
@@ -748,7 +748,7 @@
           name: "test-ext-gs-tf"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     # ══════════════════════════════════════════════════════════════════
     #  TEST 12: Create external generic system

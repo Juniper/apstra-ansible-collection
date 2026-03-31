@@ -114,7 +114,7 @@
     #  Discover routing zone (Default) for IP Link primitive
     # ==================================================================
 
-    - name: Find Default routing zone
+    - name: Find Default routing zone  # noqa: jinja[spacing]
       ansible.builtin.set_fact:
         default_routing_zone_id: >-
           {%- set zones = bp_facts.ansible_facts.apstra_facts.blueprints[blueprint_id].security_zones -%}
@@ -402,7 +402,7 @@
             {%- endif -%}
           {%- endif -%}
 
-    - name: Show link IP pool status
+    - name: Show link IP pool status  # noqa: jinja[spacing]
       ansible.builtin.debug:
         msg: >-
           {% if link_ip_pool_id | trim | length > 0 -%}

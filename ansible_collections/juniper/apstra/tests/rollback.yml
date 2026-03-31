@@ -240,7 +240,7 @@
               property_set: "{{ revert_ps.id.property_set }}"
             state: absent
             auth_token: "{{ auth.token }}"
-          ignore_errors: true
+          failed_when: false
           when: revert_ps.id.property_set is defined
 
     ################################################################################

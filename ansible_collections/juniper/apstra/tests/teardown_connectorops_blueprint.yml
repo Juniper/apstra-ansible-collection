@@ -98,7 +98,7 @@
              | list
              | first
              | default(None) }}
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 2 — Extract blueprint ID"
       ansible.builtin.set_fact:
@@ -160,7 +160,7 @@
              | map(attribute='id')
              | list }}
 
-    - name: "Phase 3.5 — Uninstall agents ({{ _agent_ids | length }} found)"
+    - name: "Phase 3.5 — Uninstall agents, total: {{ _agent_ids | length }}"
       ansible.builtin.uri:
         url: "{{ api_url }}/system-agents/{{ item }}/uninstall-agent"
         method: POST
@@ -171,7 +171,7 @@
       loop: "{{ _agent_ids }}"
       loop_control:
         label: "agent {{ item }}"
-      ignore_errors: true
+      failed_when: false
       when: _agent_ids | length > 0
 
     - name: "Phase 3.5 — Wait for agents to fully stop"

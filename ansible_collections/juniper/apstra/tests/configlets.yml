@@ -312,7 +312,13 @@
           generators:
             - config_style: "junos"
               section: "system"
-              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+              template_text: |-
+                system {
+                  ntp {
+                    server {% raw %}{{ ntp_server }}{% endraw %};
+                    boot-server {% raw %}{{ ntp_server }}{% endraw %};
+                  }
+                }
               negation_template_text: ""
               filename: ""
         auth_token: "{{ auth.token }}"
@@ -332,7 +338,13 @@
           generators:
             - config_style: "junos"
               section: "system"
-              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+              template_text: |-
+                system {
+                  ntp {
+                    server {% raw %}{{ ntp_server }}{% endraw %};
+                    boot-server {% raw %}{{ ntp_server }}{% endraw %};
+                  }
+                }
               negation_template_text: ""
               filename: ""
         auth_token: "{{ auth.token }}"

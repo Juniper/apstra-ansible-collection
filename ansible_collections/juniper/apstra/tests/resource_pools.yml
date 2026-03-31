@@ -100,7 +100,7 @@
             | selectattr('type', 'equalto', 'asn')
             | first
           }}
-      ignore_errors: true
+      failed_when: false
 
     - name: Display ASN resource group
       ansible.builtin.debug:
