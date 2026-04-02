@@ -1400,6 +1400,106 @@
       when:
         - not (item.skipped | default(false))
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Phase 15f — Regression: customer-scenario VN with create_policy_tagged
+    # ─────────────────────────────────────────────────────────────────────────
+    # Reproduces the exact body a sales/customer environment used that previously
+    # triggered a second untagged CT with an auto-assigned VLAN from the pool.
+    # Fix (189d188): create_policy_untagged is no longer injected when
+    # create_policy_tagged is explicitly True.
+    #
+    # Params mirrored from customer config:
+    #   create_policy_tagged: true  — only a tagged CT should be created
+    #   vlan_id: 254                — global VLAN applied to all bound_to entries
+    #   virtual_gateway_ipv4        — L3 VN with gateway + subnet
+    #   security_zone_id: green     — first SZ in this testbed (customer used "Tenant1")
+    #   vn_id: "100110"             — customer's VN ID
+    #   bound_to: all leaf nodes    — reuses ESI-expanded or fallback list from Phase 15c
+
+    - name: "Phase 15f.1 — Customer-scenario VN: create with create_policy_tagged=true"
+      tags: [phase15_vn, regression]
+      juniper.apstra.virtual_network:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          label: "customer-test-vn"
+          description: "Regression test — customer scenario with create_policy_tagged"
+          ipv4_enabled: true
+          virtual_gateway_ipv4: "10.100.10.1"
+          ipv4_subnet: "10.100.10.0/24"
+          virtual_gateway_ipv4_enabled: true
+          create_policy_tagged: true   # must NOT inject create_policy_untagged
+          vlan_id: 254
+          vn_id: "100110"
+          vn_type: "vxlan"
+          security_zone_id: "green"   # matches customer's "Tenant1" SZ role
+          bound_to: "{{ vn_esi_bound_to if esi_pair_label is defined else vn_fallback_bound_to }}"
+        state: present
+      register: customer_vn
+
+    - name: "Phase 15f.2 — Assert customer VN created (changed=true, vlan_id=254)"
+      tags: [phase15_vn, regression]
+      ansible.builtin.assert:
+        that:
+          - customer_vn is not failed
+          - customer_vn.changed
+          - customer_vn.id.virtual_network is defined
+          - customer_vn.virtual_network.bound_to | length > 0
+          - customer_vn.virtual_network.bound_to[0].vlan_id == 254
+        fail_msg: >-
+          FAILED: customer-scenario VN (create_policy_tagged=true).
+          changed={{ customer_vn.changed }},
+          bound_to={{ customer_vn.virtual_network.bound_to | length }} entries,
+          vlan_id={{ customer_vn.virtual_network.bound_to[0].vlan_id | default('MISSING') }}
+        success_msg: >-
+          PASSED: customer-scenario VN created (changed=true),
+          bound_to={{ customer_vn.virtual_network.bound_to | length }} entries,
+          vlan_id={{ customer_vn.virtual_network.bound_to[0].vlan_id }}
+          (create_policy_tagged=true — no untagged CT injected).
+
+    - name: "Phase 15f.3 — Idempotency re-run: customer-scenario VN (must not change)"
+      tags: [phase15_vn, regression]
+      juniper.apstra.virtual_network:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id: "{{ customer_vn.id }}"
+        body:
+          label: "customer-test-vn"
+          description: "Regression test — customer scenario with create_policy_tagged"
+          ipv4_enabled: true
+          virtual_gateway_ipv4: "10.100.10.1"
+          ipv4_subnet: "10.100.10.0/24"
+          virtual_gateway_ipv4_enabled: true
+          create_policy_tagged: true
+          vlan_id: 254
+          vn_id: "100110"
+          vn_type: "vxlan"
+          security_zone_id: "green"
+          bound_to: "{{ vn_esi_bound_to if esi_pair_label is defined else vn_fallback_bound_to }}"
+        state: present
+      register: customer_vn_idemp
+
+    - name: "Phase 15f.4 — Assert customer VN idempotency (changed=false)"
+      tags: [phase15_vn, regression]
+      ansible.builtin.assert:
+        that:
+          - not customer_vn_idemp.changed
+        fail_msg: "FAILED: customer-scenario VN idempotency (unexpected change on re-run)"
+        success_msg: "PASSED: customer-scenario VN idempotency OK (create_policy_tagged, no drift)"
+
+    - name: "Phase 15f.5 — Cleanup: delete customer-scenario VN"
+      tags: [phase15_vn, regression]
+      juniper.apstra.virtual_network:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id: "{{ customer_vn.id }}"
+        state: absent
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 16: SZ Loopback IP Pool Assignment
     # Each security zone requires a loopback IP pool assigned to its per-leaf
