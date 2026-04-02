@@ -324,7 +324,17 @@ def main():
             # so compare_and_update() silently skips it on updates, preserving
             # full idempotency.  Callers may override by setting the field
             # explicitly to False in the body.
-            if body.get("vn_type") == "vxlan" and "create_policy_untagged" not in body:
+            #
+            # Do NOT add create_policy_untagged when create_policy_tagged is
+            # True — the caller explicitly wants a tagged CT only.  Adding both
+            # would cause Apstra to create a second (untagged) CT with an
+            # auto-assigned VLAN from the pool, producing an unexpected extra
+            # VLAN assignment visible in the UI.
+            if (
+                body.get("vn_type") == "vxlan"
+                and "create_policy_untagged" not in body
+                and not body.get("create_policy_tagged")
+            ):
                 body["create_policy_untagged"] = True
 
         # Validate the id
