@@ -276,6 +276,16 @@ demo-connectivity-template: install
 	$(_DEMO_CHECK)
 	$(_DEMO_BASE) --tags "phase1_auth,phase2_onboard,phase3_design,phase4_interface_maps,phase5_blueprint,phase6_external_gateway,phase7_connectivity_template"
 
+# ── Regression: customer-scenario VN test (Phase 15f) ─────────────────────────
+# Runs against an already-deployed connectorops blueprint.
+# Phase 0 (always) loads testbed vars; phase14_sz builds the SZ facts and the
+# vn_esi_bound_to / vn_fallback_bound_to lists used by Phase 15f.
+# All earlier tasks are idempotent — only Phase 15f adds new assertions.
+# Usage: make test-vn-regression TESTBED_FILE=/path/to/testbed.yaml
+test-vn-regression: install
+	$(_DEMO_CHECK)
+	$(_DEMO_BASE) --tags "phase1_auth,phase14_sz,phase15_vn"
+
 delete-connectorops-blueprint: install
 	@if [ -z "$(TESTBED_FILE)" ]; then echo "ERROR: TESTBED_FILE is required. Usage: make delete-connectorops-blueprint TESTBED_FILE=/path/to/testbed.yaml"; exit 1; fi
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \

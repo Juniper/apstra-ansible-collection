@@ -85,6 +85,38 @@
       ansible.builtin.debug:
         var: rg_update.resource_group
 
+    # ── Regression: first-time pool assignment to empty resource_group ──────
+    # Bug: API omits pool_ids from GET when empty, so compare_and_update() at
+    # depth-0 silently skipped pool_ids, always returning ok (changed=false).
+    # Fix: normalize pool_ids to [] before diffing so changes are detected.
+
+    - name: Verify pool assignment to empty resource_group was detected (changed)
+      ansible.builtin.assert:
+        that:
+          - rg_update is not failed
+          - rg_update.changed
+        fail_msg: "pool_ids assignment to empty resource_group was NOT detected (bug regression)"
+        success_msg: "PASSED: pool assignment on empty resource_group detected (changed=true)"
+
+    - name: Idempotency — re-run pool assignment (must not change)
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          group_type: "ip"
+          group_name: "leaf_loopback_ips"
+        body:
+          description: "Updated description"
+          pool_ids: "{{ ip_pools }}"
+        auth_token: "{{ auth.token }}"
+      register: rg_update_idemp
+
+    - name: Verify resource_group idempotency (changed == false)
+      ansible.builtin.assert:
+        that:
+          - not rg_update_idemp.changed
+        fail_msg: "resource_group idempotency FAILED (unexpected change on re-run)"
+        success_msg: "PASSED: resource_group idempotency OK (pool_ids already set)"
+
     # ── Name Resolution: assign pool by display_name ───────────────
 
     - name: Get first IP pool display_name

@@ -224,6 +224,13 @@ def main():
             current_object = resource_group.get()
 
             if current_object:
+                # Apstra omits pool_ids from the GET response when no pools are
+                # assigned.  compare_and_update() at depth-0 silently skips keys
+                # absent in current, so we normalise here to ensure an empty
+                # assignment is treated as a genuine change target.
+                if "pool_ids" not in current_object:
+                    current_object["pool_ids"] = []
+
                 if body:
                     # Update the object
                     changes = {}
@@ -234,6 +241,11 @@ def main():
                             result["response"] = updated_object
                         result["changes"] = changes
                         result["msg"] = f"{leaf_object_type} updated successfully"
+                    else:
+                        result["changed"] = False
+                        result["msg"] = (
+                            f"{leaf_object_type} already up to date, no changes needed"
+                        )
 
             # Return the final object state (avoid re-reading after updates
             # because SDK may return stale cached data; for creates, fetch
