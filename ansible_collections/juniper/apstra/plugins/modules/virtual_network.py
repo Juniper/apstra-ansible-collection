@@ -156,6 +156,26 @@ EXAMPLES = """
         - system_id: "apstra_esi_001_leaf_pair1"   # ESI redundancy group
     state: present
 
+# create_policy_tagged — use when you want ONLY a tagged CT and no auto-untagged CT.
+# Without this, Apstra normally expects an untagged CT; by default the module sets
+# create_policy_untagged=True automatically for vxlan VNs.  Setting
+# create_policy_tagged=True explicitly suppresses that auto-injection so only one
+# tagged connectivity template is created (avoids the unexpected extra VLAN from pool).
+- name: Create virtual network with tagged-only connectivity template
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "prod-vn-tagged"
+      vn_type: "vxlan"
+      vlan_id: 254
+      create_policy_tagged: true   # suppresses auto create_policy_untagged injection
+      security_zone_id: "Tenant1"
+      bound_to:
+        - system_id: "DC1-Leaf1"
+        - system_id: "DC1-Leaf2"
+    state: present
+
 - name: Delete a virtual network
   juniper.apstra.virtual_network:
     id:

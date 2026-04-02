@@ -249,6 +249,57 @@
         state: absent
         auth_token: "{{ auth.token }}"
 
+    # ── Regression: create_policy_tagged must NOT auto-add create_policy_untagged ─
+    # Bug: when create_policy_tagged=True, the old code unconditionally injected
+    # create_policy_untagged=True as well, causing Apstra to create a second CT
+    # with an auto-assigned VLAN from the pool (visible as unexpected VLAN in UI).
+    # Fix: only inject create_policy_untagged when create_policy_tagged is falsy.
+
+    - name: Create VN with create_policy_tagged (no untagged CT should be created)
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        body:
+          label: "test_vn_tagged_only"
+          vn_type: "vxlan"
+          vlan_id: 254
+          create_policy_tagged: true   # must NOT trigger auto create_policy_untagged
+        auth_token: "{{ auth.token }}"
+      register: vn_tagged_only
+
+    - name: Verify create_policy_tagged VN creation succeeded
+      ansible.builtin.assert:
+        that:
+          - vn_tagged_only is not failed
+          - vn_tagged_only.changed
+          - vn_tagged_only.id.virtual_network is defined
+        fail_msg: "create_policy_tagged VN creation FAILED"
+        success_msg: "PASSED: VN with create_policy_tagged created (changed=true)"
+
+    - name: Idempotency — re-run create_policy_tagged VN (must not change)
+      juniper.apstra.virtual_network:
+        id: "{{ vn_tagged_only.id }}"
+        body:
+          label: "test_vn_tagged_only"
+          vn_type: "vxlan"
+          vlan_id: 254
+          create_policy_tagged: true
+        auth_token: "{{ auth.token }}"
+      register: vn_tagged_only_idemp
+
+    - name: Verify idempotency for create_policy_tagged VN (changed == false)
+      ansible.builtin.assert:
+        that:
+          - not vn_tagged_only_idemp.changed
+        fail_msg: "create_policy_tagged idempotency FAILED (unexpected change)"
+        success_msg: "PASSED: create_policy_tagged idempotency OK (no drift)"
+
+    - name: Delete VN (create_policy_tagged test)
+      juniper.apstra.virtual_network:
+        id: "{{ vn_tagged_only.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
     # NOTE: Tests for ESI pair expansion (bound_to with a redundancy_group label)
     # and global vlan_id with real leaf nodes require a testbed with actual managed
     # devices and are covered by integration tests, not the unit test blueprint here.
