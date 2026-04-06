@@ -1,0 +1,629 @@
+---
+# =============================================================================
+# IBA Probes — Full CRUD End-to-End Test Playbook
+# =============================================================================
+#
+# This playbook tests the juniper.apstra.iba_probes module by:
+#   1. Authenticating to Apstra
+#   2. Creating a fresh blueprint for testing
+#   3. Listing available predefined probes
+#   4. Creating probes from various predefined types (CRUD - Create)
+#   5. Verifying created probes exist (CRUD - Read)
+#   6. Updating probe properties (CRUD - Update)
+#   7. Testing idempotency (re-running create should detect no changes)
+#   8. Deleting all test probes (CRUD - Delete)
+#   9. Verifying deletion
+#   10. Testing IBA dashboards CRUD
+#   11. Deleting the blueprint
+#
+# Usage:
+#   cd apstra-ansible-collection
+#   make test-iba_probes
+#
+# Environment variables (or set in .env):
+#   APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD, APSTRA_VERIFY_CERTIFICATES
+# =============================================================================
+
+- name: IBA Probes — Full CRUD Test
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # Override these via -e if needed
+    blueprint_label: "iba-probes-test-bp"
+    blueprint_template: "L2 Virtual EVPN"
+
+  tasks:
+    # ─── Authentication ───────────────────────────────────────────────
+    - name: Authenticate to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Display auth token (truncated)
+      ansible.builtin.debug:
+        msg: "Authenticated. Token: {{ auth.token[:16] }}..."
+
+    # ─── Blueprint Creation ───────────────────────────────────────────
+    - name: "SETUP — Create test blueprint"
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_label }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "{{ blueprint_template }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show blueprint ID
+      ansible.builtin.debug:
+        msg: "Blueprint: {{ blueprint_label }} → {{ bp.id.blueprint }}"
+
+    # ─── List Predefined Probes ───────────────────────────────────────
+    - name: List all available predefined probes
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: predefined_list
+
+    - name: Show predefined probe count
+      ansible.builtin.debug:
+        msg: "Available predefined probes: {{ predefined_list.predefined_probes | length }}"
+
+    - name: Show predefined probe names
+      ansible.builtin.debug:
+        msg: "{{ predefined_list.predefined_probes }}"
+
+    # ═════════════════════════════════════════════════════════════════
+    # CREATE — Instantiate various predefined probes
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "CREATE — BGP Session probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: bgp_session
+          label: "Test - BGP Monitoring"
+          duration: 300
+          threshold: 40
+        auth_token: "{{ auth.token }}"
+      register: probe_bgp
+
+    - name: Verify BGP probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_bgp.changed == true
+          - probe_bgp.id.probe is defined
+          - probe_bgp.probe.label == "Test - BGP Monitoring"
+        fail_msg: "BGP probe creation failed"
+
+    - name: "CREATE — Bandwidth Utilization probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: bandwidth_utilization
+          label: "Test - Bandwidth Utilization"
+          first_summary_average_period: 120
+          first_summary_total_duration: 3600
+          second_summary_average_period: 3600
+          second_summary_total_duration: 2592000
+        auth_token: "{{ auth.token }}"
+      register: probe_bw
+
+    - name: Verify Bandwidth probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_bw.changed == true
+          - probe_bw.id.probe is defined
+        fail_msg: "Bandwidth probe creation failed"
+
+    - name: "CREATE — Control Plane Policing probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: copp
+          label: "Test - Control Plane Policing"
+          aggregation_period: 300
+          collection_interval: 120
+          history_duration: 2592000
+          drop_count_threshold: 1
+        auth_token: "{{ auth.token }}"
+      register: probe_copp
+
+    - name: Verify COPP probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_copp.changed == true
+          - probe_copp.id.probe is defined
+        fail_msg: "COPP probe creation failed"
+
+    - name: "CREATE — Device System Health probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: device_health
+          label: "Test - Device System Health"
+          raise_switch_anomaly: true
+          raise_server_anomaly: true
+          history_duration: 2592000
+        auth_token: "{{ auth.token }}"
+      register: probe_health
+
+    - name: Verify Device Health probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_health.changed == true
+          - probe_health.id.probe is defined
+        fail_msg: "Device Health probe creation failed"
+
+    - name: "CREATE — Device Telemetry Health probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: device_telemetry_health
+          label: "Test - Device Telemetry Health"
+        auth_token: "{{ auth.token }}"
+      register: probe_telemetry
+
+    - name: Verify Device Telemetry probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_telemetry.changed == true
+        fail_msg: "Device Telemetry probe creation failed"
+
+    - name: "CREATE — LAG Imbalance probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: lag_imbalance
+          label: "Test - LAG Imbalance"
+        auth_token: "{{ auth.token }}"
+      register: probe_lag
+
+    - name: "CREATE — Fabric ECMP Imbalance probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: fabric_ecmp_imbalance
+          label: "Test - Fabric ECMP Imbalance"
+        auth_token: "{{ auth.token }}"
+      register: probe_ecmp
+
+    - name: "CREATE — ESI Imbalance probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: esi_imbalance
+          label: "Test - ESI Imbalance"
+        auth_token: "{{ auth.token }}"
+      register: probe_esi
+
+    - name: "CREATE — MAC Monitor probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: mac_monitor
+          label: "Test - MAC Monitor"
+        auth_token: "{{ auth.token }}"
+      register: probe_mac
+
+    - name: Show all created probe IDs
+      ansible.builtin.debug:
+        msg:
+          - "BGP: {{ probe_bgp.id.probe }}"
+          - "Bandwidth: {{ probe_bw.id.probe }}"
+          - "COPP: {{ probe_copp.id.probe }}"
+          - "Health: {{ probe_health.id.probe }}"
+          - "Telemetry: {{ probe_telemetry.id.probe }}"
+          - "LAG: {{ probe_lag.id.probe }}"
+          - "ECMP: {{ probe_ecmp.id.probe }}"
+          - "ESI: {{ probe_esi.id.probe }}"
+          - "MAC: {{ probe_mac.id.probe }}"
+
+    # ═════════════════════════════════════════════════════════════════
+    # READ — Verify probes exist by re-fetching
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "READ — Fetch BGP probe by ID (via probe type)"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_bgp.id.probe }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: read_bgp
+
+    - name: Verify READ returns the probe
+      ansible.builtin.assert:
+        that:
+          - read_bgp.changed == false
+          - read_bgp.probe.label == "Test - BGP Monitoring"
+        fail_msg: "Failed to read back BGP probe"
+
+    # ═════════════════════════════════════════════════════════════════
+    # READ BY LABEL — Fetch probes using label in id.probe
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "READ BY LABEL — Fetch BGP probe by label (via id.probe)"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "Test - BGP Monitoring"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: read_bgp_label
+
+    - name: Verify READ by label returns the same probe
+      ansible.builtin.assert:
+        that:
+          - read_bgp_label.changed == false
+          - read_bgp_label.probe.label == "Test - BGP Monitoring"
+          - read_bgp_label.probe.id == probe_bgp.id.probe
+        fail_msg: "Failed to read BGP probe by label"
+
+    - name: "READ BY LABEL — Fetch Bandwidth probe by label"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "Test - Bandwidth Utilization"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: read_bw_label
+
+    - name: Verify Bandwidth probe read by label
+      ansible.builtin.assert:
+        that:
+          - read_bw_label.changed == false
+          - read_bw_label.probe.id == probe_bw.id.probe
+        fail_msg: "Failed to read Bandwidth probe by label"
+
+    # ═════════════════════════════════════════════════════════════════
+    # IDEMPOTENCY — Re-create should not change anything
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "IDEMPOTENCY — Re-create BGP probe (should detect existing)"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: bgp_session
+          label: "Test - BGP Monitoring"
+          duration: 300
+          threshold: 40
+        auth_token: "{{ auth.token }}"
+      register: idem_bgp
+
+    - name: Verify idempotency
+      ansible.builtin.assert:
+        that:
+          - idem_bgp.changed == false
+        fail_msg: "Idempotency check failed — probe was recreated"
+
+    # ═════════════════════════════════════════════════════════════════
+    # UPDATE — Modify probe properties
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "UPDATE — Change BGP probe description"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - BGP Monitoring"
+          description: "Updated by Ansible IBA probe test"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: update_bgp
+
+    - name: Verify update was applied
+      ansible.builtin.assert:
+        that:
+          - update_bgp.changed == true
+          - update_bgp.changes.description is defined
+        fail_msg: "Probe update failed"
+
+    - name: "UPDATE — Disable the Bandwidth probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - Bandwidth Utilization"
+          disabled: true
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: update_bw
+
+    - name: Verify disable was applied
+      ansible.builtin.assert:
+        that:
+          - update_bw.changed == true
+        fail_msg: "Probe disable failed"
+
+    # ═════════════════════════════════════════════════════════════════
+    # DASHBOARD — CRUD tests
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "DASHBOARD CREATE — Create a test dashboard"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - Ansible IBA Dashboard"
+          description: "Created by IBA probe test playbook"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: dash_create
+
+    - name: Verify dashboard creation
+      ansible.builtin.assert:
+        that:
+          - dash_create.changed == true
+          - dash_create.id.dashboard is defined
+        fail_msg: "Dashboard creation failed"
+
+    - name: "DASHBOARD UPDATE — Update dashboard description"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - Ansible IBA Dashboard"
+          description: "Updated by Ansible IBA probe test"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: dash_update
+
+    - name: Verify dashboard update
+      ansible.builtin.assert:
+        that:
+          - dash_update.changed == true
+        fail_msg: "Dashboard update failed"
+
+    - name: "DASHBOARD IDEMPOTENCY — Re-apply same description"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - Ansible IBA Dashboard"
+          description: "Updated by Ansible IBA probe test"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: dash_idem
+
+    - name: Verify dashboard idempotency
+      ansible.builtin.assert:
+        that:
+          - dash_idem.changed == false
+        fail_msg: "Dashboard idempotency check failed"
+
+    - name: "DASHBOARD DELETE — Remove test dashboard by label"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          dashboard: "Test - Ansible IBA Dashboard"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: dash_delete
+
+    - name: Verify dashboard deletion
+      ansible.builtin.assert:
+        that:
+          - dash_delete.changed == true
+        fail_msg: "Dashboard deletion by label failed"
+
+    - name: "DASHBOARD RE-CREATE — Recreate for label-based read test"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - Ansible IBA Dashboard"
+          description: "Recreated for label read test"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: dash_recreate
+
+    - name: "DASHBOARD READ BY LABEL — Fetch dashboard by label"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          dashboard: "Test - Ansible IBA Dashboard"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: read_dash_label
+
+    - name: Verify dashboard read by label
+      ansible.builtin.assert:
+        that:
+          - read_dash_label.changed == false
+          - read_dash_label.dashboard.label == "Test - Ansible IBA Dashboard"
+          - read_dash_label.dashboard.id == dash_recreate.id.dashboard
+        fail_msg: "Failed to read dashboard by label"
+
+    - name: "DASHBOARD FINAL DELETE — Remove dashboard by ID"
+      juniper.apstra.iba_probes:
+        type: dashboard
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          dashboard: "{{ dash_recreate.id.dashboard }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    # ═════════════════════════════════════════════════════════════════
+    # DELETE — Clean up all test probes
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "DELETE — Remove BGP probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_bgp.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: del_bgp
+
+    - name: "DELETE BY LABEL — Remove Bandwidth probe by label"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "Test - Bandwidth Utilization"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: del_bw_label
+
+    - name: Verify label-based deletion
+      ansible.builtin.assert:
+        that:
+          - del_bw_label.changed == true
+        fail_msg: "Probe deletion by label failed"
+
+    - name: "DELETE — Remove COPP probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_copp.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove Device Health probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_health.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove Device Telemetry probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_telemetry.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove LAG probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_lag.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove ECMP probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_ecmp.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove ESI probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_esi.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove MAC Monitor probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_mac.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Verify BGP probe deletion
+      ansible.builtin.assert:
+        that:
+          - del_bgp.changed == true
+        fail_msg: "Probe deletion failed"
+
+    # ═════════════════════════════════════════════════════════════════
+    # VERIFY DELETE — Confirm probes are gone
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "VERIFY — Re-delete BGP probe (should be idempotent)"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          label: "Test - BGP Monitoring"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: verify_del
+
+    - name: Verify delete idempotency
+      ansible.builtin.assert:
+        that:
+          - verify_del.changed == false
+        fail_msg: "Delete idempotency check failed"
+
+    # ═════════════════════════════════════════════════════════════════
+    # TEARDOWN — Delete the test blueprint
+    # ═════════════════════════════════════════════════════════════════
+
+    - name: "TEARDOWN — Delete test blueprint"
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_delete
+
+    - name: Verify blueprint deletion
+      ansible.builtin.assert:
+        that:
+          - bp_delete.changed == true
+        fail_msg: "Blueprint deletion failed"
+
+    # ─── Logout ───────────────────────────────────────────────────────
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+
+    - name: Test complete
+      ansible.builtin.debug:
+        msg: "All IBA probe CRUD tests passed successfully!"
