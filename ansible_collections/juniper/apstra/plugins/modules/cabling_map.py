@@ -412,7 +412,7 @@ def main():
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | object_module_args
 
-    result = dict(changed=False, links=[], msg="")
+    result = dict(changed=False, links=[])
 
     module = AnsibleModule(argument_spec=module_args, supports_check_mode=True)
 
