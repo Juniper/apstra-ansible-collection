@@ -117,6 +117,13 @@
             success_msg: "Test 3 PASSED: gathered LLDP data for {{ lldp_result.links | length }} link(s)"
 
         # ── Test 4: diff — LLDP vs intended ───────────────────────
+        # NOTE: diff compares LLDP-discovered physical port connections
+        # vs the blueprint intended topology. A non-zero diff requires a
+        # real physical mis-cable or LLDP mismatch — impossible to
+        # simulate via the API in a virtual/template blueprint. This test
+        # validates that the endpoint responds correctly and returns an
+        # empty list (no mismatches) for a freshly-created blueprint with
+        # no physical devices attached.
         - name: "Test 4: Get cabling map diff (state=diff)"
           juniper.apstra.cabling_map:
             id:
@@ -129,15 +136,19 @@
           ansible.builtin.debug:
             var: diff_result
 
-        - name: Verify diff result structure
+        - name: Verify diff result structure and response
           ansible.builtin.assert:
             that:
               - diff_result is defined
               - not diff_result.changed
               - diff_result.links is defined
               - diff_result.links | type_debug == 'list'
-            fail_msg: "Test 4 FAILED: diff state returned unexpected structure"
-            success_msg: "Test 4 PASSED: cabling map diff returned {{ diff_result.links | length }} link(s)"
+              - diff_result.links | length == 0
+            fail_msg: "Test 4 FAILED: diff state returned unexpected structure or non-zero diff on a new blueprint"
+            success_msg: >-
+              Test 4 PASSED: diff=0 on new blueprint (no LLDP data, no physical
+              mis-cables). A non-zero diff would require a real physical mis-cable
+              or LLDP mismatch — not possible to simulate via API in a virtual blueprint.
 
         # ── Tests 5-7: require links in the blueprint ──────────────
         # These run only when the blueprint has topology links.

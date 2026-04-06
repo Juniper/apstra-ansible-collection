@@ -1,0 +1,359 @@
+---
+# ── Sample test: cabling_map module against vg-am-cops-tb-0 ────────
+#
+# Blueprint: vg-am-cops-tb-0  (two_stage_l3clos, do NOT delete)
+# 20 links: 8 spine-leaf + 12 host/SRX links
+# 8 LLDP links (real physical connections on spine-leaf ports)
+# 0 diff (all cabling matches intended config)
+#
+# Patch demo: safely updates the server-side if_name on the
+# vg-am-cops-tb-0-h2 <-> leaf2 link (h2 side is null → "bond0"),
+# then reverts to null.
+#
+# Usage:
+#   ansible-playbook tests/sample_cabling_map_vg_am_cops_tb_0.yml
+
+- name: "Sample cabling_map tests — vg-am-cops-tb-0"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    blueprint: "vg-am-cops-tb-0"
+
+    # ── Patch target: leaf2 <-> h2 link (leaf2 side) ─────────────
+    # Link: connectorops_vjun_001_leaf2<->connectorops_vjun_001_sys002(host2_leaf1_link)[1]
+    # We patch the server-side (h2) interface if_name: null → "bond0" → null
+    patch_link_leaf_if_id: "ctXqhiRhJuU2TeRF0w"     # leaf2 side (ge-0/0/3)
+    patch_link_leaf_if_name: "ge-0/0/3"             # current value — unchanged
+    patch_link_host_if_id: "8Mz7hXXP2yfeEN_1UQ"    # h2 side (currently null)
+    patch_link_host_if_name_new: "bond0"            # value to patch in
+    patch_link_host_if_name_orig: null              # original value to revert to
+
+    # ── LLDP filter: leaf3border system_id ───────────────────────
+    leaf3border_system_id: "0C009B3C6D00"
+
+    # ── Filter: spine2 system node id ────────────────────────────
+    spine2_node_id: "T5Z0gbWDMmTvfvUdsw"
+
+  tasks:
+    # ──────────────────────────────────────────────────────────────
+    # Auth
+    # ──────────────────────────────────────────────────────────────
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ──────────────────────────────────────────────────────────────
+    # 1. GATHERED — full cabling map
+    # ──────────────────────────────────────────────────────────────
+    - name: "1. Get full cabling map (state=gathered)"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: cm_full
+
+    - name: "1. Show summary"
+      ansible.builtin.debug:
+        msg: >-
+          Total links: {{ cm_full.links | length }}
+          | spine_leaf: {{ cm_full.links | selectattr('role','eq','spine_leaf') | list | length }}
+          | to_generic: {{ cm_full.links | selectattr('role','eq','to_generic') | list | length }}
+
+    - name: "1. Verify gathered structure"
+      ansible.builtin.assert:
+        that:
+          - not cm_full.changed
+          - cm_full.links | length == 20
+        success_msg: "PASS: gathered 20 links"
+        fail_msg: "FAIL: unexpected link count ({{ cm_full.links | length }})"
+
+    # ──────────────────────────────────────────────────────────────
+    # 2. GATHERED with system_node_id filter (spine2 only)
+    # ──────────────────────────────────────────────────────────────
+    - name: "2. Get cabling map filtered by spine2 system_node_id"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: gathered
+        body:
+          system_node_id: "{{ spine2_node_id }}"
+        auth_token: "{{ auth.token }}"
+      register: cm_spine2
+
+    - name: "2. Show spine2 filtered links"
+      ansible.builtin.debug:
+        msg: >-
+          spine2 links: {{ cm_spine2.links | length }}
+          | ids: {{ cm_spine2.links | map(attribute='id') | list }}
+
+    - name: "2. Verify spine2 filter"
+      ansible.builtin.assert:
+        that:
+          - not cm_spine2.changed
+          - cm_spine2.links | length > 0
+          - cm_spine2.links | length < cm_full.links | length
+        success_msg: "PASS: spine2 filter returned {{ cm_spine2.links | length }} links"
+        fail_msg: "FAIL: spine2 filter returned unexpected count"
+
+    # ──────────────────────────────────────────────────────────────
+    # 3. LLDP — raw LLDP data (all systems)
+    # ──────────────────────────────────────────────────────────────
+    - name: "3. Get LLDP data for all systems"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: lldp
+        auth_token: "{{ auth.token }}"
+      register: lldp_all
+
+    - name: "3. Show LLDP summary"
+      ansible.builtin.debug:
+        msg: >-
+          LLDP links: {{ lldp_all.links | length }}
+          | systems with LLDP: {{ lldp_all.links | map(attribute='endpoints') | flatten
+          | map(attribute='system') | map(attribute='label') | unique | sort | list }}
+
+    - name: "3. Verify LLDP"
+      ansible.builtin.assert:
+        that:
+          - not lldp_all.changed
+          - lldp_all.links | length == 8
+        success_msg: "PASS: 8 LLDP links found"
+        fail_msg: "FAIL: unexpected LLDP link count ({{ lldp_all.links | length }})"
+
+    # ──────────────────────────────────────────────────────────────
+    # 4. LLDP — filtered by leaf3border system_id (MAC)
+    # ──────────────────────────────────────────────────────────────
+    - name: "4. Get LLDP data for leaf3border only"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: lldp
+        body:
+          system_id: "{{ leaf3border_system_id }}"
+        auth_token: "{{ auth.token }}"
+      register: lldp_leaf3
+
+    - name: "4. Show leaf3border LLDP"
+      ansible.builtin.debug:
+        msg: "leaf3border LLDP links: {{ lldp_leaf3.links | length }}, ids={{ lldp_leaf3.links | map(attribute='id') | list }}"
+
+    - name: "4. Verify leaf3border LLDP filter"
+      ansible.builtin.assert:
+        that:
+          - not lldp_leaf3.changed
+          - lldp_leaf3.links | length > 0
+        success_msg: "PASS: leaf3border LLDP returned {{ lldp_leaf3.links | length }} link(s)"
+        fail_msg: "FAIL: leaf3border LLDP filter returned nothing"
+
+    # ──────────────────────────────────────────────────────────────
+    # 5. DIFF — LLDP vs intended config
+    #
+    # The diff endpoint compares PHYSICAL port connections:
+    #   - LLDP-reported: what device A actually sees as its neighbor
+    #     on each port (discovered via LLDP protocol)
+    #   - Intended: what the blueprint topology says should be connected
+    #
+    # A NON-ZERO diff occurs when:
+    #   - A cable is plugged into the wrong port on a device
+    #   - A cable is accidentally moved from one port to another
+    #   - LLDP discovers a neighbor that doesn't match the blueprint design
+    #
+    # NOTE: 'if_name' is an annotation field — changing it does NOT
+    # affect diff. Apstra also validates if_name against the device's
+    # interface map (rejects arbitrary values with 422). Only a real
+    # physical mis-cable would create a non-zero diff.
+    #
+    # In this virtual blueprint all 8 spine-leaf LLDP connections match
+    # the intended topology, so diff is always 0. This IS the correct
+    # behavior and confirms the diff module is working.
+    # ──────────────────────────────────────────────────────────────
+    - name: "5. Get cabling map diff"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: diff
+        auth_token: "{{ auth.token }}"
+      register: cm_diff
+
+    - name: "5. Show diff result"
+      ansible.builtin.debug:
+        msg: >-
+          Diff: {{ cm_diff.links | length }} mismatch(es)
+          — diff=0 means all LLDP-discovered connections match the intended topology
+
+    - name: "5. Verify diff (expect 0 — all cables match LLDP)"
+      ansible.builtin.assert:
+        that:
+          - not cm_diff.changed
+          - cm_diff.links | length == 0
+        success_msg: "PASS: diff=0 — all LLDP physical connections match intended topology"
+        fail_msg: "FAIL: unexpected diff count {{ cm_diff.links | length }}: {{ cm_diff.links | map(attribute='id') | list }}"
+
+    # ──────────────────────────────────────────────────────────────
+    # 6. PRESENT — patch + revert (leaf2<->h2 server-side if_name)
+    #
+    # Target link: connectorops_vjun_001_leaf2<->..._sys002(host2_leaf1_link)[1]
+    # Change:      h2 server interface if_name: null → "bond0" → null
+    # The leaf2-side if_name (ge-0/0/3) is kept as-is throughout.
+    # ──────────────────────────────────────────────────────────────
+
+    - name: "6a. Confirm current h2 if_name is null (pre-check)"
+      ansible.builtin.assert:
+        that:
+          - >-
+            cm_full.links
+            | selectattr('id','search','sys002.*host2_leaf1_link')
+            | map(attribute='endpoints') | flatten
+            | selectattr('system.label','eq','vg-am-cops-tb-0-h2')
+            | map(attribute='interface.if_name') | first is none
+        success_msg: "PASS: h2 if_name is null — safe to patch"
+        fail_msg: "WARN: h2 if_name is not null, skipping patch test"
+      ignore_errors: true
+      register: precheck
+
+    - name: "6b. PATCH — set h2 if_name to 'bond0'"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: present
+        body:
+          links:
+            - endpoints:
+                - interface:
+                    id: "{{ patch_link_leaf_if_id }}"
+                    if_name: "{{ patch_link_leaf_if_name }}"
+                - interface:
+                    id: "{{ patch_link_host_if_id }}"
+                    if_name: "{{ patch_link_host_if_name_new }}"
+        auth_token: "{{ auth.token }}"
+      register: patch_result
+      when: precheck is not failed
+
+    - name: "6b. Show patch result"
+      ansible.builtin.debug:
+        msg: "changed={{ patch_result.changed }}, total_links_returned={{ patch_result.links | length }}"
+      when: patch_result is not skipped
+
+    - name: "6b. Verify patch applied"
+      ansible.builtin.assert:
+        that:
+          - patch_result.changed
+          - patch_result.links | length > 0
+        success_msg: "PASS: patch applied (changed=true)"
+        fail_msg: "FAIL: patch did not apply"
+      when: patch_result is not skipped
+
+    # ── Diff check after patch ─────────────────────────────────────
+    # if_name is a pure annotation — it does NOT affect physical cabling.
+    # Diff compares LLDP-discovered port connections vs the topology
+    # design. Changing if_name has no impact, confirming that diff
+    # correctly ignores annotation-only changes.
+    # Note: Apstra also validates if_name against the device interface
+    # map and rejects arbitrary values (422), so only valid port names
+    # can be patched.
+    - name: "6b-diff. Run diff after if_name patch"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: diff
+        auth_token: "{{ auth.token }}"
+      register: cm_diff_after_patch
+      when: patch_result is not skipped
+
+    - name: "6b-diff. Show diff after if_name patch"
+      ansible.builtin.debug:
+        msg: >-
+          Diff after patch: {{ cm_diff_after_patch.links | length }} mismatch(es)
+          {% if cm_diff_after_patch.links | length > 0 %}
+          | ids: {{ cm_diff_after_patch.links | map(attribute='id') | list }}
+          {% endif %}
+      when: cm_diff_after_patch is not skipped
+
+    - name: "6b-diff. Verify diff=0 after if_name patch (annotation only, no physical change)"
+      ansible.builtin.assert:
+        that:
+          - cm_diff_after_patch.links | length == 0
+        success_msg: "PASS: diff=0 after if_name patch — annotation changes do not affect physical cabling diff"
+        fail_msg: "FAIL: unexpected diff after if_name patch: {{ cm_diff_after_patch.links | map(attribute='id') | list }}"
+      when: cm_diff_after_patch is not skipped
+
+    - name: "6c. Re-gather to confirm h2 if_name is now 'bond0'"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: cm_after_patch
+      when: patch_result is not skipped
+
+    - name: "6c. Verify h2 if_name changed to 'bond0'"
+      ansible.builtin.assert:
+        that:
+          - >-
+            cm_after_patch.links
+            | selectattr('id','search','sys002.*host2_leaf1_link')
+            | map(attribute='endpoints') | flatten
+            | selectattr('system.label','eq','vg-am-cops-tb-0-h2')
+            | map(attribute='interface.if_name') | first == 'bond0'
+        success_msg: "PASS: h2 if_name confirmed as 'bond0'"
+        fail_msg: "FAIL: h2 if_name not updated"
+      when: patch_result is not skipped
+
+    - name: "6d. REVERT — restore h2 if_name to null"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: present
+        body:
+          links:
+            - endpoints:
+                - interface:
+                    id: "{{ patch_link_leaf_if_id }}"
+                    if_name: "{{ patch_link_leaf_if_name }}"
+                - interface:
+                    id: "{{ patch_link_host_if_id }}"
+                    if_name: "{{ patch_link_host_if_name_orig }}"
+        auth_token: "{{ auth.token }}"
+      register: revert_result
+      when: patch_result is not skipped
+
+    - name: "6d. Show revert result"
+      ansible.builtin.debug:
+        msg: "Revert changed={{ revert_result.changed }}"
+      when: revert_result is not skipped
+
+    - name: "6e. Re-gather to confirm h2 if_name is null again"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint }}"
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: cm_after_revert
+      when: revert_result is not skipped
+
+    - name: "6e. Verify h2 if_name reverted to null"
+      ansible.builtin.assert:
+        that:
+          - >-
+            cm_after_revert.links
+            | selectattr('id','search','sys002.*host2_leaf1_link')
+            | map(attribute='endpoints') | flatten
+            | selectattr('system.label','eq','vg-am-cops-tb-0-h2')
+            | map(attribute='interface.if_name') | first is none
+        success_msg: "PASS: h2 if_name successfully reverted to null"
+        fail_msg: "FAIL: h2 if_name was not reverted"
+      when: cm_after_revert is not skipped
+
+    # ──────────────────────────────────────────────────────────────
+    # Summary
+    # ──────────────────────────────────────────────────────────────
+    - name: All sample tests PASSED
+      ansible.builtin.debug:
+        msg: >-
+          All tests PASSED for blueprint '{{ blueprint }}'.
+          Blueprint was NOT modified (all patches reverted).
