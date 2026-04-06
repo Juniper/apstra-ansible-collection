@@ -1,0 +1,222 @@
+---
+# ── Test playbook for juniper.apstra.cabling_map ──────────────────
+#
+# Prerequisites:
+#   - Apstra server reachable
+#   - A blueprint with cabling map data (devices assigned to
+#     the blueprint with wired links).
+#
+# Usage:
+#   ansible-playbook tests/cabling_map.yml \
+#     -e blueprint_name=vg-ext-0
+#
+# Variables:
+#   blueprint_name: Name or ID of an existing blueprint.
+
+- name: Test cabling_map module
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # Override via -e blueprint_name=<name> or set here
+    blueprint_name: "{{ lookup('env', 'APSTRA_TEST_BLUEPRINT') | default('vg-ext-0', true) }}"
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Test 1: gathered — full cabling map ───────────────────────
+    - name: "Test 1: Get full cabling map (state=gathered)"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: cm_result
+
+    - name: Display gathered cabling map
+      ansible.builtin.debug:
+        var: cm_result
+
+    - name: Verify gathered result structure
+      ansible.builtin.assert:
+        that:
+          - cm_result is defined
+          - not cm_result.changed
+          - cm_result.links is defined
+          - cm_result.links | type_debug == 'list'
+        fail_msg: "Test 1 FAILED: gathered cabling map returned unexpected structure"
+        success_msg: "Test 1 PASSED: gathered {{ cm_result.links | length }} link(s)"
+
+    # ── Test 2: gathered — idempotent ────────────────────────────
+    - name: "Test 2: Re-gather cabling map (idempotent, no change)"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: cm_idem
+
+    - name: Verify idempotency of gathered
+      ansible.builtin.assert:
+        that:
+          - not cm_idem.changed
+          - cm_idem.links | length == cm_result.links | length
+        fail_msg: "Test 2 FAILED: gathered was not idempotent"
+        success_msg: "Test 2 PASSED: gathered is idempotent ({{ cm_idem.links | length }} links)"
+
+    # ── Test 3: lldp — raw LLDP data ─────────────────────────────
+    - name: "Test 3: Get LLDP data (state=lldp)"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: lldp
+        auth_token: "{{ auth.token }}"
+      register: lldp_result
+
+    - name: Display LLDP result
+      ansible.builtin.debug:
+        var: lldp_result
+
+    - name: Verify LLDP result structure
+      ansible.builtin.assert:
+        that:
+          - lldp_result is defined
+          - not lldp_result.changed
+          - lldp_result.links is defined
+          - lldp_result.links | type_debug == 'list'
+        fail_msg: "Test 3 FAILED: lldp state returned unexpected structure"
+        success_msg: "Test 3 PASSED: gathered LLDP data for {{ lldp_result.links | length }} link(s)"
+
+    # ── Test 4: diff — LLDP vs intended ──────────────────────────
+    - name: "Test 4: Get cabling map diff (state=diff)"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: diff
+        auth_token: "{{ auth.token }}"
+      register: diff_result
+
+    - name: Display diff result
+      ansible.builtin.debug:
+        var: diff_result
+
+    - name: Verify diff result structure
+      ansible.builtin.assert:
+        that:
+          - diff_result is defined
+          - not diff_result.changed
+          - diff_result.links is defined
+          - diff_result.links | type_debug == 'list'
+        fail_msg: "Test 4 FAILED: diff state returned unexpected structure"
+        success_msg: "Test 4 PASSED: cabling map diff returned {{ diff_result.links | length }} link(s)"
+
+    # ── Test 5: gathered with system_node_id filter ───────────────
+    - name: Extract a system node ID from cabling map for filtering
+      ansible.builtin.set_fact:
+        test_system_node_id: "{{ cm_result.links[0].endpoints[0].system.id }}"
+      when: cm_result.links | length > 0
+
+    - name: "Test 5: Gather cabling map filtered by system_node_id"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: gathered
+        body:
+          system_node_id: "{{ test_system_node_id }}"
+        auth_token: "{{ auth.token }}"
+      register: cm_filtered
+      when: test_system_node_id is defined
+
+    - name: Display filtered cabling map
+      ansible.builtin.debug:
+        var: cm_filtered
+      when: test_system_node_id is defined
+
+    - name: Verify filtered cabling map
+      ansible.builtin.assert:
+        that:
+          - cm_filtered is defined
+          - not cm_filtered.changed
+          - cm_filtered.links is defined
+        fail_msg: "Test 5 FAILED: filtered cabling map failed"
+        success_msg: "Test 5 PASSED: filtered cabling map returned {{ cm_filtered.links | length }} link(s)"
+      when: test_system_node_id is defined
+
+    # ── Test 6: present — update a link (PATCH) ───────────────────
+    # Re-apply the current if_name values to verify the PATCH path
+    # without changing anything meaningful.
+    - name: Extract first link's endpoint interface IDs for patching
+      ansible.builtin.set_fact:
+        patch_link: "{{ cm_result.links[0] }}"
+        patch_if0: "{{ cm_result.links[0].endpoints[0].interface }}"
+        patch_if1: "{{ cm_result.links[0].endpoints[1].interface }}"
+      when: cm_result.links | length > 0
+
+    - name: "Test 6: Update cabling map link (state=present)"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: present
+        body:
+          links:
+            - endpoints:
+                - interface:
+                    id: "{{ patch_if0.id }}"
+                    if_name: "{{ patch_if0.if_name }}"
+                - interface:
+                    id: "{{ patch_if1.id }}"
+                    if_name: "{{ patch_if1.if_name }}"
+        auth_token: "{{ auth.token }}"
+      register: patch_result
+      when: patch_if0 is defined and patch_if0.if_name is not none
+
+    - name: Display patch result
+      ansible.builtin.debug:
+        var: patch_result
+      when: patch_result is defined
+
+    - name: Verify patch result
+      ansible.builtin.assert:
+        that:
+          - patch_result.changed
+          - patch_result.links is defined
+          - patch_result.links | type_debug == 'list'
+        fail_msg: "Test 6 FAILED: present state patch failed"
+        success_msg: "Test 6 PASSED: cabling map updated with {{ patch_result.links | length }} link(s) in result"
+      when: patch_result is defined and patch_result is not skipped
+
+    # ── Test 7: lldp filtered by system_id ───────────────────────
+    - name: Extract system_id (MAC) from first LLDP entry
+      ansible.builtin.set_fact:
+        test_system_id: "{{ lldp_result.links[0].system.system_id | default(omit) }}"
+      when: lldp_result.links | length > 0 and lldp_result.links[0].system is defined
+
+    - name: "Test 7: Get LLDP data filtered by system_id"
+      juniper.apstra.cabling_map:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: lldp
+        body:
+          system_id: "{{ test_system_id }}"
+        auth_token: "{{ auth.token }}"
+      register: lldp_filtered
+      when: test_system_id is defined
+
+    - name: Verify filtered LLDP result
+      ansible.builtin.assert:
+        that:
+          - lldp_filtered is defined
+          - not lldp_filtered.changed
+        fail_msg: "Test 7 FAILED: filtered lldp state failed"
+        success_msg: "Test 7 PASSED: filtered LLDP returned {{ lldp_filtered.links | length }} link(s)"
+      when: lldp_filtered is defined and lldp_filtered is not skipped
+
+    # ── Summary ───────────────────────────────────────────────────
+    - name: All cabling_map tests passed
+      ansible.builtin.debug:
+        msg: "All cabling_map tests PASSED for blueprint '{{ blueprint_name }}'"

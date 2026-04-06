@@ -142,7 +142,8 @@ install: build
 	test-system_agents \
 	test-interface_map \
 	test-fabric_settings \
-	test-ztp_device
+	test-ztp_device \
+	test-cabling_map
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -212,6 +213,11 @@ test-interface_map: install
 
 test-fabric_settings: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/fabric_settings.yml
+
+BLUEPRINT_NAME ?=
+test-cabling_map: install
+	@if [ -z "$(BLUEPRINT_NAME)" ]; then echo "ERROR: BLUEPRINT_NAME is required. Usage: make test-cabling_map BLUEPRINT_NAME=<name>"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/cabling_map.yml -e blueprint_name=$(BLUEPRINT_NAME)
 
 test-rollback: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rollback.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
