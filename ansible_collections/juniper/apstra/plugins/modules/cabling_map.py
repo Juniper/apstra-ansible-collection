@@ -14,6 +14,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -100,7 +103,7 @@ options:
       - For C(present), requires a C(links) list of link objects to update.
         Each link object must contain at least an C(id) or C(endpoints) key.
       - For C(gathered), optional keys are C(aggregate_links) (bool) and
-        C(system_node_id) (str) to filter results.
+        C(system_node_id) (str, UUID or system label) to filter results.
       - For C(lldp), optional key C(system_id) (str) to filter by system.
       - For C(diff), optional key C(check_interface_map) (bool, default true)
         to include interface map check.
@@ -131,7 +134,7 @@ EXAMPLES = """
       blueprint: "my-blueprint"
     state: gathered
     body:
-      system_node_id: "abc123"
+      system_node_id: "spine1"      # label or UUID
       aggregate_links: true
   register: cm_filtered
 
@@ -327,7 +330,11 @@ def _update_cabling_map(client_factory, blueprint_id, body):
 
 def _handle_gathered(module, client_factory, blueprint_id):
     """Return the full cabling map from /experience/web/cabling-map."""
-    body = module.params.get("body") or {}
+    body = dict(module.params.get("body") or {})
+    if body.get("system_node_id"):
+        body["system_node_id"] = resolve_system_node_id(
+            client_factory, blueprint_id, body["system_node_id"]
+        )
     links = _get_cabling_map(client_factory, blueprint_id, body)
     return dict(
         changed=False,
