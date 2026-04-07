@@ -181,9 +181,44 @@
             success_msg: "Test 5 PASSED: filtered cabling map returned {{ cm_filtered.links | length }} link(s)"
           when: test_system_node_id is defined
 
-        - name: "Test 5 SKIPPED: no links in blueprint"
+        # ── Test 5b: gathered with system label (name-to-id) ──────
+        # Explicitly tests resolve_system_node_id: pass the system
+        # *label* (e.g. "spine1") instead of a UUID and confirm that
+        # the module resolves it to the same graph node ID and returns
+        # the same links as Test 5.
+        - name: Extract system label for name-to-id test
+          ansible.builtin.set_fact:
+            test_system_label: "{{ cm_result.links[0].endpoints[0].system.label }}"
+          when: cm_result.links | length > 0
+
+        - name: "Test 5b: Gather cabling map filtered by system label (name-to-id)"
+          juniper.apstra.cabling_map:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            state: gathered
+            body:
+              system_node_id: "{{ test_system_label }}"
+            auth_token: "{{ auth.token }}"
+          register: cm_filtered_by_label
+          when: test_system_label is defined
+
+        - name: Verify name-to-id result matches UUID-based result
+          ansible.builtin.assert:
+            that:
+              - cm_filtered_by_label is defined
+              - not cm_filtered_by_label.changed
+              - cm_filtered_by_label.links is defined
+              - cm_filtered_by_label.links | length == cm_filtered.links | length
+            fail_msg: "Test 5b FAILED: label-based filter returned different results than UUID-based filter"
+            success_msg: >-
+              Test 5b PASSED: system label '{{ test_system_label }}' resolved to
+              graph node ID and returned {{ cm_filtered_by_label.links | length }} link(s)
+              (same as UUID-based filter)
+          when: test_system_label is defined
+
+        - name: "Test 5b SKIPPED: no links in blueprint"
           ansible.builtin.debug:
-            msg: "Test 5 SKIPPED: blueprint has no links (new template, no topology assigned)"
+            msg: "Test 5b SKIPPED: blueprint has no links (new template, no topology assigned)"
           when: cm_result.links | length == 0
 
         # ── Test 6: present — patch a link ────────────────────────
