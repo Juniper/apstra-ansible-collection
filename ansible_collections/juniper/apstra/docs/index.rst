@@ -56,6 +56,7 @@ Modules
 * :ansplugin:`configlets module <juniper.apstra.configlets#module>` -- Manage configlets in Apstra
 * :ansplugin:`endpoint_policy module <juniper.apstra.endpoint_policy#module>` -- Manage endpoint policies in Apstra
 * :ansplugin:`generic_systems module <juniper.apstra.generic_systems#module>` -- Manage generic systems in Apstra blueprints
+* :ansplugin:`interconnect_gateway module <juniper.apstra.interconnect_gateway#module>` -- Manage EVPN Interconnect Domains and their Gateways in Apstra blueprints
 * :ansplugin:`resource_group module <juniper.apstra.resource_group#module>` -- Manage resource groups in Apstra
 * :ansplugin:`routing_policy module <juniper.apstra.routing_policy#module>` -- Manage routing policies in Apstra
 * :ansplugin:`resource_pools module <juniper.apstra.resource_pools#module>` -- Manage resource pools in Apstra
@@ -73,6 +74,7 @@ Modules
     configlets_module
     endpoint_policy_module
     generic_systems_module
+    interconnect_gateway_module
     resource_group_module
     routing_policy_module
     resoource_pools_module
