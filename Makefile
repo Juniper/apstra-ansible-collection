@@ -144,7 +144,7 @@ install: build
 	test-fabric_settings \
 	test-ztp_device \
 	test-interconnect_gateway \
-  test-cabling_map
+    test-cabling_map
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False

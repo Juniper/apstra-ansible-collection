@@ -27,7 +27,7 @@ short_description: Manage and inspect the cabling map in an Apstra blueprint
 version_added: "0.2.0"
 
 author:
-  - "Vamsi Gavini (@vgavini)"
+  - "Vijay Gavini (@vgavini)"
 
 description:
   - Provides read and write access to the Apstra cabling map for a blueprint.
