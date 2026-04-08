@@ -292,6 +292,26 @@
           ansible.builtin.set_fact:
             blueprint_id: "{{ bp.id.blueprint }}"
 
+        - name: "Test 5a: List all virtual_infra nodes in blueprint (no id.virtual_infra, no body)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: bp_vim_list
+
+        - name: Verify blueprint virtual_infra list
+          ansible.builtin.assert:
+            that:
+              - not bp_vim_list.changed
+              - bp_vim_list.virtual_infra is defined
+              - bp_vim_list.virtual_infra | type_debug == 'list'
+            fail_msg: "Test 5a FAILED: blueprint virtual_infra list failed"
+            success_msg: >-
+              Test 5a PASSED: blueprint virtual_infra list returned
+              {{ bp_vim_list.virtual_infra | length }} node(s)
+              (0 expected for a fresh blueprint)
+
         - name: "Test 5: Blueprint scope — VIM assignment skipped (no system_id)"
           ansible.builtin.debug:
             msg: >-

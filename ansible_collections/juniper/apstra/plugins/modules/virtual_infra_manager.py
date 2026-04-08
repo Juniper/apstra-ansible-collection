@@ -280,6 +280,20 @@ EXAMPLES = """
     scope: vcenter
     state: absent
 
+# ── Blueprint scope: list all VIM nodes ─────────────────────────
+
+- name: List all virtual_infra nodes in a blueprint
+  juniper.apstra.virtual_infra_manager:
+    id:
+      blueprint: "prod-dc1"
+    state: present
+    auth_token: "{{ auth_token }}"
+  register: bp_vim_list
+
+- name: Show all blueprint VIM nodes
+  ansible.builtin.debug:
+    var: bp_vim_list.virtual_infra
+
 # ── Blueprint scope: assign VIM node to a blueprint ──────────────
 
 - name: Add virtual infra node to blueprint
@@ -336,8 +350,11 @@ virtual_infra_manager:
   type: dict
   returned: on present (global scope)
 virtual_infra:
-  description: The blueprint VIM node details (blueprint scope).
-  type: dict
+  description: >-
+    Blueprint VIM node details (blueprint scope with C(id.virtual_infra)),
+    or list of all virtual_infra nodes (blueprint scope without C(id.virtual_infra)
+    and without body).
+  type: raw
   returned: on present (blueprint scope)
 vcenters:
   description: List of vCenter instances under the VIM (scope=vcenter, no id.vcenter).
@@ -551,6 +568,15 @@ def _handle_blueprint_vim(module, client_factory, id, body, state, result):
     leaf_object_type = singular_leaf_object_type(object_type)  # "virtual_infra"
 
     object_id = id.get(leaf_object_type)
+    collection_id = {k: v for k, v in id.items() if k != leaf_object_type}
+
+    # ── List all virtual_infra nodes (no object_id, no body) ──────────────
+    if object_id is None and not body and state == "present":
+        all_vims = client_factory.object_request(object_type, "get", collection_id)
+        result["changed"] = False
+        result["virtual_infra"] = all_vims if isinstance(all_vims, list) else []
+        result["msg"] = f"gathered {len(result['virtual_infra'])} virtual_infra node(s)"
+        return
 
     # Look up existing object
     current_object = None
@@ -558,9 +584,7 @@ def _handle_blueprint_vim(module, client_factory, id, body, state, result):
         current_object = client_factory.object_request(object_type, "get", id)
     elif body and body.get("system_id"):
         # Search by system_id in the list
-        all_vims = client_factory.object_request(
-            object_type, "get", {k: v for k, v in id.items() if k != leaf_object_type}
-        )
+        all_vims = client_factory.object_request(object_type, "get", collection_id)
         if isinstance(all_vims, list):
             for vim in all_vims:
                 if vim.get("system_id") == body["system_id"]:
