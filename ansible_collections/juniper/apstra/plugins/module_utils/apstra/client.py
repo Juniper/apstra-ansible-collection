@@ -17,6 +17,9 @@ try:
         Client as resourceAllocationClient,
     )
     from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
+    from aos.sdk.api.reference_design._extensions.virtual_infra import (
+        Client as virtualInfraClient,
+    )
     from aos.sdk.graph import Graph
     from aos.sdk.graph import query
 except ImportError as imp_exc:
@@ -329,6 +332,7 @@ class ApstraClientFactory:
             "endpointpolicy_client": endpointPolicyClient,
             "tags_client": tagsClient,
             "resource_allocation_client": resourceAllocationClient,
+            "virtual_infra_client": virtualInfraClient,
         }
 
         # Map client to types. Dotted types are traversed.
@@ -343,6 +347,7 @@ class ApstraClientFactory:
                 "ipv6_pools",
                 "devices",
                 "property_sets",
+                "virtual_infra_managers",
                 "vlan_pools",
                 "vni_pools",
             ],
@@ -367,6 +372,7 @@ class ApstraClientFactory:
             ],
             "tags_client": ["blueprints.tags"],
             "resource_allocation_client": ["blueprints.resource_groups"],
+            "virtual_infra_client": ["blueprints.virtual_infra"],
         }
 
         # Populate the list (and set) of supported objects
@@ -571,6 +577,13 @@ class ApstraClientFactory:
         :return: The resource allocation client instance.
         """
         return self._get_client("resource_allocation_client", resourceAllocationClient)
+
+    def get_virtual_infra_client(self):
+        """
+        Get the virtual infra extension client.
+        :return: The virtual infra client instance.
+        """
+        return self._get_client("virtual_infra_client", virtualInfraClient)
 
     def validate_id(self, object_type, id):
         """
