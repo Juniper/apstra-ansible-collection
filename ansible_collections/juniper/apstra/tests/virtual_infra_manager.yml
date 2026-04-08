@@ -107,6 +107,29 @@
             fail_msg: "Test 3 FAILED: VIM update failed"
             success_msg: "Test 3 PASSED: VIM hostname updated successfully"
 
+        # ── Test 3b: Full replace by UUID (state=replaced / PUT) ─
+        - name: "Test 3b: Full replace VIM definition (state=replaced)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            body:
+              display_name: "{{ vim_display_name }}"
+              type: "vcenter"
+              hostname: "192.0.2.99"
+              username: "replaced-user"
+              password: "ReplacedPass!"
+            state: replaced
+            auth_token: "{{ auth.token }}"
+          register: vim_replaced
+
+        - name: Verify replaced result
+          ansible.builtin.assert:
+            that:
+              - vim_replaced.changed
+              - vim_replaced.msg is search("replaced")
+            fail_msg: "Test 3b FAILED: state=replaced (PUT) failed"
+            success_msg: "Test 3b PASSED: VIM fully replaced via PUT"
+
         # ── Test 4: Name-to-id: update by display_name ───────────
         - name: "Test 4: Update VIM by display_name (name-to-id resolution)"
           juniper.apstra.virtual_infra_manager:
@@ -127,6 +150,32 @@
             success_msg: >-
               Test 4 PASSED: display_name '{{ vim_display_name }}' resolved
               to ID {{ vim_id }} and update succeeded
+
+        # ── Test 4b: scope=vcenter — list vCenters ────────────────
+        # Lists vCenters under the test VIM. The VIM was just created
+        # with dummy credentials and has no real vCenters registered,
+        # so the list should be empty.  This exercises the SDK
+        # list() call path for the /vcenters sub-resource.
+        - name: "Test 4b: List vCenters under VIM (scope=vcenter)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            scope: vcenter
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vcenter_list
+
+        - name: Verify vcenter list result
+          ansible.builtin.assert:
+            that:
+              - not vcenter_list.changed
+              - vcenter_list.vcenters is defined
+              - vcenter_list.vcenters | type_debug == 'list'
+            fail_msg: "Test 4b FAILED: scope=vcenter list failed"
+            success_msg: >-
+              Test 4b PASSED: vcenters list returned
+              {{ vcenter_list.vcenters | length }} vcenter(s)
+              (0 expected for a new dummy VIM)
 
         # ── Test 5: Blueprint scope — list (empty) ────────────────
         # Create a fresh blueprint then list its virtual_infra nodes.

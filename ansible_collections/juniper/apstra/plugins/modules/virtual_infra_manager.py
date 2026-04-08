@@ -97,14 +97,31 @@ options:
         Apstra system identifier; C(agent_id) (str) optional agent ID.
     type: dict
     required: false
+  scope:
+    description:
+      - Selects the sub-resource to operate on within a global VIM.
+      - C(manager) (default) — the VIM itself at
+        C(/api/virtual-infra-managers/{id}).
+      - C(vcenter) — the vCenter instances at
+        C(/api/virtual-infra-managers/{id}/vcenters).  Requires
+        C(id.virtual_infra_manager) to be set.  SDK supports list and
+        create only; individual C({vcenter_id}) operations are not
+        available in the current SDK version.
+    type: str
+    required: false
+    choices: ["manager", "vcenter"]
+    default: "manager"
   state:
     description:
       - Desired state.
-      - C(present) — create or update.
+      - C(present) — create, or partially update (PATCH).
+      - C(replaced) — fully replace an existing VIM (PUT).  Requires
+        C(id.virtual_infra_manager).  Only valid for
+        C(scope=manager) on the global scope.
       - C(absent) — delete.
     type: str
     required: false
-    choices: ["present", "absent"]
+    choices: ["present", "replaced", "absent"]
     default: "present"
 """
 
@@ -159,6 +176,48 @@ EXAMPLES = """
     id:
       virtual_infra_manager: "prod-vcenter"
     state: absent
+
+# ── Global scope: full replace via PUT (state=replaced) ─────────
+
+- name: Fully replace a VIM definition (PUT)
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+    body:
+      display_name: "prod-vcenter"
+      type: "vcenter"
+      hostname: "vcenter3.example.com"
+      username: "administrator@vsphere.local"
+      password: "NewPass123!"
+    state: replaced
+
+# ── Global scope: list vCenters for a VIM (scope=vcenter) ────────
+
+- name: List all vCenters under a VIM
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+    scope: vcenter
+    state: present
+  register: vcenter_list
+
+- name: Show vCenters
+  ansible.builtin.debug:
+    var: vcenter_list.vcenters
+
+# ── Global scope: create a vCenter under a VIM ───────────────────
+
+- name: Add a vCenter instance to a VIM
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+    scope: vcenter
+    body:
+      hostname: "vc1.example.com"
+      username: "admin@vsphere.local"
+      password: "VcPass!"
+    state: present
+  register: vcenter_created
 
 # ── Blueprint scope: assign VIM node to a blueprint ──────────────
 
@@ -219,6 +278,10 @@ virtual_infra:
   description: The blueprint VIM node details (blueprint scope).
   type: dict
   returned: on present (blueprint scope)
+vcenters:
+  description: List of vCenter instances under the VIM (scope=vcenter).
+  type: list
+  returned: on present with scope=vcenter
 changes:
   description: Dictionary of fields that were updated.
   type: dict
@@ -228,6 +291,47 @@ msg:
   type: str
   returned: always
 """
+
+
+# ──────────────────────────────────────────────────────────────────
+#  vCenters sub-scope handler  (scope=vcenter)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _handle_vcenters(module, client_factory, vim_id, body, state, result):
+    """Handle vCenter sub-resource at /api/virtual-infra-managers/{id}/vcenters.
+
+    The current SDK exposes list() and create() only.  Individual
+    /{vcenter_id} operations (GET/PUT/PATCH/DELETE) are not available
+    in this SDK version.
+    """
+    base = client_factory.get_base_client()
+    vc_resource = base.virtual_infra_managers[vim_id].vcenters
+
+    if state == "present":
+        if body:
+            # POST — create a new vCenter under this VIM
+            created = vc_resource.create(body)
+            result["changed"] = True
+            result["response"] = created
+            result["msg"] = "vcenter created successfully"
+        else:
+            # GET — list all vCenters
+            vcenters = vc_resource.list()
+            result["changed"] = False
+            result["vcenters"] = vcenters if vcenters is not None else []
+            result["msg"] = f"gathered {len(result['vcenters'])} vcenter(s)"
+    elif state == "absent":
+        raise ValueError(
+            "scope=vcenter state=absent is not supported: the current SDK "
+            "version does not expose /{vcenter_id} DELETE. "
+            "Use the Apstra UI or raw API to remove individual vCenters."
+        )
+    elif state == "replaced":
+        raise ValueError(
+            "scope=vcenter state=replaced is not supported: the current SDK "
+            "version does not expose /{vcenter_id} PUT."
+        )
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -310,6 +414,22 @@ def _handle_global_vim(module, client_factory, id, body, state, result):
                 retry_delay=3,
             )
 
+    elif state == "replaced":
+        # PUT — full replace of the VIM definition
+        if id is None or leaf_object_type not in id:
+            raise ValueError(
+                f"Must specify '{leaf_object_type}' in id to use state=replaced"
+            )
+        if body is None:
+            raise ValueError("Must specify 'body' to use state=replaced")
+        base = client_factory.get_base_client()
+        updated = base.virtual_infra_managers[id[leaf_object_type]].update(body)
+        result["id"] = id
+        result["changed"] = True
+        if updated:
+            result["response"] = updated
+        result["msg"] = f"{leaf_object_type} replaced (PUT) successfully"
+
     elif state == "absent":
         if id is None or leaf_object_type not in id:
             raise ValueError(
@@ -321,8 +441,6 @@ def _handle_global_vim(module, client_factory, id, body, state, result):
         result["msg"] = f"{leaf_object_type} deleted successfully"
 
 
-# ──────────────────────────────────────────────────────────────────
-#  Blueprint scope handler
 # ──────────────────────────────────────────────────────────────────
 
 
@@ -411,10 +529,16 @@ def main():
     object_module_args = dict(
         id=dict(type="dict", required=False, default=None),
         body=dict(type="dict", required=False),
+        scope=dict(
+            type="str",
+            required=False,
+            choices=["manager", "vcenter"],
+            default="manager",
+        ),
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent"],
+            choices=["present", "replaced", "absent"],
             default="present",
         ),
     )
@@ -430,6 +554,7 @@ def main():
 
         id = dict(module.params.get("id") or {})
         body = module.params.get("body")
+        scope = module.params["scope"]
         state = module.params["state"]
 
         # Resolve blueprint name → ID if present
@@ -439,7 +564,21 @@ def main():
         is_blueprint_scope = "blueprint" in id
 
         if is_blueprint_scope:
+            if scope == "vcenter":
+                raise ValueError(
+                    "scope=vcenter is only valid for global scope "
+                    "(omit 'blueprint' from id)"
+                )
             _handle_blueprint_vim(module, client_factory, id, body, state, result)
+        elif scope == "vcenter":
+            # Resolve VIM name → ID before vcenters call
+            vim_ref = id.get("virtual_infra_manager")
+            if not vim_ref:
+                raise ValueError(
+                    "Must specify 'id.virtual_infra_manager' for scope=vcenter"
+                )
+            vim_id = resolve_virtual_infra_manager_id(client_factory, vim_ref)
+            _handle_vcenters(module, client_factory, vim_id, body, state, result)
         else:
             _handle_global_vim(module, client_factory, id, body, state, result)
 
