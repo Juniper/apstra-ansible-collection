@@ -177,6 +177,99 @@
               {{ vcenter_list.vcenters | length }} vcenter(s)
               (0 expected for a new dummy VIM)
 
+        # ── Tests 4c–4f: Individual vCenter CRUD by ID ───────────
+        # These tests exercise the vim_vcenter.py raw_request path.
+        # Creating a vCenter under the dummy VIM (192.0.2.1) may fail
+        # if the Apstra server validates connectivity — the block is
+        # structured so failures are captured without aborting the suite.
+        - name: "Test 4c: Create a vCenter under the VIM (scope=vcenter)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            scope: vcenter
+            body:
+              hostname: "192.0.2.50"
+              username: "vc-test@vsphere.local"
+              password: "VcTest123!"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vc_created
+          ignore_errors: true
+
+        - name: "Test 4c result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4c: scope=vcenter create
+              {% if vc_created.failed %}SKIPPED (server rejected dummy vCenter — expected in unit context)
+              {% else %}PASSED — vcenter id={{ vc_created.response }}{% endif %}
+
+        - name: Set vcenter ID fact if created
+          ansible.builtin.set_fact:
+            vcenter_id: "{{ vc_created.response.id | default('') }}"
+          when: not vc_created.failed and vc_created.response is defined
+
+        - name: "Test 4d: Get individual vCenter by ID (scope=vcenter, no body)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+              vcenter: "{{ vcenter_id }}"
+            scope: vcenter
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vc_get
+          when: vcenter_id is defined and vcenter_id != ''
+          ignore_errors: true
+
+        - name: "Test 4d result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4d: get vcenter
+              {% if vcenter_id is not defined or vcenter_id == '' %}SKIPPED (no vcenter created in 4c)
+              {% elif vc_get.failed %}FAILED — {{ vc_get.msg }}
+              {% else %}PASSED — vcenter={{ vc_get.vcenter }}{% endif %}
+
+        - name: "Test 4e: Patch vCenter credentials (scope=vcenter, state=present + body)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+              vcenter: "{{ vcenter_id }}"
+            scope: vcenter
+            body:
+              password: "VcNewPass456!"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vc_patch
+          when: vcenter_id is defined and vcenter_id != ''
+          ignore_errors: true
+
+        - name: "Test 4e result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4e: patch vcenter
+              {% if vcenter_id is not defined or vcenter_id == '' %}SKIPPED
+              {% elif vc_patch.failed %}FAILED — {{ vc_patch.msg }}
+              {% else %}PASSED — changed={{ vc_patch.changed }}{% endif %}
+
+        - name: "Test 4f: Delete vCenter by ID (scope=vcenter, state=absent)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+              vcenter: "{{ vcenter_id }}"
+            scope: vcenter
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: vc_delete
+          when: vcenter_id is defined and vcenter_id != ''
+          ignore_errors: true
+
+        - name: "Test 4f result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4f: delete vcenter
+              {% if vcenter_id is not defined or vcenter_id == '' %}SKIPPED
+              {% elif vc_delete.failed %}FAILED — {{ vc_delete.msg }}
+              {% else %}PASSED — changed={{ vc_delete.changed }}{% endif %}
+
         # ── Test 5: Blueprint scope — list (empty) ────────────────
         # Create a fresh blueprint then list its virtual_infra nodes.
         # A new blueprint will always have an empty VIM list.

@@ -18,6 +18,15 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_virtual_infra_manager_id,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter import (
+    list_vim_vcenters,
+    create_vim_vcenter,
+    get_vim_vcenter,
+    update_vim_vcenter,
+    patch_vim_vcenter,
+    delete_vim_vcenter,
+    find_vim_vcenter_by_hostname,
+)
 
 DOCUMENTATION = """
 ---
@@ -82,6 +91,10 @@ options:
         (UUID or display_name) for get/update/delete.
       - B(Blueprint scope) — include C(blueprint) (UUID or label).  Use
         C(virtual_infra) (UUID) for get/update/delete an existing node.
+      - B(vcenter scope) — when C(scope=vcenter), optionally include
+        C(vcenter) (UUID) to target a specific vCenter instance under the
+        VIM.  Omit C(vcenter) to operate on the vCenters collection
+        (list or create).
     type: dict
     required: false
   body:
@@ -103,10 +116,11 @@ options:
       - C(manager) (default) — the VIM itself at
         C(/api/virtual-infra-managers/{id}).
       - C(vcenter) — the vCenter instances at
-        C(/api/virtual-infra-managers/{id}/vcenters).  Requires
-        C(id.virtual_infra_manager) to be set.  SDK supports list and
-        create only; individual C({vcenter_id}) operations are not
-        available in the current SDK version.
+        C(/api/virtual-infra-managers/{id}/vcenters) and
+        C(/api/virtual-infra-managers/{id}/vcenters/{vcenter_id}).
+        Requires C(id.virtual_infra_manager) to be set.  Supports full
+        CRUD — list, create, get, PATCH, PUT, and delete — via direct
+        API calls.
     type: str
     required: false
     choices: ["manager", "vcenter"]
@@ -115,9 +129,9 @@ options:
     description:
       - Desired state.
       - C(present) — create, or partially update (PATCH).
-      - C(replaced) — fully replace an existing VIM (PUT).  Requires
-        C(id.virtual_infra_manager).  Only valid for
-        C(scope=manager) on the global scope.
+      - C(replaced) — fully replace an existing object (PUT).  For
+        C(scope=manager) requires C(id.virtual_infra_manager).  For
+        C(scope=vcenter) requires C(id.vcenter).
       - C(absent) — delete.
     type: str
     required: false
@@ -219,6 +233,53 @@ EXAMPLES = """
     state: present
   register: vcenter_created
 
+# ── Global scope: get a specific vCenter by ID ────────────────────
+
+- name: Get individual vCenter details
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+      vcenter: "{{ vcenter_created.id.vcenter }}"
+    scope: vcenter
+    state: present
+  register: vc_detail
+
+# ── Global scope: patch a specific vCenter ────────────────────────
+
+- name: Update vCenter credentials (PATCH)
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+      vcenter: "{{ vcenter_created.id.vcenter }}"
+    scope: vcenter
+    body:
+      password: "NewVcPass!"
+    state: present
+
+# ── Global scope: replace a specific vCenter (PUT) ────────────────
+
+- name: Fully replace a vCenter definition (PUT)
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+      vcenter: "{{ vcenter_created.id.vcenter }}"
+    scope: vcenter
+    body:
+      hostname: "vc2.example.com"
+      username: "admin@vsphere.local"
+      password: "VcPass!"
+    state: replaced
+
+# ── Global scope: delete a specific vCenter ───────────────────────
+
+- name: Remove a vCenter from the VIM
+  juniper.apstra.virtual_infra_manager:
+    id:
+      virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
+      vcenter: "{{ vcenter_created.id.vcenter }}"
+    scope: vcenter
+    state: absent
+
 # ── Blueprint scope: assign VIM node to a blueprint ──────────────
 
 - name: Add virtual infra node to blueprint
@@ -279,9 +340,13 @@ virtual_infra:
   type: dict
   returned: on present (blueprint scope)
 vcenters:
-  description: List of vCenter instances under the VIM (scope=vcenter).
+  description: List of vCenter instances under the VIM (scope=vcenter, no id.vcenter).
   type: list
-  returned: on present with scope=vcenter
+  returned: on present with scope=vcenter and no id.vcenter
+vcenter:
+  description: A single vCenter instance details (scope=vcenter with id.vcenter).
+  type: dict
+  returned: on present with scope=vcenter and id.vcenter and no body
 changes:
   description: Dictionary of fields that were updated.
   type: dict
@@ -301,37 +366,73 @@ msg:
 def _handle_vcenters(module, client_factory, vim_id, body, state, result):
     """Handle vCenter sub-resource at /api/virtual-infra-managers/{id}/vcenters.
 
-    The current SDK exposes list() and create() only.  Individual
-    /{vcenter_id} operations (GET/PUT/PATCH/DELETE) are not available
-    in this SDK version.
-    """
-    base = client_factory.get_base_client()
-    vc_resource = base.virtual_infra_managers[vim_id].vcenters
+    Collection operations (list / create) are performed against
+    /vcenters.  Individual operations (GET/PATCH/PUT/DELETE) are
+    performed against /vcenters/{vcenter_id} via direct API calls
+    using vim_vcenter module_utils (SDK gap fill).
 
-    if state == "present":
-        if body:
-            # POST — create a new vCenter under this VIM
-            created = vc_resource.create(body)
-            result["changed"] = True
-            result["response"] = created
-            result["msg"] = "vcenter created successfully"
+    Routing:
+      id.vcenter absent + no body  → list_vim_vcenters
+      id.vcenter absent + body     → create_vim_vcenter
+      id.vcenter present + no body + state=present  → get_vim_vcenter
+      id.vcenter present + body    + state=present  → patch_vim_vcenter
+      id.vcenter present + body    + state=replaced → update_vim_vcenter
+      id.vcenter present           + state=absent   → delete_vim_vcenter
+    """
+    vcenter_id = (module.params.get("id") or {}).get("vcenter")
+
+    if vcenter_id is None:
+        # ── Collection operations ──────────────────────────────────
+        if state == "present":
+            if body:
+                # POST — create a new vCenter under this VIM
+                created = create_vim_vcenter(client_factory, vim_id, body)
+                result["changed"] = True
+                result["response"] = created
+                result["msg"] = "vcenter created successfully"
+            else:
+                # GET — list all vCenters
+                vcenters = list_vim_vcenters(client_factory, vim_id)
+                result["changed"] = False
+                result["vcenters"] = vcenters if vcenters is not None else []
+                result["msg"] = f"gathered {len(result['vcenters'])} vcenter(s)"
         else:
-            # GET — list all vCenters
-            vcenters = vc_resource.list()
-            result["changed"] = False
-            result["vcenters"] = vcenters if vcenters is not None else []
-            result["msg"] = f"gathered {len(result['vcenters'])} vcenter(s)"
-    elif state == "absent":
-        raise ValueError(
-            "scope=vcenter state=absent is not supported: the current SDK "
-            "version does not expose /{vcenter_id} DELETE. "
-            "Use the Apstra UI or raw API to remove individual vCenters."
-        )
-    elif state == "replaced":
-        raise ValueError(
-            "scope=vcenter state=replaced is not supported: the current SDK "
-            "version does not expose /{vcenter_id} PUT."
-        )
+            raise ValueError(
+                "scope=vcenter state=absent/replaced requires id.vcenter to "
+                "target a specific vCenter UUID."
+            )
+    else:
+        # ── Individual vcenter operations ─────────────────────────
+        if state == "present":
+            if body:
+                # PATCH — partial update
+                updated = patch_vim_vcenter(client_factory, vim_id, vcenter_id, body)
+                result["changed"] = True
+                result["response"] = updated
+                result["id"] = {"vcenter": vcenter_id}
+                result["msg"] = "vcenter patched successfully"
+            else:
+                # GET — fetch single vcenter
+                vcenter = get_vim_vcenter(client_factory, vim_id, vcenter_id)
+                result["changed"] = False
+                result["vcenter"] = vcenter
+                result["id"] = {"vcenter": vcenter_id}
+                result["msg"] = "vcenter retrieved"
+        elif state == "replaced":
+            if not body:
+                raise ValueError(
+                    "scope=vcenter state=replaced requires a body (PUT payload)."
+                )
+            updated = update_vim_vcenter(client_factory, vim_id, vcenter_id, body)
+            result["changed"] = True
+            result["response"] = updated
+            result["id"] = {"vcenter": vcenter_id}
+            result["msg"] = "vcenter replaced (PUT) successfully"
+        elif state == "absent":
+            delete_vim_vcenter(client_factory, vim_id, vcenter_id)
+            result["changed"] = True
+            result["id"] = {"vcenter": vcenter_id}
+            result["msg"] = "vcenter deleted successfully"
 
 
 # ──────────────────────────────────────────────────────────────────
