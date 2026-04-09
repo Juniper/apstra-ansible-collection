@@ -18,6 +18,12 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_interconnect_domain_id,
     resolve_system_node_id,
+    resolve_virtual_network_id,
+    resolve_security_zone_id,
+    resolve_routing_policy_id,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_dci import (
+    patch_interconnect_domain_raw,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interconnect_domain import (
     get_interconnect_domain,
@@ -353,6 +359,46 @@ def _find_interconnect_gateway_by_name(client_factory, object_type, id, gw_name)
 
 
 # ──────────────────────────────────────────────────────────────────
+#  DCI raw-PATCH builder
+# ──────────────────────────────────────────────────────────────────
+
+
+def _build_dci_patch(client_factory, blueprint_id, raw_fields):
+    """Build a raw PATCH payload for DCI-extension fields.
+
+    Resolves labels → node IDs for security_zones and virtual_networks
+    sub-keys, then returns the SDK-style payload for
+    ``patch_interconnect_domain_raw``.
+    """
+    payload = {}
+
+    # security_zones: { "<sz_label_or_id>": { routing_policy_id, ... } }
+    if "security_zones" in raw_fields:
+        resolved = {}
+        for sz_key, sz_cfg in raw_fields["security_zones"].items():
+            sz_id = resolve_security_zone_id(client_factory, blueprint_id, sz_key)
+            entry = dict(sz_cfg) if isinstance(sz_cfg, dict) else {}
+            # Resolve routing_policy_id label → ID
+            if "routing_policy_id" in entry:
+                entry["routing_policy_id"] = resolve_routing_policy_id(
+                    client_factory, blueprint_id, entry["routing_policy_id"]
+                )
+            resolved[sz_id] = entry
+        payload["interconnect_security_zones"] = resolved
+
+    # virtual_networks: { "<vn_label_or_id>": { l2, l3, translation_vni } }
+    if "virtual_networks" in raw_fields:
+        resolved = {}
+        for vn_key, vn_cfg in raw_fields["virtual_networks"].items():
+            vn_id = resolve_virtual_network_id(client_factory, blueprint_id, vn_key)
+            entry = dict(vn_cfg) if isinstance(vn_cfg, dict) else {}
+            resolved[vn_id] = entry
+        payload["interconnect_virtual_networks"] = resolved
+
+    return payload
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Domain logic
 # ──────────────────────────────────────────────────────────────────
 
@@ -386,6 +432,14 @@ def _run_domain(module, client_factory, result):
             domain_id = found["id"]
             id[leaf_object_type] = domain_id
             current_object = found
+
+    # Separate DCI-extension fields that require raw PATCH
+    raw_patch_fields = {}
+    if body:
+        if "security_zones" in body:
+            raw_patch_fields["security_zones"] = body.pop("security_zones")
+        if "virtual_networks" in body:
+            raw_patch_fields["virtual_networks"] = body.pop("virtual_networks")
 
     if state == "present":
         if current_object:
@@ -421,8 +475,10 @@ def _run_domain(module, client_factory, result):
                 result["changed"] = False
                 result["msg"] = f"No changes specified for {leaf_object_type}"
         else:
-            if body is None:
+            if body is None and not raw_patch_fields:
                 raise ValueError(f"Must specify 'body' to create a {leaf_object_type}")
+            if body is None:
+                body = {}
             created = create_interconnect_domain(client_factory, blueprint_id, body)
             if isinstance(created, dict) and "id" in created:
                 domain_id = created["id"]
@@ -432,13 +488,56 @@ def _run_domain(module, client_factory, result):
             result["response"] = created
             result["msg"] = f"{leaf_object_type} created successfully"
 
+        # Apply raw PATCH for DCI-extension fields (L3, VN)
+        if raw_patch_fields and domain_id:
+            patch_payload = _build_dci_patch(
+                client_factory, blueprint_id, raw_patch_fields
+            )
+            if patch_payload:
+                # Compare against current state to avoid no-op PATCHes.
+                # The current object may contain extra read-only fields
+                # (routing_policy_label, security_zone_id, vrf_name, …)
+                # so we only check the fields we intend to set.
+                cur = (
+                    get_interconnect_domain(client_factory, blueprint_id, domain_id)
+                    or {}
+                )
+                needs_patch = False
+                for k, desired in patch_payload.items():
+                    current = cur.get(k, {})
+                    if isinstance(desired, dict) and isinstance(current, dict):
+                        for sub_key, sub_desired in desired.items():
+                            sub_current = current.get(sub_key, {})
+                            if isinstance(sub_desired, dict) and isinstance(
+                                sub_current, dict
+                            ):
+                                for field, val in sub_desired.items():
+                                    if sub_current.get(field) != val:
+                                        needs_patch = True
+                                        break
+                                if needs_patch:
+                                    break
+                            elif sub_current != sub_desired:
+                                needs_patch = True
+                                break
+                        if needs_patch:
+                            break
+                    elif current != desired:
+                        needs_patch = True
+                        break
+                if needs_patch:
+                    patch_interconnect_domain_raw(
+                        client_factory, blueprint_id, domain_id, patch_payload
+                    )
+                    result["changed"] = True
+                    result.setdefault("changes", {})
+                    result["changes"].update(patch_payload)
+                    result["msg"] = f"{leaf_object_type} updated successfully"
+
         # Return the final object state
-        if current_object is not None:
-            result[leaf_object_type] = current_object
-        elif domain_id:
-            final_obj = get_interconnect_domain(client_factory, blueprint_id, domain_id)
-            if final_obj:
-                result[leaf_object_type] = final_obj
+        final_obj = get_interconnect_domain(client_factory, blueprint_id, domain_id)
+        if final_obj:
+            result[leaf_object_type] = final_obj
 
     elif state == "absent":
         # Allow delete by label: look up domain_id from body.label when
