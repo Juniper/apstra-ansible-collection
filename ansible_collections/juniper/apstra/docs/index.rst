@@ -57,6 +57,7 @@ Modules
 * :ansplugin:`endpoint_policy module <juniper.apstra.endpoint_policy#module>` -- Manage endpoint policies in Apstra
 * :ansplugin:`generic_systems module <juniper.apstra.generic_systems#module>` -- Manage generic systems in Apstra blueprints
 * :ansplugin:`iba_probes module <juniper.apstra.iba_probes#module>` -- Manage IBA probes and dashboards in Apstra
+* :ansplugin:`interconnect_gateway module <juniper.apstra.interconnect_gateway#module>` -- Manage EVPN Interconnect Domains and their Gateways in Apstra blueprints
 * :ansplugin:`resource_group module <juniper.apstra.resource_group#module>` -- Manage resource groups in Apstra
 * :ansplugin:`routing_policy module <juniper.apstra.routing_policy#module>` -- Manage routing policies in Apstra
 * :ansplugin:`resource_pools module <juniper.apstra.resource_pools#module>` -- Manage resource pools in Apstra
@@ -75,6 +76,7 @@ Modules
     endpoint_policy_module
     generic_systems_module
     iba_probes_module
+    interconnect_gateway_module
     resource_group_module
     routing_policy_module
     resoource_pools_module

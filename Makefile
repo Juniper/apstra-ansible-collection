@@ -143,7 +143,9 @@ install: build
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
-	test-iba_probes
+	test-iba_probes \
+	test-interconnect_gateway \
+  test-cabling_map
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -213,6 +215,12 @@ test-interface_map: install
 
 test-fabric_settings: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/fabric_settings.yml
+
+test-cabling_map: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/cabling_map.yml
+
+test-interconnect_gateway: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml
 
 test-rollback: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rollback.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
@@ -297,7 +305,7 @@ delete-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-interface_map test-fabric_settings test-ztp_device test-iba_probes
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes
 
 # Integration Tests
 .PHONY: test-integration-property_set

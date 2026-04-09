@@ -896,3 +896,58 @@ def _resolve_primitive_attrs(client_factory, blueprint_id, config):
             for _child_name, child_config in value.items():
                 if isinstance(child_config, dict):
                     _resolve_primitive_attrs(client_factory, blueprint_id, child_config)
+
+
+# ──────────────────────────────────────────────────────────────────
+#  EVPN Interconnect Domain resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_interconnect_domain_id(client_factory, blueprint_id, domain_ref):
+    """Resolve an EVPN interconnect domain reference (ID or label) to its ID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param domain_ref: The domain ID or label.
+    :return: The resolved domain ID string.
+    :raises ValueError: If no matching domain is found.
+    """
+    if not domain_ref:
+        return domain_ref
+
+    # Deferred import to avoid circular dependencies at module load time
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interconnect_domain import (
+        list_interconnect_domains,
+    )
+
+    domains = list_interconnect_domains(client_factory, blueprint_id)
+
+    # Exact ID match (domain IDs are UUIDs or short strings)
+    for domain in domains:
+        if domain.get("id") == domain_ref:
+            return domain_ref
+
+    # If it already looks like a UUID and didn't match, fast-fail with helpful error
+    if _is_uuid(domain_ref):
+        available = [d.get("label", "") for d in domains]
+        raise ValueError(
+            f"Interconnect domain with ID '{domain_ref}' not found in blueprint. "
+            f"Available: {available}"
+        )
+
+    # Exact label match
+    for domain in domains:
+        if domain.get("label") == domain_ref:
+            return domain["id"]
+
+    # Case-insensitive label fallback
+    ref_lower = domain_ref.lower()
+    for domain in domains:
+        if (domain.get("label") or "").lower() == ref_lower:
+            return domain["id"]
+
+    available = [d.get("label", "") for d in domains]
+    raise ValueError(
+        f"Interconnect domain '{domain_ref}' not found in blueprint. "
+        f"Available: {available}"
+    )
