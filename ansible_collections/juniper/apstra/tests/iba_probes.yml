@@ -230,6 +230,78 @@
         auth_token: "{{ auth.token }}"
       register: probe_mac
 
+    - name: "CREATE — Device Environmental Checks probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: environmental_data
+          label: "Test - Device Environmental Checks"
+        auth_token: "{{ auth.token }}"
+      register: probe_env
+
+    - name: Verify Device Environmental Checks probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_env.changed == true
+          - probe_env.id.probe is defined
+        fail_msg: "Device Environmental Checks probe creation failed"
+
+    - name: "CREATE — Device Traffic probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: traffic
+          label: "Test - Device Traffic"
+        auth_token: "{{ auth.token }}"
+      register: probe_traffic
+
+    - name: Verify Device Traffic probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_traffic.changed == true
+          - probe_traffic.id.probe is defined
+        fail_msg: "Device Traffic probe creation failed"
+
+    - name: "CREATE — Drain Traffic Anomaly probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: drain_node_traffic_anomaly
+          label: "Test - Drain Traffic Anomaly"
+        auth_token: "{{ auth.token }}"
+      register: probe_drain
+
+    - name: Verify Drain Traffic Anomaly probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_drain.changed == true
+          - probe_drain.id.probe is defined
+        fail_msg: "Drain Traffic Anomaly probe creation failed"
+
+    - name: "CREATE — MLAG Imbalance probe"
+      juniper.apstra.iba_probes:
+        type: predefined
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        body:
+          predefined_probe: mlag_imbalance
+          label: "Test - MLAG Imbalance"
+        auth_token: "{{ auth.token }}"
+      register: probe_mlag
+
+    - name: Verify MLAG Imbalance probe creation
+      ansible.builtin.assert:
+        that:
+          - probe_mlag.changed == true
+          - probe_mlag.id.probe is defined
+        fail_msg: "MLAG Imbalance probe creation failed"
+
     - name: Show all created probe IDs
       ansible.builtin.debug:
         msg:
@@ -242,6 +314,10 @@
           - "ECMP: {{ probe_ecmp.id.probe }}"
           - "ESI: {{ probe_esi.id.probe }}"
           - "MAC: {{ probe_mac.id.probe }}"
+          - "Environmental: {{ probe_env.id.probe }}"
+          - "Traffic: {{ probe_traffic.id.probe }}"
+          - "Drain: {{ probe_drain.id.probe }}"
+          - "MLAG: {{ probe_mlag.id.probe }}"
 
     # ═════════════════════════════════════════════════════════════════
     # READ — Verify probes exist by re-fetching
@@ -571,6 +647,42 @@
         id:
           blueprint: "{{ bp.id.blueprint }}"
           probe: "{{ probe_mac.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove Device Environmental Checks probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_env.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove Device Traffic probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_traffic.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove Drain Traffic Anomaly probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_drain.id.probe }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: "DELETE — Remove MLAG Imbalance probe"
+      juniper.apstra.iba_probes:
+        type: probe
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          probe: "{{ probe_mlag.id.probe }}"
         state: absent
         auth_token: "{{ auth.token }}"
 
