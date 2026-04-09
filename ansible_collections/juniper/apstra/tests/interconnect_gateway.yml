@@ -1,0 +1,414 @@
+---
+- name: Test interconnect_gateway module (domain + gateway)
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_icgw_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ---- Create blueprint ----
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ---- Get leaf node IDs for local_gw_nodes ----
+
+    - name: Get blueprint nodes
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - "blueprints.nodes"
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+      register: bp_facts
+
+    - name: Extract leaf node IDs
+      ansible.builtin.set_fact:
+        leaf_nodes: >-
+          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.id')
+             | list }}
+
+    - name: Extract leaf node labels
+      ansible.builtin.set_fact:
+        leaf_labels: >-
+          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.label')
+             | list }}
+
+    - name: Show leaf node IDs and labels
+      ansible.builtin.debug:
+        msg: "IDs: {{ leaf_nodes }} | Labels: {{ leaf_labels }}"
+
+    # ==================================================================
+    #  DOMAIN TESTS (type: domain)
+    # ==================================================================
+
+    # ---- Create interconnect domain ----
+
+    - name: Create interconnect domain
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id: "{{ bp.id }}"
+        body:
+          label: "test_icd_1"
+          route_target: "65500:100"
+        auth_token: "{{ auth.token }}"
+      register: icd
+
+    - name: Show created interconnect domain
+      ansible.builtin.debug:
+        var: icd
+
+    - name: Verify interconnect domain was created
+      ansible.builtin.assert:
+        that:
+          - icd.changed
+          - icd.id.evpn_interconnect_group is defined
+        fail_msg: "Interconnect domain was not created"
+
+    # ---- Domain idempotency check ----
+
+    - name: Create interconnect domain (no change)
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id: "{{ bp.id }}"
+        body:
+          label: "test_icd_1"
+          route_target: "65500:100"
+        auth_token: "{{ auth.token }}"
+      register: icd_nochange
+
+    - name: Verify domain idempotency
+      ansible.builtin.assert:
+        that:
+          - not icd_nochange.changed
+        fail_msg: "Interconnect domain should not have changed"
+
+    # ---- Update domain route_target ----
+
+    - name: Update interconnect domain route_target
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          evpn_interconnect_group: "{{ icd.id.evpn_interconnect_group }}"
+        body:
+          label: "test_icd_1"
+          route_target: "65500:101"
+        auth_token: "{{ auth.token }}"
+      register: icd_update
+
+    - name: Verify interconnect domain was updated
+      ansible.builtin.assert:
+        that:
+          - icd_update.changed
+        fail_msg: "Interconnect domain was not updated"
+
+    # ---- Update domain by label lookup ----
+
+    - name: Update interconnect domain by label lookup
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id: "{{ bp.id }}"
+        body:
+          label: "test_icd_1"
+          route_target: "65500:102"
+        auth_token: "{{ auth.token }}"
+      register: icd_update_by_label
+
+    - name: Verify domain update by label
+      ansible.builtin.assert:
+        that:
+          - icd_update_by_label.changed
+        fail_msg: "Interconnect domain update by label failed"
+
+    # ---- Create second domain with ESI MAC ----
+
+    - name: Create second interconnect domain with ESI MAC
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id: "{{ bp.id }}"
+        body:
+          label: "test_icd_2"
+          route_target: "65500:200"
+          esi_mac: "02:00:00:00:00:01"
+        auth_token: "{{ auth.token }}"
+      register: icd_2
+
+    - name: Verify second interconnect domain was created
+      ansible.builtin.assert:
+        that:
+          - icd_2.changed
+          - icd_2.id.evpn_interconnect_group is defined
+        fail_msg: "Second interconnect domain was not created"
+
+    # ---- Delete second domain by label (name-resolution test) ----
+
+    - name: Delete second interconnect domain by label (no explicit ID)
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id: "{{ bp.id }}"
+        body:
+          label: "test_icd_2"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: icd_2_delete_by_label
+
+    - name: Verify second domain deleted by label
+      ansible.builtin.assert:
+        that:
+          - icd_2_delete_by_label.changed
+        fail_msg: "Interconnect domain delete-by-label failed"
+        success_msg: "PASSED: Interconnect domain deleted by label (no explicit ID)"
+
+    # ==================================================================
+    #  GATEWAY TESTS (type: gateway — the default)
+    # ==================================================================
+
+    # ---- Create interconnect gateway (using raw node IDs + domain UUID) ----
+
+    - name: Create interconnect gateway (raw IDs)
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_1"
+          gw_ip: "10.99.1.1"
+          gw_asn: 65500
+          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
+          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw
+
+    - name: Show created interconnect gateway
+      ansible.builtin.debug:
+        var: icgw
+
+    - name: Verify interconnect gateway was created
+      ansible.builtin.assert:
+        that:
+          - icgw.changed
+          - icgw.id.remote_gateway is defined
+        fail_msg: "Interconnect gateway was not created"
+
+    # ---- Gateway idempotency check ----
+
+    - name: Create interconnect gateway (no change)
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_1"
+          gw_ip: "10.99.1.1"
+          gw_asn: 65500
+          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
+          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_nochange
+
+    - name: Verify gateway idempotency
+      ansible.builtin.assert:
+        that:
+          - not icgw_nochange.changed
+        fail_msg: "Interconnect gateway should not have changed"
+
+    # ---- Update gateway IP ----
+
+    - name: Update interconnect gateway IP
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ icgw.id.remote_gateway }}"
+        body:
+          gw_name: "test_icgw_1"
+          gw_ip: "10.99.1.2"
+          gw_asn: 65500
+          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
+          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_update
+
+    - name: Verify interconnect gateway was updated
+      ansible.builtin.assert:
+        that:
+          - icgw_update.changed
+        fail_msg: "Interconnect gateway was not updated"
+
+    # ---- Update gateway by name lookup ----
+
+    - name: Update interconnect gateway by name lookup
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_1"
+          gw_ip: "10.99.1.3"
+          gw_asn: 65500
+          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
+          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_update_by_name
+
+    - name: Verify gateway update by name
+      ansible.builtin.assert:
+        that:
+          - icgw_update_by_name.changed
+        fail_msg: "Interconnect gateway update by name lookup failed"
+
+    # ---- Name-resolution: create gateway using node labels + domain label ----
+
+    - name: "Name-resolution test: Create gateway using node labels and domain label"
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_labels"
+          gw_ip: "10.99.2.1"
+          gw_asn: 65501
+          evpn_interconnect_group_id: "test_icd_1"
+          local_gw_nodes: "{{ leaf_labels[:2] }}"
+          ttl: 3
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_by_labels
+
+    - name: Verify gateway created via label resolution
+      ansible.builtin.assert:
+        that:
+          - icgw_by_labels.changed
+          - icgw_by_labels.id.remote_gateway is defined
+        fail_msg: "Name-resolution gateway creation failed"
+        success_msg: "PASSED: Gateway created using node labels and domain label"
+
+    - name: "Name-resolution idempotency: Re-run with same labels (no change)"
+      juniper.apstra.interconnect_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_icgw_labels"
+          gw_ip: "10.99.2.1"
+          gw_asn: 65501
+          evpn_interconnect_group_id: "test_icd_1"
+          local_gw_nodes: "{{ leaf_labels[:2] }}"
+          ttl: 3
+          keepalive_timer: 10
+          holdtime_timer: 30
+        auth_token: "{{ auth.token }}"
+      register: icgw_by_labels_nochange
+
+    - name: Verify label-resolved gateway is idempotent
+      ansible.builtin.assert:
+        that:
+          - not icgw_by_labels_nochange.changed
+        fail_msg: "Name-resolution gateway should be idempotent"
+        success_msg: "PASSED: Label-resolved gateway is idempotent"
+
+    - name: Delete name-resolution test gateway
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ icgw_by_labels.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: icgw_by_labels_delete
+
+    - name: Verify name-resolution gateway was deleted
+      ansible.builtin.assert:
+        that:
+          - icgw_by_labels_delete.changed
+        fail_msg: "Name-resolution gateway was not deleted"
+
+    # ==================================================================
+    #  CLEANUP (gateway first, then domain, then blueprint)
+    # ==================================================================
+
+    - name: Delete interconnect gateway (by explicit ID)
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          remote_gateway: "{{ icgw.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: icgw_delete
+
+    - name: Verify interconnect gateway was deleted
+      ansible.builtin.assert:
+        that:
+          - icgw_delete.changed
+        fail_msg: "Interconnect gateway was not deleted"
+
+    - name: Delete first interconnect domain (by explicit ID)
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+          evpn_interconnect_group: "{{ icd.id.evpn_interconnect_group }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: icd_delete
+
+    - name: Verify first interconnect domain was deleted
+      ansible.builtin.assert:
+        that:
+          - icd_delete.changed
+        fail_msg: "First interconnect domain was not deleted"
+    # NOTE: icd_2 (test_icd_2) was already deleted by label in the name-resolution
+    # test above \u2014 no separate cleanup needed here.
+
+    - name: Unlock blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_delete
+
+    - name: Verify blueprint was deleted
+      ansible.builtin.assert:
+        that:
+          - bp_delete.changed
+        fail_msg: "Blueprint was not deleted"
