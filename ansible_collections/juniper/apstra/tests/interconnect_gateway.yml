@@ -26,6 +26,9 @@
     # VNI pool (must already exist on the Apstra instance)
     vni_pool_name: "Default-10000-20000"
 
+    # IP pool for RZ leaf loopback assignment (must already exist)
+    loopback_pool_name: "Private-172.16.0.0/12"
+
     # Routing Zone / VRF (same label both BPs)
     vrf_label: "dci-test-red"
 
@@ -266,6 +269,47 @@
     - name: Show VRF results
       ansible.builtin.debug:
         msg: "BP0 VRF={{ bp0_vrf.id }} | BP1 VRF={{ bp1_vrf.id }}"
+
+    # ==============================================================
+    #  STEP 4b: Assign RZ leaf loopback IP pools for the VRFs
+    # ==============================================================
+
+    - name: "BP0: Assign RZ leaf loopback IP pool"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          group_type: "ip"
+          group_name: "sz:{{ bp0_vrf.id.security_zone }},leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ loopback_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_rz_loopback
+
+    - name: "BP1: Assign RZ leaf loopback IP pool"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          group_type: "ip"
+          group_name: "sz:{{ bp1_vrf.id.security_zone }},leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ loopback_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_rz_loopback
+
+    - name: Verify RZ loopback IP pools assigned
+      ansible.builtin.assert:
+        that:
+          - bp0_rz_loopback is not failed
+          - bp1_rz_loopback is not failed
+        fail_msg: "Failed to assign RZ leaf loopback IP pools"
+
+    - name: Show RZ loopback results
+      ansible.builtin.debug:
+        msg: "BP0 RZ loopback: changed={{ bp0_rz_loopback.changed }} | BP1 RZ loopback: changed={{ bp1_rz_loopback.changed }}"
 
     # ==============================================================
     #  STEP 5: Create Virtual Networks on both BPs
