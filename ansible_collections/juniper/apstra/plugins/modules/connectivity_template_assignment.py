@@ -89,7 +89,8 @@ options:
     suboptions:
       blueprint:
         description:
-          - The ID of the Apstra blueprint.
+          - The ID or label of the Apstra blueprint.
+          - C(blueprint_id) is accepted as an alias for this key.
         required: true
         type: str
       ct_id:
@@ -315,7 +316,7 @@ def main():
 
         # Validate params
         id_param = module.params["id"] or {}
-        blueprint_id = id_param.get("blueprint")
+        blueprint_id = id_param.get("blueprint") or id_param.get("blueprint_id")
         if blueprint_id:
             blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
             id_param["blueprint"] = blueprint_id
