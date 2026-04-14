@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
+import re
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
@@ -95,7 +96,9 @@ options:
         type: str
       ct_id:
         description:
-          - The UUID of the Connectivity Template to assign.
+          - The UUID or name (label) of the Connectivity Template to assign.
+          - If a non-UUID value is supplied it is automatically resolved
+            to a UUID by looking up the CT name in the blueprint.
           - Either C(ct_id) or C(ct_name) must be provided.
         required: false
         type: str
@@ -226,6 +229,16 @@ msg:
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_uuid(value):
+    """Return True if *value* looks like a UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)."""
+    return bool(_UUID_RE.match(str(value))) if value else False
+
 
 def _find_ct_by_name(ep_client, blueprint_id, name):
     """
@@ -332,6 +345,11 @@ def main():
         )
 
         # ── Resolve CT ID ─────────────────────────────────────────────
+        # If ct_id is provided but is not a UUID, treat it as a name.
+        if ct_id and not _is_uuid(ct_id):
+            ct_name = ct_name or ct_id
+            ct_id = None
+
         if not ct_id:
             if ct_name:
                 ct_id = _find_ct_by_name(ep_client, blueprint_id, ct_name)
@@ -341,7 +359,7 @@ def main():
                         f"not found in blueprint '{blueprint_id}'"
                     )
             else:
-                raise ValueError("Either 'ct_id' or 'ct_name' is required")
+                raise ValueError("Either 'ct_id' (UUID) or 'ct_name' is required")
 
         if not application_point_ids:
             result["msg"] = "No application_point_ids specified, nothing to do"
