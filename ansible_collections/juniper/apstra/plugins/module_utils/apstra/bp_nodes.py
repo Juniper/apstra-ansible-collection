@@ -207,6 +207,74 @@ def node_needs_update(current_node, desired):
     return changes
 
 
+def assign_nodes_by_label(client_factory, blueprint_id, assignment, deploy_mode=None):
+    """Bulk-assign physical device serials to blueprint nodes by label.
+
+    Resolves each node label to its UUID, compares current vs desired
+    state, and patches only those nodes that actually need updating
+    (idempotent).
+
+    Args:
+        client_factory: ``ApstraClientFactory``.
+        blueprint_id: Blueprint UUID.
+        assignment: Dict mapping node label (e.g. ``"spine1"``) to
+            device serial number (``system_id``).
+        deploy_mode: Optional deploy-mode string to apply to every
+            assigned node (``"deploy"`` / ``"undeploy"`` / ``"drain"``
+            / ``"ready"``).  Omitted when *None*.
+
+    Returns:
+        dict with keys:
+            - ``changed`` (bool): True if any node was patched.
+            - ``nodes_updated`` (dict): ``{label: final_node_dict}``
+              for every node that was actually patched.
+            - ``nodes_unchanged`` (list): Labels already at desired
+              state (no patch needed).
+            - ``labels_not_found`` (list): Labels not present in the
+              blueprint.  Non-empty means a caller error.
+    """
+    all_nodes = list_nodes(client_factory, blueprint_id)
+
+    # Build label → node_id map
+    label_to_id = {
+        props.get("label"): node_id
+        for node_id, props in all_nodes.items()
+        if props.get("label")
+    }
+
+    nodes_updated = {}
+    nodes_unchanged = []
+    labels_not_found = []
+
+    for label, serial in assignment.items():
+        node_id = label_to_id.get(label)
+        if node_id is None:
+            labels_not_found.append(label)
+            continue
+
+        current = all_nodes[node_id]
+
+        desired = {"system_id": serial}
+        if deploy_mode is not None:
+            desired["deploy_mode"] = deploy_mode
+
+        changes = node_needs_update(current, desired)
+        if not changes:
+            nodes_unchanged.append(label)
+            continue
+
+        patch_node(client_factory, blueprint_id, node_id, changes)
+        final = get_node(client_factory, blueprint_id, node_id)
+        nodes_updated[label] = final
+
+    return dict(
+        changed=bool(nodes_updated),
+        nodes_updated=nodes_updated,
+        nodes_unchanged=nodes_unchanged,
+        labels_not_found=labels_not_found,
+    )
+
+
 def set_node_tags(client_factory, blueprint_id, node_id, tags):
     """Set tags on a blueprint node.
 

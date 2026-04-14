@@ -584,8 +584,9 @@
       ansible.builtin.debug:
         var: device_serial_map
 
-    # Build system_id assignments: map blueprint node_id → serial
-    # Match by comparing the device label in the vars to the blueprint node label
+    # Build system_id assignments: map blueprint node label → serial
+    # device_serial_map is already {node_label: serial}; after Phase 4.5e the
+    # blueprint node labels match exactly so we can use bulk assignment directly.
     - name: "Phase 5 — Assign system_id + deploy_mode to blueprint nodes"
       tags: [phase5_blueprint]
       juniper.apstra.blueprint:
@@ -594,16 +595,10 @@
         auth_token: "{{ token }}"
         id:
           blueprint: "{{ blueprint_label }}"
-        node_id: "{{ node_by_label[item.key].id }}"
-        system_id: "{{ device_serial_map[item.key] }}"
+        assignment: "{{ device_serial_map }}"
         deploy_mode: deploy
         state: node_updated
-      loop: "{{ devices | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-      when:
-        - node_by_label[item.key] is defined
-        - device_serial_map[item.key] is defined
+      when: device_serial_map | length > 0
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 6: Resource Pool Creation & Assignment

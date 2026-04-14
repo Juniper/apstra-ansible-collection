@@ -31,6 +31,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes imp
     get_node,
     patch_node,
     node_needs_update,
+    assign_nodes_by_label,
 )
 
 DOCUMENTATION = """
@@ -126,8 +127,9 @@ options:
       - C(absent) deletes the blueprint.
       - C(queried) runs a graph query against the blueprint
         (read-only, never modifies the blueprint).
-      - C(node_updated) patches properties on a single blueprint
-        node (system_id, deploy_mode, hostname, label).
+      - C(node_updated) patches properties on one or more blueprint
+        nodes. Use C(node_id) to target a single node by UUID, or
+        C(assignment) to assign multiple nodes by label in one task.
     required: false
     type: str
     choices: ["present", "committed", "absent", "queried", "node_updated"]
@@ -210,9 +212,21 @@ options:
     type: str
     required: false
     default: ethernet
+  assignment:
+    description:
+      - Dict mapping blueprint node labels to physical device serial
+        numbers (C(system_id)) for bulk assignment.
+      - "Example: C({spine1: SERIAL001, spine2: SERIAL002, leaf1: SERIAL003})."
+      - When C(deploy_mode) is also specified, it is applied to every
+        node in the dict.
+      - Mutually exclusive with C(node_id).
+      - Only used when C(state=node_updated).
+    type: dict
+    required: false
   node_id:
     description:
-      - The blueprint node ID to patch.
+      - The blueprint node ID to patch (single-node mode).
+      - Mutually exclusive with C(assignment).
       - Only used when C(state=node_updated).
     type: str
     required: false
@@ -335,7 +349,21 @@ EXAMPLES = """
     state: queried
   register: host_intfs
 
-# Assign system_id to a blueprint node
+# Bulk-assign serials to multiple nodes by label in one task
+- name: Assign devices to all fabric nodes
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    assignment:
+      spine1: "SERIAL001"
+      spine2: "SERIAL002"
+      leaf1:  "SERIAL003"
+      leaf2:  "SERIAL004"
+    deploy_mode: deploy
+    state: node_updated
+  register: assigned
+
+# Assign system_id to a single blueprint node (by UUID)
 - name: Bind device serial to spine1
   juniper.apstra.blueprint:
     id:
@@ -427,6 +455,21 @@ host_interfaces:
         - Returned by C(host_bond_interfaces).
     returned: when using host_bond_interfaces
     type: dict
+nodes_updated:
+    description:
+        - "Mapping of node label to final node properties for every node that
+          was patched during a bulk C(assignment) call."
+        - Returned by C(state=node_updated) with C(assignment).
+    returned: when using assignment
+    type: dict
+nodes_unchanged:
+    description:
+        - List of node labels that were already at the desired state
+          (no patch needed) during a bulk C(assignment) call.
+        - Returned by C(state=node_updated) with C(assignment).
+    returned: when using assignment
+    type: list
+    elements: str
 node:
     description:
         - Node properties after patch.
@@ -577,12 +620,37 @@ def _handle_queried(module, client_factory, blueprint_id):
 
 
 def _handle_node_updated(module, client_factory, blueprint_id):
-    """Handle state=node_updated -- patch a single blueprint node."""
+    """Handle state=node_updated -- single-node or bulk-by-label assignment."""
     params = module.params
     node_id = params.get("node_id")
+    assignment = params.get("assignment")
 
+    # ── Bulk assignment mode (assignment dict) ────────────────────────────
+    if assignment:
+        if node_id:
+            module.fail_json(msg="node_id and assignment are mutually exclusive")
+        deploy_mode = params.get("deploy_mode")
+        result = assign_nodes_by_label(
+            client_factory, blueprint_id, assignment, deploy_mode=deploy_mode
+        )
+        if result["labels_not_found"]:
+            module.fail_json(
+                msg=(
+                    "The following node labels were not found in the blueprint: "
+                    + ", ".join(result["labels_not_found"])
+                ),
+                **result,
+            )
+        n = len(result["nodes_updated"])
+        u = len(result["nodes_unchanged"])
+        result["msg"] = f"{n} node(s) updated, {u} already up to date"
+        return result
+
+    # ── Single-node mode (node_id) ────────────────────────────────────────
     if not node_id:
-        module.fail_json(msg="node_id is required when state=node_updated")
+        module.fail_json(
+            msg="Either node_id or assignment is required when state=node_updated"
+        )
 
     # Read current node state
     current = get_node(client_factory, blueprint_id, node_id)
@@ -682,6 +750,7 @@ def main():
         local_role=dict(type="str", required=False, default="leaf"),
         if_type=dict(type="str", required=False, default="ethernet"),
         # Node params (state=node_updated)
+        assignment=dict(type="dict", required=False),
         node_id=dict(type="str", required=False),
         system_id=dict(type="str", required=False),
         deploy_mode=dict(
@@ -702,7 +771,10 @@ def main():
     module = AnsibleModule(
         argument_spec=module_args,
         supports_check_mode=True,
-        mutually_exclusive=[("query", "query_type")],
+        mutually_exclusive=[
+            ("query", "query_type"),
+            ("node_id", "assignment"),
+        ],
     )
 
     try:
