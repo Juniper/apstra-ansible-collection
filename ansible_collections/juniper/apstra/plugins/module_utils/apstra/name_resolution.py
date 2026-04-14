@@ -532,12 +532,16 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
     Accepts one of the following forms:
 
     * A raw string graph node ID (pass-through, no API call performed).
+    * A colon-separated shorthand string ``"<system_label>:<if_name>"``
+      (e.g. ``"leaf1:ge-0/0/3"`` or ``"leaf1:ae1"``) which is resolved
+      via a QE graph query.
     * A dict ``{"system": "<system_label_or_id>", "if_name": "<if_name>"}``
       which is resolved via a QE graph query.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.
-    :param ap_ref: A raw string node ID or a resolution dict.
+    :param ap_ref: A raw string node ID, a ``system:if_name`` shorthand
+        string, or a resolution dict.
     :return: The resolved interface graph node ID string.
     :raises ValueError: If the system or interface cannot be found.
     """
@@ -545,14 +549,22 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
         return ap_ref
 
     if isinstance(ap_ref, str):
-        return ap_ref  # already a raw node ID — pass through unchanged
-
-    system_ref = ap_ref.get("system")
-    if_name = ap_ref.get("if_name")
+        # Colon-shorthand: "system_label:if_name" (must contain exactly one ':')
+        # Distinguish from raw node IDs which never contain ':'
+        if ":" in ap_ref:
+            parts = ap_ref.split(":", 1)
+            system_ref = parts[0]
+            if_name = parts[1]
+        else:
+            return ap_ref  # already a raw node ID — pass through unchanged
+    else:
+        system_ref = ap_ref.get("system")
+        if_name = ap_ref.get("if_name")
     if not system_ref or not if_name:
         raise ValueError(
-            "Interface reference dict must have 'system' and 'if_name' keys, "
-            f"got: {ap_ref}"
+            "Interface reference must be a 'system:if_name' string, "
+            "a dict with 'system' and 'if_name' keys, or a raw node ID. "
+            f"Got: {ap_ref}"
         )
 
     qry = (
@@ -593,8 +605,11 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
 def resolve_application_point_ids(client_factory, blueprint_id, ap_refs):
     """Resolve a list of application-point references to interface node IDs.
 
-    Each entry may be a raw string graph node ID or a resolution dict
-    ``{"system": "<label_or_id>", "if_name": "<if_name>"}``.
+    Each entry may be:
+    - A raw string graph node ID (pass-through).
+    - A colon-separated shorthand string ``"system_label:if_name"``
+      (e.g. ``"leaf1:ge-0/0/3"``).
+    - A resolution dict ``{"system": "<label_or_id>", "if_name": "<if_name>"}``.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.

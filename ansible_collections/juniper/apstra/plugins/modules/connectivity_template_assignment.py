@@ -110,10 +110,14 @@ options:
       - Must contain C(application_point_ids) list of application-point
         references to assign the CT to (when state is present) or unassign
         from (when state is absent).
-      - Each entry may be a raw blueprint graph node ID string
-        (e.g. C(G31G9dCSVcDS9PoeYg)) or a resolution dict with
-        C(system) and C(if_name) keys that is resolved to the
-        interface node ID via a QE graph query.
+      - Each entry may be:
+      - A raw blueprint graph node ID string
+        (e.g. C(G31G9dCSVcDS9PoeYg)).
+      - A colon-separated shorthand string C("<system_label>:<if_name>")
+        (e.g. C("leaf1:ge-0/0/3") or C("leaf1:ae1")) that is resolved
+        to the interface node ID via a QE graph query.
+      - A resolution dict with C(system) and C(if_name) keys that is
+        resolved to the interface node ID via a QE graph query.
     type: dict
     required: true
   state:
@@ -128,6 +132,21 @@ options:
 """
 
 EXAMPLES = """
+# ── Assign using colon-shorthand (system:if_name) strings ────────────
+
+- name: Assign CT using system:if_name shorthand
+  juniper.apstra.connectivity_template_assignment:
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_name: "NewVN2"
+    body:
+      application_point_ids:
+        - "leaf1:ge-0/0/3"
+        - "leaf1:ae1"
+        - "leaf2:ae1"
+        - "leaf3:ge-0/0/2"
+    state: present
+
 # ── Assign by CT ID using raw node IDs ───────────────────────────────
 
 - name: Assign CT to multiple interfaces (raw node IDs)
