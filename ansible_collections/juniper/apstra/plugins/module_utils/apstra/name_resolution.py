@@ -534,7 +534,10 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
     * A raw string graph node ID (pass-through, no API call performed).
     * A colon-separated shorthand string ``"<system_label>:<if_name>"``
       (e.g. ``"leaf1:ge-0/0/3"`` or ``"leaf1:ae1"``) which is resolved
-      via a QE graph query.
+      via a QE graph query.  For ESI leaf-pairs use the leaf-pair label
+      as the system reference, e.g.
+      ``"leaf1/leaf2:ae1"`` or ``"leaf1 / leaf2:ae1"`` — whitespace
+      around the slash is normalised automatically.
     * A dict ``{"system": "<system_label_or_id>", "if_name": "<if_name>"}``
       which is resolved via a QE graph query.
 
@@ -567,12 +570,22 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
             f"Got: {ap_ref}"
         )
 
-    qry = (
+    # Query both system nodes (individual devices) and redundancy_group nodes
+    # (ESI leaf-pairs).  Redundancy groups have labels like
+    # "leaf1 / leaf2" and own the LAG (ae) interfaces in EVPN multi-homing.
+    qry_system = (
         'node(type="system", name="sys")'
         '.out(type="hosted_interfaces")'
         f'.node(type="interface", if_name="{if_name}", name="intf")'
     )
-    results = _run_qe(client_factory, blueprint_id, qry)
+    qry_rg = (
+        'node(type="redundancy_group", name="sys")'
+        '.out(type="hosted_interfaces")'
+        f'.node(type="interface", if_name="{if_name}", name="intf")'
+    )
+    results = (_run_qe(client_factory, blueprint_id, qry_system) or []) + (
+        _run_qe(client_factory, blueprint_id, qry_rg) or []
+    )
 
     if results:
         # Exact label or ID match
@@ -586,6 +599,20 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
         for r in results:
             sys_node = r.get("sys", {})
             if (sys_node.get("label") or "").lower() == ref_lower:
+                return r["intf"]["id"]
+
+        # Whitespace-normalized fallback: Apstra stores leaf-pair labels with
+        # spaces around the slash (e.g. "leaf1 / leaf2") but users often omit
+        # spaces.  Normalize by stripping whitespace around "/" for comparison.
+        def _norm(s):
+            import re as _re
+
+            return _re.sub(r"\s*/\s*", "/", str(s)).lower()
+
+        ref_norm = _norm(system_ref)
+        for r in results:
+            sys_node = r.get("sys", {})
+            if _norm(sys_node.get("label") or "") == ref_norm:
                 return r["intf"]["id"]
 
     available_systems = sorted(
