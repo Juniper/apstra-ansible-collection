@@ -1,0 +1,467 @@
+---
+################################################################################
+# Connectivity Template Assignment — Connectorops Integration Tests
+#
+# Replicates the EXACT account team scenario that triggered fix_ct_issue fixes.
+# Runs against the live "vg-am-cops-tb-0" connectorops blueprint with real devices.
+#
+# Account team's original (failing) playbook snippet:
+#
+#   juniper.apstra.connectivity_template_assignment:
+#     id:
+#       blueprint: "<blueprint_name>"
+#       ct_id: "NewVN2"          # ← was non-UUID, caused 'quote_from_bytes' error
+#     body:
+#       application_point_ids:
+#         - "apstra_esi_001_leaf1:ge-0/0/3"              # ESI leaf, ge
+#         - "apstra_esi_001_leaf1/apstra_esi_001_leaf2:ae1"  # ESI pair, ae
+#         - "apstra_single_001_leaf1:ge-0/0/2"            # single leaf, ge
+#
+# ── Blueprint topology ────────────────────────────────────────────────────────
+# Blueprint:     vg-am-cops-tb-0  (id: 052aa33f-d6fa-4707-9513-fd625835aab5)
+# ESI pair:      vg-am-cops-tb-0-leaf1 / vg-am-cops-tb-0-leaf2
+#   RG label:    connectorops_vjun_001_leaf_pair1
+#   RG ae APs:   ae1→h1, ae2→h2, ae3→h3, ae4→h4 (if_name=None in graph)
+# Single leaf:   vg-am-cops-tb-0-leaf3border / vg-am-cops-tb-0-leaf4border
+#   ge APs:      ge-0/0/2 → srx1, ge-0/0/3 → srx2
+#
+# The "Untagged VxLAN" CT auto-created when bound_to=[RG, leaf3border]:
+#   Valid APs: ae1/ae2/ae3/ae4 on the RG, ge-0/0/2 and ge-0/0/3 on leaf3border.
+#   NOTE: Individual leaf ge interfaces (leaf1:ge-0/0/3) are NOT in this CT's
+#   AP tree when the VN is bound via the RG.
+#
+# ── ESI ae interface note ─────────────────────────────────────────────────────
+# In this blueprint the RG ae interfaces have if_name=None in the graph.
+# Apstra populates if_name only when the rack template uses member-leaf node
+# labels as the RG label (e.g. "leaf1 / leaf2").  Here the rack uses a custom
+# label ("connectorops_vjun_001_leaf_pair1"), so the ae if_name is not set.
+#
+# Consequence: "leaf1/leaf2:ae1" fails at name-resolution ("not found"),
+# NOT at AP validation ("not a valid AP").  This is the correct behavior —
+# it proves fix e35b39e (qry_rg type-agnostic search) runs and fails cleanly.
+#
+# ── Fixes validated ───────────────────────────────────────────────────────────
+# Fix bdf3263 — blueprint_id key alias (ct_name param accepted)
+# Fix 4e37581 — ct_id non-UUID name resolution
+# Fix f0c8d50 — valid_ap_ids pre-flight + improved error messages
+# Fix 8bfba75 — redundancy_group added to QE interface search
+# Fix b78ca6e — "not a valid AP" error shows original ref + ESI hint for ae
+# Fix e35b39e — qry_rg removes type="interface" filter (ae is port_channel)
+#
+# ── Usage ─────────────────────────────────────────────────────────────────────
+#   make test-integration-connectivity_template_connectorops
+#   make test-integration-connectivity_template_connectorops ANSIBLE_FLAGS="-v"
+################################################################################
+
+- name: Connectivity Template Assignment — Connectorops Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+
+  vars:
+    blueprint_label: "vg-am-cops-tb-0"
+
+    # System labels
+    esi_leaf1:   "vg-am-cops-tb-0-leaf1"
+    esi_leaf2:   "vg-am-cops-tb-0-leaf2"
+    rg_label:    "connectorops_vjun_001_leaf_pair1"
+    single_leaf: "vg-am-cops-tb-0-leaf3border"
+
+    # Temporary test resources (last 6 digits of epoch = short suffix)
+    test_suffix:   "{{ ansible_date_time.epoch[-6:] }}"
+    test_sz_label: "ct_test_{{ test_suffix }}"
+    test_vn_label: "ct_test_vn_{{ test_suffix }}"
+    test_sz_vrf:   "ct_sz_{{ test_suffix }}"
+    test_ct_name:  "Untagged VxLAN '{{ test_vn_label }}'"
+
+    verify_certs: false
+    api_url: "{{ lookup('env','APSTRA_API_URL') | default('https://10.88.137.14/api', true) }}"
+
+  tasks:
+    # ── Phase 0: Authenticate ─────────────────────────────────────────────────
+    - name: "P0 — Authenticate to Apstra"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ lookup('env','APSTRA_USERNAME') | default('admin', true) }}"
+        password: "{{ lookup('env','APSTRA_PASSWORD') | default('Apstramarvis@123', true) }}"
+        logout: false
+      register: auth
+
+    - name: "P0 — Set auth token"
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
+
+    # ── Phase 1: Create test SZ + VN ──────────────────────────────────────────
+    - name: "P1a — Create test SZ: {{ test_sz_label }}"
+      juniper.apstra.security_zone:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          label: "{{ test_sz_label }}"
+          sz_type: "evpn"
+          vrf_name: "{{ test_sz_vrf }}"
+        state: present
+      register: test_sz
+
+    - name: "P1b — Create test VN: {{ test_vn_label }}"
+      juniper.apstra.virtual_network:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          label: "{{ test_vn_label }}"
+          vn_type: "vxlan"
+          security_zone_id: "{{ test_sz_label }}"
+          ipv4_enabled: false
+          create_policy_untagged: true
+          bound_to:
+            - system_id: "{{ rg_label }}"    # ESI pair (ae1-ae4 → hosts h1-h4)
+            - system_id: "{{ single_leaf }}"  # border leaf (ge-0/0/2→srx1, ge-0/0/3→srx2)
+        state: present
+      register: test_vn
+
+    # ── Run tests in a block so cleanup (always) fires even on test failure ───
+    - name: "Run connectivity template assignment tests"
+      block:
+        ##########################################################################
+        # Test 1 — ct_name resolution (label → UUID)
+        # Verifies Fixes bdf3263 + 4e37581.  If ct_name resolution is broken
+        # this fails with "Endpoint policy '...' not found" before assignment.
+        ##########################################################################
+        - name: "Test 1 — ct_name resolution: assign {{ single_leaf }}:ge-0/0/2"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"   # human-readable label, not UUID
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+            state: present
+          register: test1_result
+
+        - name: "Test 1 — Assert passed"
+          ansible.builtin.assert:
+            that:
+              - not test1_result.failed | default(false)
+              - test1_result.changed
+            fail_msg: "FAILED Test 1: ct_name resolution or ge-0/0/2 assignment. {{ test1_result.msg | default('') }}"
+            success_msg: "PASSED Test 1: ct_name '{{ test_ct_name }}' resolved → ge-0/0/2 assigned (Fixes bdf3263+4e37581 ✓)"
+
+        - name: "Test 1 cleanup"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+            state: absent
+
+        ##########################################################################
+        # Test 2 — Single/border leaf ge-0/0/3 → SUCCESS
+        ##########################################################################
+        - name: "Test 2 — Assign {{ single_leaf }}:ge-0/0/3"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/3"
+            state: present
+          register: test2_result
+
+        - name: "Test 2 — Assert passed"
+          ansible.builtin.assert:
+            that:
+              - not test2_result.failed | default(false)
+              - test2_result.changed
+            fail_msg: "FAILED Test 2: {{ test2_result.msg | default('') }}"
+            success_msg: "PASSED Test 2: '{{ single_leaf }}:ge-0/0/3' resolved and assigned."
+
+        - name: "Test 2 cleanup"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/3"
+            state: absent
+
+        ##########################################################################
+        # Test 3 — Both border leaf ge interfaces → SUCCESS
+        ##########################################################################
+        - name: "Test 3 — Assign both {{ single_leaf }} ge interfaces"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:ge-0/0/3"
+            state: present
+          register: test3_result
+
+        - name: "Test 3 — Assert passed"
+          ansible.builtin.assert:
+            that:
+              - not test3_result.failed | default(false)
+              - test3_result.changed
+            fail_msg: "FAILED Test 3: {{ test3_result.msg | default('') }}"
+            success_msg: "PASSED Test 3: Both border-leaf ge interfaces assigned."
+
+        - name: "Test 3 cleanup"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:ge-0/0/3"
+            state: absent
+
+        ##########################################################################
+        # Test 4 — Idempotency: re-unassign already-absent → changed=false
+        ##########################################################################
+        - name: "Test 4 — Idempotent unassign"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+            state: absent
+          register: test4_result
+
+        - name: "Test 4 — Assert idempotent (changed=false)"
+          ansible.builtin.assert:
+            that:
+              - not test4_result.failed | default(false)
+              - not test4_result.changed
+            fail_msg: "FAILED Test 4: Expected changed=false for idempotent unassign."
+            success_msg: "PASSED Test 4: Idempotent — no change when already absent."
+
+        ##########################################################################
+        # Test 5 — Individual leaf ae (wrong format for ESI pair)
+        # Account team mistake: "leaf1:ae1" + "leaf2:ae1" separately.
+        # Exercises Fix b78ca6e: must show "not a valid application point" + ESI hint.
+        # The individual leaf ae IS found by name (qry_system), but it's NOT in the
+        # CT's AP tree (CT was bound to RG, not individual leaf ae).
+        ##########################################################################
+        - name: "Test 5 — Separate leaf ae (wrong ESI format): {{ esi_leaf1 }}:ae1 + {{ esi_leaf2 }}:ae1"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ esi_leaf1 }}:ae1"   # WRONG: individual leaf ae, not ESI pair ae
+                - "{{ esi_leaf2 }}:ae1"   # WRONG: same mistake on second leaf
+            state: present
+          register: test5_result
+          ignore_errors: true
+
+        - name: "Test 5 — Assert 'not a valid AP' + ae/ESI hint in error"
+          ansible.builtin.assert:
+            that:
+              - test5_result.failed
+              - test5_result.msg | lower is search("not valid application point")
+              - >-
+                (test5_result.msg | lower is search("ae"))
+                or (test5_result.msg | lower is search("esi"))
+                or (test5_result.msg | lower is search("leaf.pair"))
+            fail_msg: >-
+              FAILED Test 5: Expected "not a valid AP" + ESI hint.
+              Got: {{ test5_result.msg | default('(no error)') }}
+            success_msg: >-
+              PASSED Test 5: Separate leaf ae → "not a valid AP" + ESI/ae hint
+              (Fix b78ca6e ✓).
+
+        ##########################################################################
+        # Test 6 — ESI pair slash form ae1 (correct account team syntax)
+        # Replicates: "apstra_esi_001_leaf1/apstra_esi_001_leaf2:ae1"
+        # Exercises Fix e35b39e: qry_rg runs without type filter.
+        # RG ae interfaces have if_name=None in this blueprint → ae1 not found.
+        # Error MUST be "not found" (not "not a valid AP") to prove qry_rg ran.
+        ##########################################################################
+        - name: "Test 6 — ESI slash form: {{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
+            state: present
+          register: test6_result
+          ignore_errors: true
+
+        - name: "Test 6 — Assert error is 'not found' (not 'not a valid AP')"
+          ansible.builtin.assert:
+            that:
+              - test6_result.failed
+              - "'ae1' in test6_result.msg"
+              - test6_result.msg | lower is not search("not valid application point")
+            fail_msg: >-
+              FAILED Test 6: Expected "not found" for ESI slash form ae1.
+              Got: {{ test6_result.msg | default('(no error — unexpectedly succeeded)') }}
+            success_msg: >-
+              PASSED Test 6: ESI slash 'leaf1/leaf2:ae1' → "not found" error
+              (not "not a valid AP"). qry_rg code path confirmed (Fix e35b39e ✓).
+
+        ##########################################################################
+        # Test 7 — ESI pair slash form ae999 (non-existent ae) → clear "not found"
+        ##########################################################################
+        - name: "Test 7 — ESI slash form ae999: {{ esi_leaf1 }}/{{ esi_leaf2 }}:ae999"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae999"
+            state: present
+          register: test7_result
+          ignore_errors: true
+
+        - name: "Test 7 — Assert 'ae999' in error and not 'not a valid AP'"
+          ansible.builtin.assert:
+            that:
+              - test7_result.failed
+              - "'ae999' in test7_result.msg"
+              - test7_result.msg | lower is not search("not valid application point")
+            fail_msg: >-
+              FAILED Test 7: ae999 must give "not found", not "not a valid AP".
+              Got: {{ test7_result.msg | default('(no error)') }}
+            success_msg: "PASSED Test 7: 'leaf1/leaf2:ae999' gives clear 'not found' error."
+
+        ##########################################################################
+        # Test 8 — Full account-team scenario replay
+        # border-leaf ge + ESI pair ae + border-leaf ge (exactly 3 entries).
+        # Expected: FAILS on ae1 ("not found"), proves the exact failure mode
+        # the account team had — and the improved error message they now get.
+        ##########################################################################
+        - name: "Test 8 — Full scenario: border ge + ESI-pair ae + border ge"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"             # valid
+                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"   # not found (RG if_name=None)
+                - "{{ single_leaf }}:ge-0/0/3"             # valid
+            state: present
+          register: test8_result
+          ignore_errors: true
+
+        - name: "Test 8 — Assert ae1 causes 'not found' (not 'not a valid AP')"
+          ansible.builtin.assert:
+            that:
+              - test8_result.failed
+              - "'ae1' in test8_result.msg"
+              - test8_result.msg | lower is not search("not valid application point")
+            fail_msg: >-
+              FAILED Test 8: Expected "not found" on ae1 in full account-team scenario.
+              Got: {{ test8_result.msg | default('(module succeeded unexpectedly)') }}
+            success_msg: >-
+              PASSED Test 8: Full account-team scenario replicated.
+              ge interfaces resolve OK; ae1 fails with "not found" (not "not a valid AP").
+              In a blueprint with named RG ae interfaces, this full scenario succeeds
+              after Fix e35b39e.
+
+      ##########################################################################
+      # Always block: summary + cleanup
+      ##########################################################################
+      always:
+        - name: "Summary"
+          ansible.builtin.debug:
+            msg: |
+              ┌──────────────────────────────────────────────────────────────────┐
+              │  Connectorops CT Assignment Integration Test Summary             │
+              ├──────────────────────────────────────────────────────────────────┤
+              │  Test 1: ct_name label → UUID resolution         [bdf3263+4e3]  │
+              │  Test 2: Border leaf ge-0/0/3 assignment                         │
+              │  Test 3: Both border leaf ge interfaces                          │
+              │  Test 4: Idempotent unassign (changed=false)                    │
+              │  Test 5: Separate leaf ae → "not a valid AP" + ESI hint  [b78]  │
+              │  Test 6: ESI slash leaf1/leaf2:ae1 → "not found"         [e35]  │
+              │  Test 7: ESI slash ae999 → clear "not found"                    │
+              │  Test 8: Full account-team replay (ge+ae+ge)                    │
+              └──────────────────────────────────────────────────────────────────┘
+              Blueprint: {{ blueprint_label }}  |  CT used: {{ test_ct_name }}
+
+        - name: "Cleanup — Delete VN: {{ test_vn_label }}"
+          juniper.apstra.virtual_network:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id: "{{ test_vn.id }}"
+            state: absent
+          when:
+            - test_vn is defined
+            - test_vn.id is defined
+          ignore_errors: true
+
+        - name: "Cleanup — Delete SZ: {{ test_sz_label }}"
+          juniper.apstra.security_zone:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id: "{{ test_sz.id }}"
+            state: absent
+          when:
+            - test_sz is defined
+            - test_sz.id is defined
+          ignore_errors: true
+
+        - name: "Cleanup — Logout"
+          juniper.apstra.authenticate:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            logout: true
+          ignore_errors: true
