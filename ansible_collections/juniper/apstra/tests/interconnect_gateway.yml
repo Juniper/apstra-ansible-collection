@@ -1,414 +1,999 @@
 ---
-- name: Test interconnect_gateway module (domain + gateway)
+# ================================================================
+# E2E DCI Test for the interconnect_gateway module
+#
+# Creates two blueprints from scratch, sets up full DCI between them:
+#   VNI pools -> VRFs -> VNs -> Domains -> Gateways -> Routing Policies
+#   -> L3 DCI enablement -> VN connection type
+#
+# Then cleans up everything in reverse order.
+#
+# Based on: inter-connect-gw/dci_full_setup.yml
+# All direct API (uri) calls have been replaced with Ansible modules.
+# DCI raw-PATCH helpers live in module_utils/apstra/bp_dci.py.
+#
+# NOTE: Physical connectivity verification is skipped -- gateways use
+#       placeholder IPs so the DCI data plane will not come up.
+# ================================================================
+- name: "E2E DCI Test: interconnect_gateway module"
   hosts: localhost
   gather_facts: false
   connection: local
+
+  vars:
+    template_id: "L2_Virtual_EVPN"
+
+    # VNI pool (must already exist on the Apstra instance)
+    vni_pool_name: "Default-10000-20000"
+
+    # IP pool for RZ leaf loopback assignment (must already exist)
+    loopback_pool_name: "Private-172.16.0.0/12"
+
+    # Routing Zone / VRF (same label both BPs)
+    vrf_label: "dci-test-red"
+
+    # Virtual Networks
+    bp0_vn_label: "dci-test-vn"
+    bp0_vn_subnet: "10.100.0.0/24"
+    bp0_vn_gateway: "10.100.0.1"
+    bp0_vn_vni: 10100
+
+    bp1_vn_label: "dci-test-vn"
+    bp1_vn_subnet: "10.200.0.0/24"
+    bp1_vn_gateway: "10.200.0.1"
+    bp1_vn_vni: 10200
+
+    # DCI domain
+    dci_domain_label: "dci-test-domain"
+    dci_route_target: "65500:100"
+    bp0_esi_mac: "02:00:00:00:00:01"
+    bp1_esi_mac: "02:00:00:00:00:02"
+
+    # L3 DCI
+    l3_route_target: "65500:200"
+    routing_policy_label: "dci-test-l3-policy"
+
+    # Gateways (placeholder IPs -- no real underlay)
+    bp0_gw_name: "ToBP1"
+    bp0_gw_ip: "10.20.0.1"
+    bp0_gw_asn: 200001
+
+    bp1_gw_name: "ToBP0"
+    bp1_gw_ip: "10.10.0.1"
+    bp1_gw_asn: 100001
+
   tasks:
+
+    # ==============================================================
+    #  STEP 0: Authenticate + hostname for unique BP names
+    # ==============================================================
+
     - name: Get local hostname
       ansible.builtin.command: hostname
       register: local_hostname
       changed_when: false
 
-    - name: Set blueprint name fact
+    - name: Set blueprint name facts
       ansible.builtin.set_fact:
-        blueprint_name: "test_icgw_{{ local_hostname.stdout }}"
+        bp0_name: "test_dci_bp0_{{ local_hostname.stdout }}"
+        bp1_name: "test_dci_bp1_{{ local_hostname.stdout }}"
 
     - name: Connect to Apstra
       juniper.apstra.authenticate:
         logout: false
       register: auth
 
-    # ---- Create blueprint ----
+    # ==============================================================
+    #  STEP 1: Create two blueprints
+    # ==============================================================
 
-    - name: Create blueprint
+    - name: Create blueprint BP0
       juniper.apstra.blueprint:
         body:
-          label: "{{ blueprint_name }}"
+          label: "{{ bp0_name }}"
           design: "two_stage_l3clos"
           init_type: "template_reference"
-          template_id: "L2_Virtual_EVPN"
+          template_id: "{{ template_id }}"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
-      register: bp
+      register: bp0
 
-    - name: Show created blueprint
+    - name: Create blueprint BP1
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ bp1_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "{{ template_id }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp1
+
+    - name: Verify both blueprints created
+      ansible.builtin.assert:
+        that:
+          - bp0.id.blueprint is defined
+          - bp1.id.blueprint is defined
+        fail_msg: "Failed to create blueprints"
+
+    - name: Show blueprint IDs
       ansible.builtin.debug:
-        var: bp
+        msg: "BP0={{ bp0.id.blueprint }} | BP1={{ bp1.id.blueprint }}"
 
-    # ---- Get leaf node IDs for local_gw_nodes ----
+    # ==============================================================
+    #  STEP 2: Get leaf node info from both BPs
+    # ==============================================================
 
-    - name: Get blueprint nodes
+    - name: "BP0: Get blueprint nodes"
       juniper.apstra.apstra_facts:
         auth_token: "{{ auth.token }}"
         gather_network_facts:
           - "blueprints.nodes"
         id:
-          blueprint: "{{ bp.id.blueprint }}"
-      register: bp_facts
+          blueprint: "{{ bp0.id.blueprint }}"
+      register: bp0_facts
 
-    - name: Extract leaf node IDs
+    - name: "BP1: Get blueprint nodes"
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        gather_network_facts:
+          - "blueprints.nodes"
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+      register: bp1_facts
+
+    - name: Extract BP0 leaf node IDs and labels
       ansible.builtin.set_fact:
-        leaf_nodes: >-
-          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+        bp0_leaf_ids: >-
+          {{ bp0_facts.ansible_facts.apstra_facts.blueprints[bp0.id.blueprint].nodes
              | dict2items
              | selectattr('value.role', 'equalto', 'leaf')
              | map(attribute='value.id')
              | list }}
-
-    - name: Extract leaf node labels
-      ansible.builtin.set_fact:
-        leaf_labels: >-
-          {{ bp_facts.ansible_facts.apstra_facts.blueprints[bp.id.blueprint].nodes
+        bp0_leaf_labels: >-
+          {{ bp0_facts.ansible_facts.apstra_facts.blueprints[bp0.id.blueprint].nodes
              | dict2items
              | selectattr('value.role', 'equalto', 'leaf')
              | map(attribute='value.label')
              | list }}
 
-    - name: Show leaf node IDs and labels
+    - name: Extract BP1 leaf node IDs and labels
+      ansible.builtin.set_fact:
+        bp1_leaf_ids: >-
+          {{ bp1_facts.ansible_facts.apstra_facts.blueprints[bp1.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.id')
+             | list }}
+        bp1_leaf_labels: >-
+          {{ bp1_facts.ansible_facts.apstra_facts.blueprints[bp1.id.blueprint].nodes
+             | dict2items
+             | selectattr('value.role', 'equalto', 'leaf')
+             | map(attribute='value.label')
+             | list }}
+
+    - name: Show leaf nodes
       ansible.builtin.debug:
-        msg: "IDs: {{ leaf_nodes }} | Labels: {{ leaf_labels }}"
+        msg: |
+          BP0 leaves: {{ bp0_leaf_labels }}
+          BP1 leaves: {{ bp1_leaf_labels }}
 
-    # ==================================================================
-    #  DOMAIN TESTS (type: domain)
-    # ==================================================================
 
-    # ---- Create interconnect domain ----
+    # ==============================================================
+    #  STEP 3: Assign VNI pools to both BPs
+    # ==============================================================
 
-    - name: Create interconnect domain
-      juniper.apstra.interconnect_gateway:
-        type: domain
-        id: "{{ bp.id }}"
+    - name: "BP0: Assign VNI pool (evpn_l3_vnis)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          group_type: "vni"
+          group_name: "evpn_l3_vnis"
         body:
-          label: "test_icd_1"
-          route_target: "65500:100"
+          pool_ids:
+            - "{{ vni_pool_name }}"
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icd
 
-    - name: Show created interconnect domain
-      ansible.builtin.debug:
-        var: icd
+    - name: "BP0: Assign VNI pool (vxlan_vn_ids)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          group_type: "vni"
+          group_name: "vxlan_vn_ids"
+        body:
+          pool_ids:
+            - "{{ vni_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
 
-    - name: Verify interconnect domain was created
+    - name: "BP1: Assign VNI pool (evpn_l3_vnis)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          group_type: "vni"
+          group_name: "evpn_l3_vnis"
+        body:
+          pool_ids:
+            - "{{ vni_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+
+    - name: "BP1: Assign VNI pool (vxlan_vn_ids)"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          group_type: "vni"
+          group_name: "vxlan_vn_ids"
+        body:
+          pool_ids:
+            - "{{ vni_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+
+    # ==============================================================
+    #  STEP 4: Create Routing Zones (VRFs) on both BPs
+    # ==============================================================
+
+    - name: "BP0: Create routing zone (VRF)"
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ vrf_label }}"
+          sz_type: "evpn"
+          vrf_name: "{{ vrf_label }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_vrf
+
+    - name: "BP1: Create routing zone (VRF)"
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ vrf_label }}"
+          sz_type: "evpn"
+          vrf_name: "{{ vrf_label }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_vrf
+
+    - name: Verify VRFs created
       ansible.builtin.assert:
         that:
-          - icd.changed
-          - icd.id.evpn_interconnect_group is defined
-        fail_msg: "Interconnect domain was not created"
+          - bp0_vrf.changed or bp0_vrf.id.security_zone is defined
+          - bp1_vrf.changed or bp1_vrf.id.security_zone is defined
+        fail_msg: "Failed to create VRFs"
 
-    # ---- Domain idempotency check ----
+    - name: Show VRF results
+      ansible.builtin.debug:
+        msg: "BP0 VRF={{ bp0_vrf.id }} | BP1 VRF={{ bp1_vrf.id }}"
 
-    - name: Create interconnect domain (no change)
+    # ==============================================================
+    #  STEP 4b: Assign RZ leaf loopback IP pools for the VRFs
+    # ==============================================================
+
+    - name: "BP0: Assign RZ leaf loopback IP pool"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          group_type: "ip"
+          group_name: "sz:{{ bp0_vrf.id.security_zone }},leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ loopback_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_rz_loopback
+
+    - name: "BP1: Assign RZ leaf loopback IP pool"
+      juniper.apstra.resource_group:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          group_type: "ip"
+          group_name: "sz:{{ bp1_vrf.id.security_zone }},leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ loopback_pool_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_rz_loopback
+
+    - name: Verify RZ loopback IP pools assigned
+      ansible.builtin.assert:
+        that:
+          - bp0_rz_loopback is not failed
+          - bp1_rz_loopback is not failed
+        fail_msg: "Failed to assign RZ leaf loopback IP pools"
+
+    - name: Show RZ loopback results
+      ansible.builtin.debug:
+        msg: "BP0 RZ loopback: changed={{ bp0_rz_loopback.changed }} | BP1 RZ loopback: changed={{ bp1_rz_loopback.changed }}"
+
+    # ==============================================================
+    #  STEP 5: Create Virtual Networks on both BPs
+    # ==============================================================
+
+    - name: "BP0: Create virtual network"
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ bp0_vn_label }}"
+          vn_type: "vxlan"
+          security_zone_id: "{{ vrf_label }}"
+          ipv4_enabled: true
+          ipv4_subnet: "{{ bp0_vn_subnet }}"
+          virtual_gateway_ipv4_enabled: true
+          virtual_gateway_ipv4: "{{ bp0_vn_gateway }}"
+          bound_to: >-
+            {%- set result = [] -%}
+            {%- for lid in bp0_leaf_ids -%}
+              {{ result.append({'system_id': lid}) }}
+            {%- endfor -%}
+            {{ result }}
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_vn
+
+    - name: "BP1: Create virtual network"
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ bp1_vn_label }}"
+          vn_type: "vxlan"
+          security_zone_id: "{{ vrf_label }}"
+          ipv4_enabled: true
+          ipv4_subnet: "{{ bp1_vn_subnet }}"
+          virtual_gateway_ipv4_enabled: true
+          virtual_gateway_ipv4: "{{ bp1_vn_gateway }}"
+          bound_to: >-
+            {%- set result = [] -%}
+            {%- for lid in bp1_leaf_ids -%}
+              {{ result.append({'system_id': lid}) }}
+            {%- endfor -%}
+            {{ result }}
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_vn
+
+    - name: Verify VNs created
+      ansible.builtin.assert:
+        that:
+          - bp0_vn.changed or bp0_vn.id.virtual_network is defined
+          - bp1_vn.changed or bp1_vn.id.virtual_network is defined
+        fail_msg: "Failed to create virtual networks"
+
+    - name: Show VN results
+      ansible.builtin.debug:
+        msg: "BP0 VN={{ bp0_vn.id }} | BP1 VN={{ bp1_vn.id }}"
+
+    # ==============================================================
+    #  STEP 6: Create Interconnect Domains on both BPs
+    # ==============================================================
+
+    - name: "BP0: Create interconnect domain"
       juniper.apstra.interconnect_gateway:
         type: domain
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
         body:
-          label: "test_icd_1"
-          route_target: "65500:100"
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          esi_mac: "{{ bp0_esi_mac }}"
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icd_nochange
+      register: bp0_domain
+
+    - name: "BP1: Create interconnect domain"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          esi_mac: "{{ bp1_esi_mac }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_domain
+
+    - name: Verify domains created
+      ansible.builtin.assert:
+        that:
+          - bp0_domain.changed
+          - bp0_domain.id.evpn_interconnect_group is defined
+          - bp1_domain.changed
+          - bp1_domain.id.evpn_interconnect_group is defined
+        fail_msg: "Failed to create interconnect domains"
+
+    # ---- Domain idempotency ----
+
+    - name: "BP0: Create domain again (idempotency)"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          esi_mac: "{{ bp0_esi_mac }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_domain_idem
 
     - name: Verify domain idempotency
       ansible.builtin.assert:
         that:
-          - not icd_nochange.changed
-        fail_msg: "Interconnect domain should not have changed"
+          - not bp0_domain_idem.changed
+        fail_msg: "Domain create should be idempotent"
+        success_msg: "PASSED: Domain create is idempotent"
 
-    # ---- Update domain route_target ----
+    # ---- Domain update by label lookup ----
 
-    - name: Update interconnect domain route_target
+    - name: "BP0: Update domain route_target by label lookup"
       juniper.apstra.interconnect_gateway:
         type: domain
         id:
-          blueprint: "{{ bp.id.blueprint }}"
-          evpn_interconnect_group: "{{ icd.id.evpn_interconnect_group }}"
+          blueprint: "{{ bp0.id.blueprint }}"
         body:
-          label: "test_icd_1"
+          label: "{{ dci_domain_label }}"
           route_target: "65500:101"
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icd_update
+      register: bp0_domain_update
 
-    - name: Verify interconnect domain was updated
+    - name: Verify domain updated
       ansible.builtin.assert:
         that:
-          - icd_update.changed
-        fail_msg: "Interconnect domain was not updated"
+          - bp0_domain_update.changed
+        fail_msg: "Domain update by label failed"
+        success_msg: "PASSED: Domain updated by label lookup"
 
-    # ---- Update domain by label lookup ----
-
-    - name: Update interconnect domain by label lookup
+    - name: "BP0: Restore original route_target"
       juniper.apstra.interconnect_gateway:
         type: domain
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
         body:
-          label: "test_icd_1"
-          route_target: "65500:102"
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icd_update_by_label
 
-    - name: Verify domain update by label
-      ansible.builtin.assert:
-        that:
-          - icd_update_by_label.changed
-        fail_msg: "Interconnect domain update by label failed"
-
-    # ---- Create second domain with ESI MAC ----
-
-    - name: Create second interconnect domain with ESI MAC
-      juniper.apstra.interconnect_gateway:
-        type: domain
-        id: "{{ bp.id }}"
-        body:
-          label: "test_icd_2"
-          route_target: "65500:200"
-          esi_mac: "02:00:00:00:00:01"
-        auth_token: "{{ auth.token }}"
-      register: icd_2
-
-    - name: Verify second interconnect domain was created
-      ansible.builtin.assert:
-        that:
-          - icd_2.changed
-          - icd_2.id.evpn_interconnect_group is defined
-        fail_msg: "Second interconnect domain was not created"
-
-    # ---- Delete second domain by label (name-resolution test) ----
-
-    - name: Delete second interconnect domain by label (no explicit ID)
-      juniper.apstra.interconnect_gateway:
-        type: domain
-        id: "{{ bp.id }}"
-        body:
-          label: "test_icd_2"
-        state: absent
-        auth_token: "{{ auth.token }}"
-      register: icd_2_delete_by_label
-
-    - name: Verify second domain deleted by label
-      ansible.builtin.assert:
-        that:
-          - icd_2_delete_by_label.changed
-        fail_msg: "Interconnect domain delete-by-label failed"
-        success_msg: "PASSED: Interconnect domain deleted by label (no explicit ID)"
-
-    # ==================================================================
-    #  GATEWAY TESTS (type: gateway — the default)
-    # ==================================================================
-
-    # ---- Create interconnect gateway (using raw node IDs + domain UUID) ----
-
-    - name: Create interconnect gateway (raw IDs)
-      juniper.apstra.interconnect_gateway:
-        id: "{{ bp.id }}"
-        body:
-          gw_name: "test_icgw_1"
-          gw_ip: "10.99.1.1"
-          gw_asn: 65500
-          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
-          local_gw_nodes: "{{ leaf_nodes[:2] }}"
-          ttl: 2
-          keepalive_timer: 10
-          holdtime_timer: 30
-        auth_token: "{{ auth.token }}"
-      register: icgw
-
-    - name: Show created interconnect gateway
+    - name: Show domain results
       ansible.builtin.debug:
-        var: icgw
+        msg: |
+          BP0 domain: {{ bp0_domain.id }}
+          BP1 domain: {{ bp1_domain.id }}
 
-    - name: Verify interconnect gateway was created
-      ansible.builtin.assert:
-        that:
-          - icgw.changed
-          - icgw.id.remote_gateway is defined
-        fail_msg: "Interconnect gateway was not created"
+    # ==============================================================
+    #  STEP 7: Create Remote Gateways on both BPs
+    # ==============================================================
+    # BP0 gateway points to BP1 leaf (using first leaf node)
+    # BP1 gateway points to BP0 leaf (using first leaf node)
 
-    # ---- Gateway idempotency check ----
-
-    - name: Create interconnect gateway (no change)
+    - name: "BP0: Create gateway ToBP1 (using leaf labels + domain label)"
       juniper.apstra.interconnect_gateway:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
         body:
-          gw_name: "test_icgw_1"
-          gw_ip: "10.99.1.1"
-          gw_asn: 65500
-          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
-          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          gw_name: "{{ bp0_gw_name }}"
+          gw_ip: "{{ bp0_gw_ip }}"
+          gw_asn: "{{ bp0_gw_asn }}"
+          evpn_interconnect_group_id: "{{ dci_domain_label }}"
+          local_gw_nodes: "{{ bp0_leaf_labels[:1] }}"
           ttl: 2
           keepalive_timer: 10
           holdtime_timer: 30
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icgw_nochange
+      register: bp0_gateway
+
+    - name: "BP1: Create gateway ToBP0 (using leaf labels + domain label)"
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          gw_name: "{{ bp1_gw_name }}"
+          gw_ip: "{{ bp1_gw_ip }}"
+          gw_asn: "{{ bp1_gw_asn }}"
+          evpn_interconnect_group_id: "{{ dci_domain_label }}"
+          local_gw_nodes: "{{ bp1_leaf_labels[:1] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_gateway
+
+    - name: Verify gateways created
+      ansible.builtin.assert:
+        that:
+          - bp0_gateway.changed
+          - bp0_gateway.id.remote_gateway is defined
+          - bp1_gateway.changed
+          - bp1_gateway.id.remote_gateway is defined
+        fail_msg: "Failed to create gateways"
+
+    # ---- Gateway idempotency ----
+
+    - name: "BP0: Create gateway again (idempotency)"
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          gw_name: "{{ bp0_gw_name }}"
+          gw_ip: "{{ bp0_gw_ip }}"
+          gw_asn: "{{ bp0_gw_asn }}"
+          evpn_interconnect_group_id: "{{ dci_domain_label }}"
+          local_gw_nodes: "{{ bp0_leaf_labels[:1] }}"
+          ttl: 2
+          keepalive_timer: 10
+          holdtime_timer: 30
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_gw_idem
 
     - name: Verify gateway idempotency
       ansible.builtin.assert:
         that:
-          - not icgw_nochange.changed
-        fail_msg: "Interconnect gateway should not have changed"
+          - not bp0_gw_idem.changed
+        fail_msg: "Gateway create should be idempotent"
+        success_msg: "PASSED: Gateway create is idempotent"
 
-    # ---- Update gateway IP ----
+    # ---- Gateway update by name lookup ----
 
-    - name: Update interconnect gateway IP
+    - name: "BP0: Update gateway IP by gw_name lookup"
       juniper.apstra.interconnect_gateway:
         id:
-          blueprint: "{{ bp.id.blueprint }}"
-          remote_gateway: "{{ icgw.id.remote_gateway }}"
+          blueprint: "{{ bp0.id.blueprint }}"
         body:
-          gw_name: "test_icgw_1"
-          gw_ip: "10.99.1.2"
-          gw_asn: 65500
-          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
-          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          gw_name: "{{ bp0_gw_name }}"
+          gw_ip: "10.20.0.99"
+          gw_asn: "{{ bp0_gw_asn }}"
+          evpn_interconnect_group_id: "{{ dci_domain_label }}"
+          local_gw_nodes: "{{ bp0_leaf_labels[:1] }}"
           ttl: 2
           keepalive_timer: 10
           holdtime_timer: 30
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icgw_update
+      register: bp0_gw_update
 
-    - name: Verify interconnect gateway was updated
+    - name: Verify gateway updated by name
       ansible.builtin.assert:
         that:
-          - icgw_update.changed
-        fail_msg: "Interconnect gateway was not updated"
+          - bp0_gw_update.changed
+        fail_msg: "Gateway update by gw_name failed"
+        success_msg: "PASSED: Gateway updated by gw_name lookup"
 
-    # ---- Update gateway by name lookup ----
-
-    - name: Update interconnect gateway by name lookup
+    - name: "BP0: Restore original gateway IP"
       juniper.apstra.interconnect_gateway:
-        id: "{{ bp.id }}"
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
         body:
-          gw_name: "test_icgw_1"
-          gw_ip: "10.99.1.3"
-          gw_asn: 65500
-          evpn_interconnect_group_id: "{{ icd.id.evpn_interconnect_group }}"
-          local_gw_nodes: "{{ leaf_nodes[:2] }}"
+          gw_name: "{{ bp0_gw_name }}"
+          gw_ip: "{{ bp0_gw_ip }}"
+          gw_asn: "{{ bp0_gw_asn }}"
+          evpn_interconnect_group_id: "{{ dci_domain_label }}"
+          local_gw_nodes: "{{ bp0_leaf_labels[:1] }}"
           ttl: 2
           keepalive_timer: 10
           holdtime_timer: 30
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icgw_update_by_name
 
-    - name: Verify gateway update by name
-      ansible.builtin.assert:
-        that:
-          - icgw_update_by_name.changed
-        fail_msg: "Interconnect gateway update by name lookup failed"
+    - name: Show gateway results
+      ansible.builtin.debug:
+        msg: |
+          BP0 gateway: {{ bp0_gateway.id }}
+          BP1 gateway: {{ bp1_gateway.id }}
 
-    # ---- Name-resolution: create gateway using node labels + domain label ----
+    # ==============================================================
+    #  STEP 8: Create DCI Routing Policies on both BPs
+    # ==============================================================
 
-    - name: "Name-resolution test: Create gateway using node labels and domain label"
-      juniper.apstra.interconnect_gateway:
-        id: "{{ bp.id }}"
-        body:
-          gw_name: "test_icgw_labels"
-          gw_ip: "10.99.2.1"
-          gw_asn: 65501
-          evpn_interconnect_group_id: "test_icd_1"
-          local_gw_nodes: "{{ leaf_labels[:2] }}"
-          ttl: 3
-          keepalive_timer: 10
-          holdtime_timer: 30
-        auth_token: "{{ auth.token }}"
-      register: icgw_by_labels
-
-    - name: Verify gateway created via label resolution
-      ansible.builtin.assert:
-        that:
-          - icgw_by_labels.changed
-          - icgw_by_labels.id.remote_gateway is defined
-        fail_msg: "Name-resolution gateway creation failed"
-        success_msg: "PASSED: Gateway created using node labels and domain label"
-
-    - name: "Name-resolution idempotency: Re-run with same labels (no change)"
-      juniper.apstra.interconnect_gateway:
-        id: "{{ bp.id }}"
-        body:
-          gw_name: "test_icgw_labels"
-          gw_ip: "10.99.2.1"
-          gw_asn: 65501
-          evpn_interconnect_group_id: "test_icd_1"
-          local_gw_nodes: "{{ leaf_labels[:2] }}"
-          ttl: 3
-          keepalive_timer: 10
-          holdtime_timer: 30
-        auth_token: "{{ auth.token }}"
-      register: icgw_by_labels_nochange
-
-    - name: Verify label-resolved gateway is idempotent
-      ansible.builtin.assert:
-        that:
-          - not icgw_by_labels_nochange.changed
-        fail_msg: "Name-resolution gateway should be idempotent"
-        success_msg: "PASSED: Label-resolved gateway is idempotent"
-
-    - name: Delete name-resolution test gateway
-      juniper.apstra.interconnect_gateway:
+    - name: "BP0: Create DCI routing policy"
+      juniper.apstra.routing_policy:
         id:
-          blueprint: "{{ bp.id.blueprint }}"
-          remote_gateway: "{{ icgw_by_labels.id.remote_gateway }}"
-        state: absent
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ routing_policy_label }}"
+          description: "DCI Layer-3 routing policy for Type 5 exchange"
+          policy_type: "user_defined"
+          import_policy: "all"
+          export_policy:
+            loopbacks: true
+            l2edge_subnets: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icgw_by_labels_delete
+      register: bp0_rp
 
-    - name: Verify name-resolution gateway was deleted
-      ansible.builtin.assert:
-        that:
-          - icgw_by_labels_delete.changed
-        fail_msg: "Name-resolution gateway was not deleted"
-
-    # ==================================================================
-    #  CLEANUP (gateway first, then domain, then blueprint)
-    # ==================================================================
-
-    - name: Delete interconnect gateway (by explicit ID)
-      juniper.apstra.interconnect_gateway:
+    - name: "BP1: Create DCI routing policy"
+      juniper.apstra.routing_policy:
         id:
-          blueprint: "{{ bp.id.blueprint }}"
-          remote_gateway: "{{ icgw.id.remote_gateway }}"
-        state: absent
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ routing_policy_label }}"
+          description: "DCI Layer-3 routing policy for Type 5 exchange"
+          policy_type: "user_defined"
+          import_policy: "all"
+          export_policy:
+            loopbacks: true
+            l2edge_subnets: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icgw_delete
+      register: bp1_rp
 
-    - name: Verify interconnect gateway was deleted
+    - name: Verify routing policies created
       ansible.builtin.assert:
         that:
-          - icgw_delete.changed
-        fail_msg: "Interconnect gateway was not deleted"
+          - bp0_rp.changed or bp0_rp.id.routing_policy is defined
+          - bp1_rp.changed or bp1_rp.id.routing_policy is defined
+        fail_msg: "Failed to create routing policies"
 
-    - name: Delete first interconnect domain (by explicit ID)
+    - name: Show routing policy results
+      ansible.builtin.debug:
+        msg: "BP0 RP={{ bp0_rp.id }} | BP1 RP={{ bp1_rp.id }}"
+
+    # ==============================================================
+    #  STEP 9: Enable L3 (Type-5) DCI on both interconnect domains
+    # ==============================================================
+    # Uses security_zones body field -> resolved to interconnect_security_zones
+    # via bp_dci.patch_interconnect_domain_raw (no direct API calls).
+    #
+    # l3_route_target MUST differ from dci_route_target to avoid
+    # EVPN_INTERCONNECT_GROUP_L3_RT_OVERLAP_WITH_L2_RT build error.
+
+    - name: Build BP0 security_zones payload
+      ansible.builtin.set_fact:
+        bp0_sz_payload: >-
+          {{ { vrf_label: { 'routing_policy_id': routing_policy_label, 'interconnect_route_target': l3_route_target, 'enabled_for_l3': true } } }}
+
+    - name: Build BP1 security_zones payload
+      ansible.builtin.set_fact:
+        bp1_sz_payload: >-
+          {{ { vrf_label: { 'routing_policy_id': routing_policy_label, 'interconnect_route_target': l3_route_target, 'enabled_for_l3': true } } }}
+
+    - name: "BP0: Enable L3 DCI on interconnect domain"
       juniper.apstra.interconnect_gateway:
         type: domain
         id:
-          blueprint: "{{ bp.id.blueprint }}"
-          evpn_interconnect_group: "{{ icd.id.evpn_interconnect_group }}"
-        state: absent
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          security_zones: "{{ bp0_sz_payload }}"
+        state: present
         auth_token: "{{ auth.token }}"
-      register: icd_delete
+      register: bp0_l3
 
-    - name: Verify first interconnect domain was deleted
+    - name: "BP1: Enable L3 DCI on interconnect domain"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          security_zones: "{{ bp1_sz_payload }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_l3
+
+    - name: Show L3 DCI results
+      ansible.builtin.debug:
+        msg: |
+          BP0 L3 DCI: changed={{ bp0_l3.changed }}
+          BP1 L3 DCI: changed={{ bp1_l3.changed }}
+
+    - name: Verify L3 DCI enabled
       ansible.builtin.assert:
         that:
-          - icd_delete.changed
-        fail_msg: "First interconnect domain was not deleted"
-    # NOTE: icd_2 (test_icd_2) was already deleted by label in the name-resolution
-    # test above \u2014 no separate cleanup needed here.
+          - bp0_l3.changed
+          - bp1_l3.changed
+        fail_msg: "Failed to enable L3 DCI"
+        success_msg: "PASSED: L3 DCI enabled on both domains"
 
-    - name: Unlock blueprint
-      juniper.apstra.blueprint:
-        id: "{{ bp.id }}"
-        lock_state: "ignore"
+    # ---- L3 DCI idempotency ----
+
+    - name: "BP0: Enable L3 DCI again (idempotency)"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          security_zones: "{{ bp0_sz_payload }}"
+        state: present
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      register: bp0_l3_idem
 
-    - name: Delete blueprint
+    - name: Verify L3 DCI idempotency
+      ansible.builtin.assert:
+        that:
+          - not bp0_l3_idem.changed
+        fail_msg: "L3 DCI should be idempotent"
+        success_msg: "PASSED: L3 DCI is idempotent"
+
+    # ==============================================================
+    #  STEP 10: Set VN connection type (L2+L3) and translation VNI
+    # ==============================================================
+    # Uses virtual_networks body field -> resolved to
+    # interconnect_virtual_networks via bp_dci.patch_interconnect_domain_raw.
+    # VN labels are resolved to node IDs automatically.
+
+    - name: Build BP0 virtual_networks payload
+      ansible.builtin.set_fact:
+        bp0_vn_payload: >-
+          {{ { bp0_vn_label: { 'l2': true, 'l3': true, 'translation_vni': bp0_vn_vni | int } } }}
+
+    - name: Build BP1 virtual_networks payload
+      ansible.builtin.set_fact:
+        bp1_vn_payload: >-
+          {{ { bp1_vn_label: { 'l2': true, 'l3': true, 'translation_vni': bp1_vn_vni | int } } }}
+
+    - name: "BP0: Set VN connection type and translation VNI"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          virtual_networks: "{{ bp0_vn_payload }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_vn_dci
+
+    - name: "BP1: Set VN connection type and translation VNI"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          virtual_networks: "{{ bp1_vn_payload }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_vn_dci
+
+    - name: Show VN connection type results
+      ansible.builtin.debug:
+        msg: |
+          BP0 VN DCI: changed={{ bp0_vn_dci.changed }}
+          BP1 VN DCI: changed={{ bp1_vn_dci.changed }}
+
+    - name: Verify VN connection type set
+      ansible.builtin.assert:
+        that:
+          - bp0_vn_dci.changed
+          - bp1_vn_dci.changed
+        fail_msg: "Failed to set VN connection type"
+        success_msg: "PASSED: VN connection type set on both domains"
+
+    # ---- VN connection type idempotency ----
+
+    - name: "BP0: Set VN connection type again (idempotency)"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          virtual_networks: "{{ bp0_vn_payload }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_vn_idem
+
+    - name: Verify VN connection type idempotency
+      ansible.builtin.assert:
+        that:
+          - not bp0_vn_idem.changed
+        fail_msg: "VN connection type should be idempotent"
+        success_msg: "PASSED: VN connection type is idempotent"
+
+    # ==============================================================
+    #  DCI Setup Summary
+    # ==============================================================
+
+    - name: DCI Setup Summary
+      ansible.builtin.debug:
+        msg: |
+          ============================================
+          DCI E2E TEST SETUP COMPLETE
+          ============================================
+          BP0: {{ bp0_name }} ({{ bp0.id.blueprint }})
+          BP1: {{ bp1_name }} ({{ bp1.id.blueprint }})
+          VRF: {{ vrf_label }}
+          VN BP0: {{ bp0_vn_label }} ({{ bp0_vn_subnet }})
+          VN BP1: {{ bp1_vn_label }} ({{ bp1_vn_subnet }})
+          Domain: {{ dci_domain_label }} (RT={{ dci_route_target }})
+          Gateway BP0->BP1: {{ bp0_gw_name }} ({{ bp0_gw_ip }})
+          Gateway BP1->BP0: {{ bp1_gw_name }} ({{ bp1_gw_ip }})
+          Routing Policy: {{ routing_policy_label }}
+          L3 DCI: enabled (l3_rt={{ l3_route_target }})
+          VN connection type: L2+L3
+          ============================================
+          NOTE: Commit and verification skipped -- no physical underlay.
+
+    # ==============================================================
+    #  CLEANUP (reverse order)
+    # ==============================================================
+
+    # ---- Delete gateways ----
+
+    - name: "BP0: Delete gateway"
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          remote_gateway: "{{ bp0_gateway.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp0_gw_del
+
+    - name: "BP1: Delete gateway"
+      juniper.apstra.interconnect_gateway:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          remote_gateway: "{{ bp1_gateway.id.remote_gateway }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp1_gw_del
+
+    - name: Verify gateways deleted
+      ansible.builtin.assert:
+        that:
+          - bp0_gw_del.changed
+          - bp1_gw_del.changed
+        fail_msg: "Failed to delete gateways"
+
+    # ---- Delete domains ----
+
+    - name: "BP0: Delete interconnect domain"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          evpn_interconnect_group: "{{ bp0_domain.id.evpn_interconnect_group }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp0_dom_del
+
+    - name: "BP1: Delete interconnect domain"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          evpn_interconnect_group: "{{ bp1_domain.id.evpn_interconnect_group }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp1_dom_del
+
+    - name: Verify domains deleted
+      ansible.builtin.assert:
+        that:
+          - bp0_dom_del.changed
+          - bp1_dom_del.changed
+        fail_msg: "Failed to delete domains"
+
+    # ---- Delete routing policies ----
+
+    - name: "BP0: Delete routing policy"
+      juniper.apstra.routing_policy:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          routing_policy: "{{ bp0_rp.id.routing_policy }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp0_rp_del
+
+    - name: "BP1: Delete routing policy"
+      juniper.apstra.routing_policy:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          routing_policy: "{{ bp1_rp.id.routing_policy }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp1_rp_del
+
+    - name: Verify routing policies deleted
+      ansible.builtin.assert:
+        that:
+          - bp0_rp_del.changed
+          - bp1_rp_del.changed
+        fail_msg: "Failed to delete routing policies"
+
+    # ---- Delete virtual networks ----
+
+    - name: "BP0: Delete virtual network"
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          virtual_network: "{{ bp0_vn.id.virtual_network }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp0_vn_del
+
+    - name: "BP1: Delete virtual network"
+      juniper.apstra.virtual_network:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          virtual_network: "{{ bp1_vn.id.virtual_network }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp1_vn_del
+
+    - name: Verify VNs deleted
+      ansible.builtin.assert:
+        that:
+          - bp0_vn_del.changed
+          - bp1_vn_del.changed
+        fail_msg: "Failed to delete virtual networks"
+
+    # ---- Delete VRFs ----
+
+    - name: "BP0: Delete VRF"
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+          security_zone: "{{ bp0_vrf.id.security_zone }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp0_vrf_del
+
+    - name: "BP1: Delete VRF"
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+          security_zone: "{{ bp1_vrf.id.security_zone }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp1_vrf_del
+
+    - name: Verify VRFs deleted
+      ansible.builtin.assert:
+        that:
+          - bp0_vrf_del.changed
+          - bp1_vrf_del.changed
+        fail_msg: "Failed to delete VRFs"
+
+    # ---- Delete blueprints ----
+
+    - name: "BP0: Unlock and delete blueprint"
       juniper.apstra.blueprint:
         id:
-          blueprint: "{{ bp.id.blueprint }}"
+          blueprint: "{{ bp0.id.blueprint }}"
+        lock_state: "ignore"
         state: absent
         auth_token: "{{ auth.token }}"
-      register: bp_delete
+      register: bp0_del
 
-    - name: Verify blueprint was deleted
+    - name: "BP1: Unlock and delete blueprint"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp1_del
+
+    - name: Verify blueprints deleted
       ansible.builtin.assert:
         that:
-          - bp_delete.changed
-        fail_msg: "Blueprint was not deleted"
+          - bp0_del.changed
+          - bp1_del.changed
+        fail_msg: "Failed to delete blueprints"
+        success_msg: "PASSED: All resources cleaned up successfully"

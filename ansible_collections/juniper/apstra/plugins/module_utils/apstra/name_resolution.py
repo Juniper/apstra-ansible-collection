@@ -573,6 +573,107 @@ def resolve_application_point_ids(client_factory, blueprint_id, ap_refs):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  IBA Probe resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_probe_id(client_factory, blueprint_id, probe_ref):
+    """Resolve an IBA probe reference (UUID or label) to its probe ID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param probe_ref: The probe UUID or label.
+    :return: The resolved probe ID string.
+    :raises ValueError: If no matching probe is found.
+    """
+    if not probe_ref:
+        return probe_ref
+
+    # Fast path: already a UUID
+    if _is_uuid(probe_ref):
+        return probe_ref
+
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/probes")
+    if resp.status_code != 200:
+        raise ValueError(
+            f"Failed to list probes in blueprint '{blueprint_id}': "
+            f"{resp.status_code} {resp.text}"
+        )
+    all_probes = resp.json().get("items", [])
+
+    # Exact ID match (non-UUID IDs)
+    for p in all_probes:
+        if p.get("id") == probe_ref:
+            return probe_ref
+
+    # Exact label match
+    for p in all_probes:
+        if p.get("label") == probe_ref:
+            return p["id"]
+
+    # Case-insensitive label fallback
+    ref_lower = probe_ref.lower()
+    for p in all_probes:
+        if (p.get("label") or "").lower() == ref_lower:
+            return p["id"]
+
+    available = [p.get("label", "") for p in all_probes]
+    raise ValueError(
+        f"Probe '{probe_ref}' not found in blueprint '{blueprint_id}'. "
+        f"Available: {available}"
+    )
+
+
+def resolve_dashboard_id(client_factory, blueprint_id, dashboard_ref):
+    """Resolve an IBA dashboard reference (UUID or label) to its dashboard ID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param dashboard_ref: The dashboard UUID or label.
+    :return: The resolved dashboard ID string.
+    :raises ValueError: If no matching dashboard is found.
+    """
+    if not dashboard_ref:
+        return dashboard_ref
+
+    # Fast path: already a UUID
+    if _is_uuid(dashboard_ref):
+        return dashboard_ref
+
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/iba/dashboards")
+    if resp.status_code != 200:
+        raise ValueError(
+            f"Failed to list dashboards in blueprint '{blueprint_id}': "
+            f"{resp.status_code} {resp.text}"
+        )
+    all_dashboards = resp.json().get("items", [])
+
+    # Exact ID match (non-UUID IDs)
+    for d in all_dashboards:
+        if d.get("id") == dashboard_ref:
+            return dashboard_ref
+
+    # Exact label match
+    for d in all_dashboards:
+        if d.get("label") == dashboard_ref:
+            return d["id"]
+
+    # Case-insensitive label fallback
+    ref_lower = dashboard_ref.lower()
+    for d in all_dashboards:
+        if (d.get("label") or "").lower() == ref_lower:
+            return d["id"]
+
+    available = [d.get("label", "") for d in all_dashboards]
+    raise ValueError(
+        f"Dashboard '{dashboard_ref}' not found in blueprint '{blueprint_id}'. "
+        f"Available: {available}"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Virtual Network resolution  (Phase 4)
 # ──────────────────────────────────────────────────────────────────
 

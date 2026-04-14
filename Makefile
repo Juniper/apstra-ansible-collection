@@ -143,6 +143,7 @@ install: build
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
+	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
 	test-virtual_infra_manager
@@ -248,6 +249,9 @@ test-rollback: install
 
 test-ztp_device: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
+
+test-iba_probes: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/iba_probes.yml
 
 test-name_resolution: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml
