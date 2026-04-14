@@ -573,6 +573,9 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
     # Query both system nodes (individual devices) and redundancy_group nodes
     # (ESI leaf-pairs).  Redundancy groups have labels like
     # "leaf1 / leaf2" and own the LAG (ae) interfaces in EVPN multi-homing.
+    # Note: ae/LAG interfaces hosted by a redundancy_group have
+    # type="port_channel" in the graph (not type="interface"), so the RG
+    # query intentionally omits the type filter on the interface node.
     qry_system = (
         'node(type="system", name="sys")'
         '.out(type="hosted_interfaces")'
@@ -581,7 +584,7 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
     qry_rg = (
         'node(type="redundancy_group", name="sys")'
         '.out(type="hosted_interfaces")'
-        f'.node(type="interface", if_name="{if_name}", name="intf")'
+        f'.node(if_name="{if_name}", name="intf")'
     )
     results = (_run_qe(client_factory, blueprint_id, qry_system) or []) + (
         _run_qe(client_factory, blueprint_id, qry_rg) or []
