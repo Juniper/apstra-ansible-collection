@@ -323,6 +323,7 @@ class ApstraClientFactory:
         self.endpointpolicy_client = None
         self.tags_client = None
         self.resource_allocation_client = None
+        self.virtual_infra_client = None
 
         # Map client members to client types
         self._client_types = {

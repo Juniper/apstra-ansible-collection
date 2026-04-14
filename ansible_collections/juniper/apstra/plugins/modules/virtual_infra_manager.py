@@ -26,6 +26,13 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter 
     patch_vim_vcenter,
     delete_vim_vcenter,
     find_vim_vcenter_by_hostname,
+    get_vim_connection_state,
+    wait_for_vim_connection,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_blueprint_utils import (
+    resolve_blueprint_virtual_infra_anomalies,
+    query_blueprint_vms,
+    get_blueprint_vnet,
 )
 
 DOCUMENTATION = """
@@ -95,35 +102,63 @@ options:
         C(vcenter) (UUID) to target a specific vCenter instance under the
         VIM.  Omit C(vcenter) to operate on the vCenters collection
         (list or create).
+      - B(anomaly_resolver scope) — blueprint only.  Triggers the
+        virtual-infra VLAN-match anomaly resolver at
+        C(/api/blueprints/{id}/virtual_infra/predefined_probes/virtual_infra_vlan_match/anomaly_resolver).
+        Requires C(id.blueprint).  Body is passed through as-is.
+      - B(query_vm scope) — blueprint only.  Queries the VM inventory
+        for a blueprint at
+        C(/api/blueprints/{id}/virtual_infra/query/vm).
+        Requires C(id.blueprint).  Body contains the query parameters.
+      - B(vnet scope) — blueprint only.  Retrieves virtual-network
+        details from the virtual-infra layer at
+        C(/api/blueprints/{id}/virtual_infra/vnet/{vnet_id}).
+        Requires C(id.blueprint) and C(id.vnet) (UUID).
     type: dict
     required: false
   body:
     description:
       - Dictionary containing the configuration to create or update.
       - B(Global scope) key fields — C(display_name) (str) human-readable
-        name for the VIM; C(type) (str) platform type C(vcenter)/C(nsx)/
-        C(nutanix); C(hostname) (str) management IP or hostname;
+        name for the VIM; C(virtual_infra_type) (str) platform type C(vcenter)/C(nsx)/
+        C(nutanix); C(management_ip) (str) management IP or hostname;
         C(username) (str) and C(password) (str) login credentials;
         C(port) (int) optional management port.
       - B(Blueprint scope) key fields — C(infra_type) (str) one of
-        C(vcenter), C(nsxt), C(nutanix), C(nsx); C(system_id) (str)
-        Apstra system identifier; C(agent_id) (str) optional agent ID.
+        C(vcenter), C(nsxt), C(nutanix), C(nsx); C(agent_id) (str)
+        the VIM UUID (C(id.virtual_infra_manager) from the global VIM create);
+        C(system_id) (str) the Apstra system identifier found in the VIM's
+        top-level C(system_id) field after the VIM connects to vCenter.
+        Both C(agent_id) and C(system_id) are required when creating a
+        blueprint virtual_infra entry.
     type: dict
     required: false
   scope:
     description:
-      - Selects the sub-resource to operate on within a global VIM.
+      - Selects the sub-resource to operate on.
       - C(manager) (default) — the VIM itself at
-        C(/api/virtual-infra-managers/{id}).
+        C(/api/virtual-infra-managers/{id}).  Global scope only.
       - C(vcenter) — the vCenter instances at
         C(/api/virtual-infra-managers/{id}/vcenters) and
         C(/api/virtual-infra-managers/{id}/vcenters/{vcenter_id}).
         Requires C(id.virtual_infra_manager) to be set.  Supports full
         CRUD — list, create, get, PATCH, PUT, and delete — via direct
-        API calls.
+        API calls.  Global scope only.
+      - C(anomaly_resolver) — POSTs to
+        C(/api/blueprints/{id}/virtual_infra/predefined_probes/virtual_infra_vlan_match/anomaly_resolver)
+        to trigger auto-resolution of virtual-infra VLAN-match anomalies.
+        Blueprint scope only (requires C(id.blueprint)).
+      - C(query_vm) — POSTs to
+        C(/api/blueprints/{id}/virtual_infra/query/vm) to query the VM
+        inventory visible through the blueprint's virtual-infra layer.
+        Returns C(result.vms) list.  Blueprint scope only.
+      - C(vnet) — GETs
+        C(/api/blueprints/{id}/virtual_infra/vnet/{vnet_id}) to retrieve
+        virtual-network details from the virtual-infra layer.  Requires
+        C(id.vnet) (UUID).  Blueprint scope only.
     type: str
     required: false
-    choices: ["manager", "vcenter"]
+    choices: ["manager", "vcenter", "anomaly_resolver", "query_vm", "vnet"]
     default: "manager"
   state:
     description:
@@ -146,8 +181,8 @@ EXAMPLES = """
   juniper.apstra.virtual_infra_manager:
     body:
       display_name: "prod-vcenter"
-      type: "vcenter"
-      hostname: "vcenter.example.com"
+      virtual_infra_type: "vcenter"
+      management_ip: "vcenter.example.com"
       username: "administrator@vsphere.local"
       password: "S3cret!"
     state: present
@@ -159,12 +194,12 @@ EXAMPLES = """
 
 # ── Global scope: update by display_name ─────────────────────────
 
-- name: Update VIM hostname by display_name (auto-resolved to ID)
+- name: Update VIM management_ip by display_name (auto-resolved to ID)
   juniper.apstra.virtual_infra_manager:
     id:
       virtual_infra_manager: "prod-vcenter"   # display_name works
     body:
-      hostname: "vcenter2.example.com"
+      management_ip: "vcenter2.example.com"
     state: present
 
 # ── Global scope: update by UUID ─────────────────────────────────
@@ -174,7 +209,7 @@ EXAMPLES = """
     id:
       virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
     body:
-      hostname: "vcenter2.example.com"
+      management_ip: "vcenter2.example.com"
     state: present
 
 # ── Global scope: delete ─────────────────────────────────────────
@@ -199,8 +234,8 @@ EXAMPLES = """
       virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
     body:
       display_name: "prod-vcenter"
-      type: "vcenter"
-      hostname: "vcenter3.example.com"
+      virtual_infra_type: "vcenter"
+      management_ip: "vcenter3.example.com"
       username: "administrator@vsphere.local"
       password: "NewPass123!"
     state: replaced
@@ -221,13 +256,13 @@ EXAMPLES = """
 
 # ── Global scope: create a vCenter under a VIM ───────────────────
 
-- name: Add a vCenter instance to a VIM
+- name: Add a vCenter instance to a VIM (NSX-type VIM only)
   juniper.apstra.virtual_infra_manager:
     id:
       virtual_infra_manager: "{{ vim_result.id.virtual_infra_manager }}"
     scope: vcenter
     body:
-      hostname: "vc1.example.com"
+      management_ip: "vc1.example.com"
       username: "admin@vsphere.local"
       password: "VcPass!"
     state: present
@@ -265,7 +300,7 @@ EXAMPLES = """
       vcenter: "{{ vcenter_created.id.vcenter }}"
     scope: vcenter
     body:
-      hostname: "vc2.example.com"
+      management_ip: "vc2.example.com"
       username: "admin@vsphere.local"
       password: "VcPass!"
     state: replaced
@@ -297,12 +332,16 @@ EXAMPLES = """
 # ── Blueprint scope: assign VIM node to a blueprint ──────────────
 
 - name: Add virtual infra node to blueprint
+  # agent_id = VIM UUID (id.virtual_infra_manager from the global VIM create)
+  # system_id = VIM's own system_id field (returned after VIM connects to vCenter)
+  # Both are REQUIRED by the Apstra API when creating a blueprint virtual_infra entry.
   juniper.apstra.virtual_infra_manager:
     id:
       blueprint: "prod-dc1"   # name or UUID
     body:
       infra_type: "vcenter"
-      system_id: "{{ vcenter_system_id }}"
+      agent_id: "{{ vim_result.id.virtual_infra_manager }}"
+      system_id: "{{ vim_result.virtual_infra_manager.system_id }}"
     state: present
   register: bp_vim
 
@@ -325,7 +364,56 @@ EXAMPLES = """
       blueprint: "prod-dc1"
       virtual_infra: "{{ bp_vim.id.virtual_infra }}"
     state: absent
-"""
+# ── Blueprint scope: trigger VLAN match anomaly resolver ────────
+# POSTs to /virtual_infra/predefined_probes/virtual_infra_vlan_match/
+# anomaly_resolver and asks Apstra to auto-resolve VLAN mismatches.
+
+- name: Resolve virtual-infra VLAN match anomalies
+  juniper.apstra.virtual_infra_manager:
+    id:
+      blueprint: "prod-dc1"
+    scope: anomaly_resolver
+    body:
+      anomaly_ids: []   # empty list = resolve all
+    state: present
+  register: anomaly_result
+
+- name: Show resolver response
+  ansible.builtin.debug:
+    var: anomaly_result.response
+
+# ── Blueprint scope: query VM inventory ───────────────────────
+# POSTs a query to /virtual_infra/query/vm and returns matching VMs.
+
+- name: Query VMs in the virtual infra layer of a blueprint
+  juniper.apstra.virtual_infra_manager:
+    id:
+      blueprint: "prod-dc1"
+    scope: query_vm
+    body:
+      filter: {}
+    state: present
+  register: vm_query
+
+- name: Show VMs
+  ansible.builtin.debug:
+    var: vm_query.vms
+
+# ── Blueprint scope: get virtual-network from virtual infra layer ──
+# GETs /virtual_infra/vnet/{vnet_id} — needs id.vnet (UUID).
+
+- name: Get vnet details from virtual infra layer
+  juniper.apstra.virtual_infra_manager:
+    id:
+      blueprint: "prod-dc1"
+      vnet: "{{ vnet_uuid }}"
+    scope: vnet
+    state: present
+  register: vnet_info
+
+- name: Show vnet
+  ansible.builtin.debug:
+    var: vnet_info.vnet"""
 
 RETURN = """
 changed:
@@ -364,6 +452,14 @@ vcenter:
   description: A single vCenter instance details (scope=vcenter with id.vcenter).
   type: dict
   returned: on present with scope=vcenter and id.vcenter and no body
+vms:
+  description: List of VMs returned by the scope=query_vm POST.
+  type: list
+  returned: on present with scope=query_vm (blueprint scope)
+vnet:
+  description: Virtual-network details from the virtual-infra layer (scope=vnet).
+  type: dict
+  returned: on present with scope=vnet (blueprint scope)
 changes:
   description: Dictionary of fields that were updated.
   type: dict
@@ -388,9 +484,20 @@ def _handle_vcenters(module, client_factory, vim_id, body, state, result):
     performed against /vcenters/{vcenter_id} via direct API calls
     using vim_vcenter module_utils (SDK gap fill).
 
+    **NSX vs vcenter VIM architecture:**
+
+    ``vcenter`` VIM type: The VIM IS the direct connection to vCenter.
+    ``POST /vcenters`` returns HTTP 422 for vcenter-type VIMs — this is
+    intentional Apstra API behaviour, not a bug.  Use the global VIM
+    create/update scope (scope=manager) to manage vcenter-type VIMs.
+
+    ``nsx`` VIM type: NSX is the parent; /vcenters sub-resources represent
+    individual vCenters managed by that NSX instance.  CREATE works only
+    for nsx-type VIMs.
+
     Routing:
       id.vcenter absent + no body  → list_vim_vcenters
-      id.vcenter absent + body     → create_vim_vcenter
+      id.vcenter absent + body     → create_vim_vcenter  (NSX VIMs only)
       id.vcenter present + no body + state=present  → get_vim_vcenter
       id.vcenter present + body    + state=present  → patch_vim_vcenter
       id.vcenter present + body    + state=replaced → update_vim_vcenter
@@ -472,10 +579,21 @@ def _handle_global_vim(module, client_factory, id, body, state, result):
     # Look up existing object
     current_object = None
     if object_id is not None:
-        current_object = client_factory.object_request(object_type, "get", id)
+        raw = client_factory.object_request(object_type, "get", id)
+        # The Apstra VIM GET API returns {"items": [...]} even for a single
+        # object.  Unwrap to get the actual VIM dict so compare_and_update
+        # can see fields like management_ip at the top level.
+        if isinstance(raw, dict) and "items" in raw:
+            items = raw.get("items", [])
+            current_object = items[0] if items else None
+        else:
+            current_object = raw
     elif body and body.get("display_name"):
         # Search by display_name in the list
         all_vims = client_factory.object_request(object_type, "get", {})
+        # Handle both bare list and {"items": [...]} wrapper
+        if isinstance(all_vims, dict) and "items" in all_vims:
+            all_vims = all_vims.get("items", [])
         if isinstance(all_vims, list):
             for vim in all_vims:
                 if vim.get("display_name") == body["display_name"]:
@@ -657,7 +775,7 @@ def main():
         scope=dict(
             type="str",
             required=False,
-            choices=["manager", "vcenter"],
+            choices=["manager", "vcenter", "anomaly_resolver", "query_vm", "vnet"],
             default="manager",
         ),
         state=dict(
@@ -694,7 +812,30 @@ def main():
                     "scope=vcenter is only valid for global scope "
                     "(omit 'blueprint' from id)"
                 )
-            _handle_blueprint_vim(module, client_factory, id, body, state, result)
+            elif scope == "anomaly_resolver":
+                response = resolve_blueprint_virtual_infra_anomalies(
+                    client_factory, id["blueprint"], body
+                )
+                result["changed"] = True
+                result["response"] = response
+                result["msg"] = "virtual-infra VLAN match anomaly resolver triggered"
+            elif scope == "query_vm":
+                vms = query_blueprint_vms(client_factory, id["blueprint"], body)
+                result["changed"] = False
+                result["vms"] = vms
+                result["msg"] = f"query/vm returned {len(vms)} VM(s)"
+            elif scope == "vnet":
+                vnet_id = id.get("vnet")
+                if not vnet_id:
+                    raise ValueError("Must specify 'id.vnet' for scope=vnet")
+                vnet = get_blueprint_vnet(client_factory, id["blueprint"], vnet_id)
+                result["changed"] = False
+                result["vnet"] = vnet
+                result["msg"] = (
+                    f"vnet {vnet_id} retrieved" if vnet else f"vnet {vnet_id} not found"
+                )
+            else:
+                _handle_blueprint_vim(module, client_factory, id, body, state, result)
         elif scope == "vcenter":
             # Resolve VIM name → ID before vcenters call
             vim_ref = id.get("virtual_infra_manager")

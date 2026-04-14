@@ -310,6 +310,7 @@ test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy 
 .PHONY: test-integration-property_set
 .PHONY: test-integration-resource_pools
 .PHONY: test-integration-configlets
+.PHONY: test-integration-virtual_infra_manager_vcenter
 
 test-integration-property_set: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/property_set.yml
@@ -319,6 +320,58 @@ test-integration-resource_pools: install
 
 test-integration-configlets: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/configlets.yml
+
+# ── VIM vCenter Integration Test (requires live vCenter at 10.204.16.35) ─────
+# Full run (all phases):
+#   make test-integration-virtual_infra_manager_vcenter \
+#     ANSIBLE_FLAGS="-v -e vcenter_hostname=10.204.16.35 \
+#                   -e vcenter_username=administrator@vsphere.local \
+#                   -e vcenter_password=C0ntrail\!23"
+#
+# Single phase (e.g., verify only with existing resources):
+#   make test-integration-virtual_infra_manager_vcenter \
+#     ANSIBLE_FLAGS="--tags verify -v -e vim_id=<uuid> -e blueprint_id=<uuid> \
+#                   -e vim_system_id=<uuid>"
+test-integration-virtual_infra_manager_vcenter: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/virtual_infra_manager_vcenter.yml
+
+# ── VIM vCenter Integration Test — ConnectorOps Blueprint ────────────────────
+# Prerequisite: make create-connectorops-blueprint TESTBED_FILE=~/ACS/testbed.yaml
+#
+# Full run (all phases):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="-v \
+#       -e vcenter_hostname=10.204.16.35 \
+#       -e vcenter_username=administrator@vsphere.local \
+#       -e vcenter_password=C0ntrail\!23"
+#
+# With explicit blueprint_id (skip auto-discovery):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="-v \
+#       -e blueprint_id=e1d32dac-895f-4ae6-b27a-272dcef072a7 \
+#       -e vcenter_hostname=10.204.16.35 \
+#       -e vcenter_username=administrator@vsphere.local \
+#       -e vcenter_password=C0ntrail\!23"
+#
+# Teardown only (clean up artifacts from a prior run):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="--tags phase_teardown -v \
+#       -e blueprint_id=<uuid> \
+#       -e vim_id=<uuid> \
+#       -e vim_system_id=<uuid> \
+#       -e esxi_system_id=<blueprint_node_id> \
+#       -e vi_id=<virtual_infra_id>"
+#
+# Verify phase only (after a waiting period for VIM analytics indexing):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="--tags phase_verify -v \
+#       -e blueprint_id=<uuid> \
+#       -e vim_id=<uuid> \
+#       -e vim_system_id=<uuid> \
+#       -e vi_id=<virtual_infra_id>"
+.PHONY: test-integration-vim-connectorops
+test-integration-vim-connectorops: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/virtual_infra_manager_connectorops.yml
 
 clean-pipenv:
 	PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true
