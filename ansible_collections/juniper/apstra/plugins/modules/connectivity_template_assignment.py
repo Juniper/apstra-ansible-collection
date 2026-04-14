@@ -265,7 +265,12 @@ def _get_current_assignments(ep_client, blueprint_id, ct_id):
     Get the current assignment states for a CT by walking the
     application-points tree.
 
-    Returns a dict: {interface_id: "used"|"unused"}
+    Returns a tuple:
+      - states:       dict {interface_id: state_string}
+                      ALL valid application-point interface IDs are present,
+                      even those never assigned (state defaults to "unused").
+      - valid_ap_ids: set of all valid application-point interface IDs for
+                      this CT (used for input validation).
     """
     app_points = (
         ep_client.blueprints[blueprint_id]
@@ -273,32 +278,45 @@ def _get_current_assignments(ep_client, blueprint_id, ct_id):
         .application_points.get()
     )
     states = {}
-    _walk_app_points_tree(app_points, ct_id, states)
-    return states
+    valid_ap_ids = set()
+    _walk_app_points_tree(app_points, ct_id, states, valid_ap_ids)
+    return states, valid_ap_ids
 
 
-def _walk_app_points_tree(node, ct_id, states):
-    """Recursively walk the app-points tree and extract interface states."""
+def _walk_app_points_tree(node, ct_id, states, valid_ap_ids):
+    """Recursively walk the app-points tree and extract interface states.
+
+    Every interface node found is added to *valid_ap_ids* regardless of
+    whether the CT has been assigned to it.  The state for each interface
+    defaults to ``"unused"`` and is overwritten when a matching policy
+    entry is found.
+    """
     if not isinstance(node, dict):
         return
 
-    # Check if this node has policies for our CT
     if node.get("type") == "interface":
-        for pol in node.get("policies", []):
-            if pol.get("policy") == ct_id:
-                states[node["id"]] = pol.get("state", "unused")
+        node_id = node.get("id")
+        if node_id:
+            valid_ap_ids.add(node_id)
+            # Default to unused; overwrite if the CT has a policy entry here.
+            ct_state = "unused"
+            for pol in node.get("policies", []):
+                if pol.get("policy") == ct_id:
+                    ct_state = pol.get("state", "unused")
+                    break
+            states[node_id] = ct_state
 
     # Walk children
     children = node.get("children", [])
     if isinstance(children, list):
         for child in children:
-            _walk_app_points_tree(child, ct_id, states)
+            _walk_app_points_tree(child, ct_id, states, valid_ap_ids)
 
     # Also walk nested 'application_points' key (top-level response)
     ap = node.get("application_points")
     if isinstance(ap, dict):
         for child in ap.get("children", []):
-            _walk_app_points_tree(child, ct_id, states)
+            _walk_app_points_tree(child, ct_id, states, valid_ap_ids)
 
 
 # ── Main module logic ─────────────────────────────────────────────────────────
@@ -367,7 +385,19 @@ def main():
             return
 
         # ── Get current state ─────────────────────────────────────────
-        current_states = _get_current_assignments(ep_client, blueprint_id, ct_id)
+        current_states, valid_ap_ids = _get_current_assignments(
+            ep_client, blueprint_id, ct_id
+        )
+
+        # ── Validate resolved IDs against the CT’s application-points tree ──
+        invalid_ids = [i for i in application_point_ids if i not in valid_ap_ids]
+        if invalid_ids:
+            raise ValueError(
+                f"The following interface IDs are not valid application points "
+                f"for CT '{ct_id}' in blueprint '{blueprint_id}': {invalid_ids}. "
+                f"Ensure the interfaces are configured as access/trunk ports and "
+                f"are compatible with the CT type."
+            )
 
         # ── Determine needed changes ──────────────────────────────────
         to_apply = []
