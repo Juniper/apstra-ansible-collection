@@ -144,6 +144,13 @@ options:
         Requires C(id.virtual_infra_manager) to be set.  Supports full
         CRUD — list, create, get, PATCH, PUT, and delete — via direct
         API calls.  Global scope only.
+        B(Note:) The C(create) operation (C(state=present) with a body
+        and no C(id.vcenter)) is only supported for VIMs of type
+        C(virtual_infra_type=nsx).  For C(vcenter)-type VIMs the
+        C(/vcenters) endpoint is read-only and Apstra returns HTTP 422
+        ("Vcenters can be added to virtual infra manager of the type
+        NSX only").  List (C(state=present) without a body) works for
+        all VIM types.
       - C(anomaly_resolver) — POSTs to
         C(/api/blueprints/{id}/virtual_infra/predefined_probes/virtual_infra_vlan_match/anomaly_resolver)
         to trigger auto-resolution of virtual-infra VLAN-match anomalies.

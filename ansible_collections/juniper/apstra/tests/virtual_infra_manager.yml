@@ -42,29 +42,42 @@
   connection: local
 
   tasks:
-    # ── Auth and setup — tagged for all phases ────────────────────
+    # ── Auth and setup — always tag ensures these run regardless of
+    # --tags / --skip-tags so that auth, api_url, and naming facts
+    # are available in every phase including --skip-tags teardown.
     - name: Connect to Apstra
       juniper.apstra.authenticate:
         logout: false
       register: auth
-      tags: [phase1, phase2, phase3, teardown]
+      tags: always
 
     - name: Get Apstra API URL from environment
       ansible.builtin.set_fact:
         apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') | default('https://10.88.137.14/api') }}"
-      tags: [phase1, phase2, phase3, teardown]
+      tags: always
 
     - name: Get local hostname for unique naming
       ansible.builtin.command: hostname
       register: local_hostname
       changed_when: false
-      tags: [phase1, phase2, phase3, teardown]
+      tags: always
 
     - name: Set unique test names
       ansible.builtin.set_fact:
         vim_display_name: "test_vim_{{ local_hostname.stdout }}"
         blueprint_name: "test_vim_bp_{{ local_hostname.stdout }}"
-      tags: [phase1, phase2, phase3, teardown]
+      tags: always
+
+    # Load vCenter credentials from .env environment variables when not
+    # provided via -e on the command line.  pipenv exports the .env vars
+    # into the process environment, so lookup('env', ...) finds them here.
+    - name: Load vCenter credentials from environment (when not passed via -e)
+      ansible.builtin.set_fact:
+        vcenter_hostname: "{{ lookup('env', 'vcenter_hostname') }}"
+        vcenter_username: "{{ lookup('env', 'vcenter_username') }}"
+        vcenter_password: "{{ lookup('env', 'vcenter_password') }}"
+      when: vcenter_hostname is not defined or vcenter_hostname == ''
+      tags: always
 
     # ── Tests ─────────────────────────────────────────────────────
     - name: Run virtual_infra_manager tests
@@ -148,6 +161,18 @@
               | error: {{ (vim_poll.json['items'] | default([{}]) | first).error_message }}
               {% endif %}
           when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
+          tags: [phase1]
+
+        # Extract system_id from the poll response so Test 5 blueprint
+        # VIM assignment can run automatically without -e vim_system_id.
+        - name: "Test 1b: Set vim_system_id from connected VIM"
+          ansible.builtin.set_fact:
+            vim_system_id: >-
+              {{ (vim_poll.json['items'] | default([{}]) | first).system_id
+                 | default('') }}
+          when: >
+            vim_poll is defined and not vim_poll.skipped | default(false)
+            and (vim_poll.json['items'] | default([{}]) | first).system_id | default('') != ''
           tags: [phase1]
 
         # ── Test 2: Global get / idempotent present ────────────────
@@ -317,6 +342,19 @@
                 | default('N/A — dummy credentials') }}
               version={{ (vim_conn_poll.json['items'] | default([{}]) | first).version | default('') }}
           when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
+          tags: [phase2]
+
+        # Refresh vim_system_id from reconnect poll in case Phase 2 runs
+        # standalone (--tags phase2 -e vim_id=<uuid>) without Phase 1.
+        - name: "Phase 2 setup: set vim_system_id from reconnected VIM"
+          ansible.builtin.set_fact:
+            vim_system_id: >-
+              {{ (vim_conn_poll.json['items'] | default([{}]) | first).system_id
+                 | default('') }}
+          when: >
+            vim_conn_poll is defined and not vim_conn_poll.skipped | default(false)
+            and (vim_conn_poll.json['items'] | default([{}]) | first).system_id | default('') != ''
+            and vim_system_id is not defined
           tags: [phase2]
 
         # ── Test 4b: scope=vcenter — list vCenters ────────────────
@@ -631,6 +669,30 @@
         # TEARDOWN — Delete global VIM (Test 6)
         # Run: --tags teardown -e vim_id=<uuid>
         # ═══════════════════════════════════════════════════════════
+
+        # If blueprint_id was not set (e.g. teardown-only run without phase3),
+        # discover it by the deterministic label so the always-block can delete it.
+        - name: "Teardown: discover blueprint_id by label (when not already set)"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            validate_certs: false
+          register: _bp_list
+          when: blueprint_id is not defined
+          tags: [teardown]
+
+        - name: "Teardown: set blueprint_id from discovered label"
+          ansible.builtin.set_fact:
+            blueprint_id: >-
+              {{ (_bp_list.json['items'] | selectattr('label','equalto', blueprint_name) | list | first).id }}
+          when: >
+            blueprint_id is not defined
+            and _bp_list is not skipped
+            and (_bp_list.json['items'] | selectattr('label','equalto', blueprint_name) | list | length) > 0
+          tags: [teardown]
 
         - name: "Test 6: Delete global VIM by UUID (state=absent)"
           juniper.apstra.virtual_infra_manager:

@@ -144,7 +144,8 @@ install: build
 	test-fabric_settings \
 	test-ztp_device \
 	test-interconnect_gateway \
-    test-cabling_map
+	test-cabling_map \
+	test-virtual_infra_manager
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -218,6 +219,24 @@ test-fabric_settings: install
 test-cabling_map: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/cabling_map.yml
 
+# ── virtual_infra_manager tests ───────────────────────────────────────────────
+# Credentials are loaded automatically from .env (vcenter_hostname /
+# vcenter_username / vcenter_password).  Override with -e when needed.
+#
+# Full run — all phases + auto-cleanup:
+#   make test-virtual_infra_manager
+#
+# Skip teardown (leave VIM alive for manual inspection):
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--skip-tags teardown -v"
+#
+# Single phase:
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags phase1 -v"
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags phase2 -v -e vim_id=<uuid>"
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags phase3 -v"
+#
+# Teardown only — clean up a stale VIM left by an interrupted run:
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags teardown -v -e vim_id=<uuid>"
+# ──────────────────────────────────────────────────────────────────────────────
 test-virtual_infra_manager: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/virtual_infra_manager.yml
 
