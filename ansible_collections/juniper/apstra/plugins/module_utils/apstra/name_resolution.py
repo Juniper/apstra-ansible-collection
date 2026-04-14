@@ -350,6 +350,42 @@ def resolve_security_zone_id(client_factory, blueprint_id, sz_ref):
     )
 
 
+def resolve_resource_group_name(client_factory, blueprint_id, group_name):
+    """Resolve a resource-group name that may contain a security-zone reference.
+
+    Resource-group names for VRF-scoped groups use the format
+    ``sz:<security_zone_id>,<group_suffix>``.
+    Users may specify a security-zone label or VRF name instead of the raw
+    ID.  This function detects the ``sz:`` prefix, resolves the embedded
+    reference via :func:`resolve_security_zone_id`, and returns the
+    canonical group name with the resolved ID.
+
+    If the group name does not start with ``sz:``, it is returned unchanged.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param group_name: The resource-group name (e.g.
+        ``"sz:VRF1,leaf_loopback_ips"`` or ``"leaf_loopback_ips"``).
+    :return: The group name with any security-zone reference resolved.
+    """
+    if not group_name or not group_name.startswith("sz:"):
+        return group_name
+
+    # Parse "sz:<sz_ref>,<suffix>"
+    remainder = group_name[3:]  # strip "sz:" prefix
+    comma_idx = remainder.find(",")
+    if comma_idx < 0:
+        # Malformed — no comma separator; return as-is and let the API
+        # report the error.
+        return group_name
+
+    sz_ref = remainder[:comma_idx]
+    suffix = remainder[comma_idx + 1 :]
+
+    resolved_sz_id = resolve_security_zone_id(client_factory, blueprint_id, sz_ref)
+    return f"sz:{resolved_sz_id},{suffix}"
+
+
 def resolve_routing_policy_id(client_factory, blueprint_id, rp_ref):
     """Resolve a routing-policy reference (UUID or label) to its node ID.
 
