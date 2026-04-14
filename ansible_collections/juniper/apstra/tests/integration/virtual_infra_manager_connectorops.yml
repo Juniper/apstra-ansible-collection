@@ -1,0 +1,951 @@
+---
+# ══════════════════════════════════════════════════════════════════════════════
+# VIM vCenter Integration Test — Real Blueprint using ConnectorOps Topology
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# PREREQUISITE: Run make create-connectorops-blueprint first.
+#   This test assumes the connectorops blueprint (vg-am-cops-tb-0) is already
+#   present in Apstra with a deployed fabric, interface maps, and VNs.
+#   It does NOT create or delete the connectorops blueprint.
+#
+# Environment:
+#   vCenter:      10.204.16.35  (VMware vCenter 7.0.3)
+#   ESXi host:    10.204.16.25  (managed by vCenter, hosts VM ub24)
+#   VM ub24:      10.204.16.36  (Ubuntu on ESXi)
+#   Blueprint:    vg-am-cops-tb-0  (2 spine + 4 leaf + 4 host topology)
+#   Leaf port:    leaf1 ge-0/0/6  (confirmed free; interface map has ge-0/0/0–95)
+#   VN assigned:  green1 (vn_id=10101, vlan=101, 210.210.210.0/24)
+#   VN CT:        "Untagged VxLAN 'green1'" — already created by the blueprint
+#
+# Why this matters (vs the simple L2_Virtual_EVPN IT test):
+#   1. Blueprint has real interface maps → generic system creation succeeds
+#   2. Blueprint has deployed VNs (green1/red1/cats1/dogs1) →
+#      ESXi host is added to green1 via connectivity template
+#   3. VIM assignment + query_vm run against a real deployed fabric context
+#   4. vnet scope test can look up an actual virtual network
+#
+# Step-by-step:
+#   Step 1 — make create-connectorops-blueprint TESTBED_FILE=~/ACS/testbed.yaml
+#   Step 2 — make test-integration-vim-connectorops \
+#               ANSIBLE_FLAGS="-v -e vcenter_hostname=10.204.16.35 ..."
+#
+# Phase tags (run independently or combined):
+#   phase_vim        — Create VIM → vCenter, wait for connect, extract system_id
+#   phase_esxi       — Add ESXi host as generic system on leaf1:ge-0/0/6,
+#                      assign green1 CT to host interface
+#   phase_vim_assign — Assign VIM to blueprint (agent_id + system_id)
+#   phase_verify     — List virtual_infra, query_vm, query all VMs, vnet lookup
+#   phase_teardown   — Remove CT from host, delete generic system,
+#                      remove VIM assignment, delete VIM
+#                      ⚠ Blueprint is NOT deleted
+#
+# Full run (all phases):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="-v \
+#       -e vcenter_hostname=10.204.16.35 \
+#       -e vcenter_username=administrator@vsphere.local \
+#       -e vcenter_password=C0ntrail\!23"
+#
+# Run with existing VIM (skip phase_vim):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="--tags phase_esxi,phase_vim_assign,phase_verify,phase_teardown -v \
+#       -e vim_id=<uuid> -e vim_system_id=<uuid>"
+#
+# Teardown only (clean up test artifacts from a previous run):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="--tags teardown_vim -v \
+#       -e blueprint_id=<uuid> \
+#       -e vim_id=<uuid> \
+#       -e vim_system_id=<uuid> \
+#       -e esxi_system_id=<blueprint_node_id> \
+#       -e vi_id=<virtual_infra_id>"
+#
+# Run setup+verify only, leave everything alive (inspect in Apstra UI):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="--tags phase_vim,phase_esxi,phase_vim_assign,phase_verify -v \
+#       -e blueprint_id=e1d32dac-895f-4ae6-b27a-272dcef072a7 \
+#       -e vcenter_hostname=10.204.16.35 ..."
+#
+# Full run but keep alive for inspection (skip teardown):
+#   make test-integration-vim-connectorops \
+#     ANSIBLE_FLAGS="--skip-tags teardown_vim -v ..."
+#
+# ══════════════════════════════════════════════════════════════════════════════
+
+- name: VIM vCenter Integration Test — ConnectorOps Blueprint
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # vCenter credentials — override via -e
+    vcenter_hostname: "10.204.16.35"
+    vcenter_username: "administrator@vsphere.local"
+    vcenter_password: "C0ntrail!23"
+
+    # ESXi / VM info
+    esxi_host_ip: "10.204.16.25"
+    vm_target_name: "ub24"
+
+    # ConnectorOps blueprint label (used if blueprint_id not provided)
+    connectorops_label: "vg-am-cops-tb-0"
+
+    # Leaf port for ESXi generic system — confirmed free in interface map
+    esxi_leaf_if: "ge-0/0/6"
+
+    # VN to assign the ESXi host to (using existing green1 CT in blueprint)
+    esxi_vn_label: "green1"
+    esxi_vn_ct_label: "Untagged VxLAN 'green1'"
+
+    # green1 VN details (VxLAN, vn_id=10101, vlan=101)
+    green_sz_id: "XS1K8QiZxJ5hitNBdg"   # green security zone (vrf=green, vlan=2)
+    green1_gateway: "210.210.210.1"      # SVI gateway on leaf1/leaf2/border-leafs
+    green1_subnet: "210.210.210.0/24"
+
+    # FT test: VM on ESXi that should land in green1 VN after vnet_remediation_policy
+    # is configured. Requires manual static IP in green1_subnet on the VM first.
+    ft_vm_host: "10.204.16.36"           # ub24 management IP (Ubuntu on ESXi)
+    ft_vm_user: "ubuntu"                 # SSH user for ub24 — override via -e
+    ft_vm_password: "{{ vcenter_password }}"  # SSH password (same as vCenter lab password)
+    ft_vm_green1_ip: "210.210.210.20"    # Static IP in green1 subnet on ub24's ens192
+                                         # .20 avoids conflict with h1 (210.210.210.10/24)
+                                         # override via -e ft_vm_green1_ip=<ip>
+
+  tasks:
+    # ══════════════════════════════════════════════════════════════════════
+    # Common — auth + resolve blueprint_id — run for all phases
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+      tags: [phase_vim, phase_esxi, phase_vim_assign, phase_verify, phase_ft, phase_teardown]
+
+    - name: Set Apstra API URL
+      ansible.builtin.set_fact:
+        apstra_api_url: >-
+          {{ lookup('env', 'APSTRA_API_URL') | default('https://10.88.137.14/api') }}
+      tags: [phase_vim, phase_esxi, phase_vim_assign, phase_verify, phase_ft, phase_teardown]
+
+    # Resolve blueprint_id: use provided value OR discover by connectorops_label
+    - name: "Resolve blueprint_id (discover by label '{{ connectorops_label }}' if not provided)"
+      block:
+        - name: List blueprints
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+          register: bp_list
+
+        - name: Extract blueprint_id by label
+          ansible.builtin.set_fact:
+            blueprint_id: >-
+              {{ (bp_list.json['items'] | default([])
+                  | selectattr('label', 'equalto', connectorops_label)
+                  | map(attribute='id') | list | first) | default('') }}
+      when: blueprint_id is not defined
+      tags: [phase_vim, phase_esxi, phase_vim_assign, phase_verify, phase_ft, phase_teardown]
+
+    - name: "Assert: connectorops blueprint found"
+      ansible.builtin.assert:
+        that:
+          - blueprint_id is defined
+          - blueprint_id | length > 0
+        success_msg: "Blueprint '{{ connectorops_label }}' resolved: {{ blueprint_id }}"
+        fail_msg: >-
+          Blueprint '{{ connectorops_label }}' not found.
+          Run: make create-connectorops-blueprint TESTBED_FILE=~/ACS/testbed.yaml
+      tags: [phase_vim, phase_esxi, phase_vim_assign, phase_verify, phase_ft, phase_teardown]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PHASE: phase_vim — Create VIM + wait for vCenter connect
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: "VIM 0: Pre-flight — check if VIM for {{ vcenter_hostname }} already exists"
+      # Idempotency guard: if a VIM with this management_ip already exists (e.g.
+      # left by a previous failed run), reuse it rather than getting a 409.
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/virtual-infra-managers"
+        method: GET
+        headers:
+          AuthToken: "{{ auth.token }}"
+        validate_certs: false
+      register: vim_preflight
+      when: vim_id is not defined
+      tags: [phase_vim]
+
+    - name: Set vim_id from pre-existing VIM (same management_ip)
+      ansible.builtin.set_fact:
+        vim_id: >-
+          {{ (vim_preflight.json['items'] | default([])
+              | selectattr('management_ip', 'equalto', vcenter_hostname)
+              | map(attribute='id') | list | first) | default('') }}
+        vim_preexisting: true
+      when:
+        - vim_id is not defined
+        - vim_preflight is not skipped
+        - vim_preflight.json['items'] | default([])
+          | selectattr('management_ip', 'equalto', vcenter_hostname)
+          | list | length > 0
+      tags: [phase_vim]
+
+    - name: Display pre-existing VIM (if found)
+      ansible.builtin.debug:
+        msg: "Reusing pre-existing VIM {{ vim_id }} for {{ vcenter_hostname }}"
+      when: vim_preexisting | default(false)
+      tags: [phase_vim]
+
+    - name: "VIM 1: Create VIM → vCenter {{ vcenter_hostname }}"
+      juniper.apstra.virtual_infra_manager:
+        body:
+          virtual_infra_type: "vcenter"
+          management_ip: "{{ vcenter_hostname }}"
+          username: "{{ vcenter_username }}"
+          password: "{{ vcenter_password }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: vim_create
+      when: vim_id is not defined or vim_id | length == 0
+      tags: [phase_vim]
+
+    - name: Set vim_id from created VIM
+      ansible.builtin.set_fact:
+        vim_id: "{{ vim_create.id.virtual_infra_manager }}"
+      when:
+        - vim_create is not skipped
+        - not vim_create.failed | default(false)
+        - vim_create.id is defined
+      tags: [phase_vim]
+
+    - name: "VIM 2: Wait for VIM to connect to vCenter (up to 90s)"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/virtual-infra-managers/{{ vim_id }}"
+        method: GET
+        headers:
+          AuthToken: "{{ auth.token }}"
+        validate_certs: false
+      register: vim_poll
+      until: >-
+        (vim_poll.json['items'] | default([{}]) | first).connection_state
+        | default('disconnected') == 'connected'
+      retries: 18
+      delay: 5
+      tags: [phase_vim]
+
+    - name: Set vim_system_id + vim_version from connected VIM
+      ansible.builtin.set_fact:
+        vim_system_id: "{{ (vim_poll.json['items'] | first).system_id }}"
+        vim_conn_state: "{{ (vim_poll.json['items'] | first).connection_state }}"
+        vim_version: "{{ (vim_poll.json['items'] | first).version | default('?') }}"
+      when: vim_poll is not skipped
+      tags: [phase_vim]
+
+    - name: "VIM 3: Assert VIM connected to vCenter"
+      ansible.builtin.assert:
+        that:
+          - vim_conn_state | default('') == 'connected'
+          - vim_system_id is defined and vim_system_id | length > 0
+        success_msg: >-
+          VIM PASSED: {{ vim_id }} connected to {{ vcenter_hostname }}
+          (v{{ vim_version | default('?') }}) — system_id={{ vim_system_id }}
+        fail_msg: >-
+          VIM FAILED: connection_state={{ vim_conn_state | default('unknown') }}
+      tags: [phase_vim]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PHASE: phase_esxi — Add ESXi host as generic system + assign to green1
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: "ESXi 0: Ensure vim_system_id known (query VIM if phase_vim skipped)"
+      block:
+        - name: Query VIM for system_id
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/virtual-infra-managers/{{ vim_id }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+          register: vim_lookup
+
+        - name: Set vim_system_id from lookup
+          ansible.builtin.set_fact:
+            vim_system_id: "{{ (vim_lookup.json['items'] | first).system_id }}"
+      when: vim_system_id is not defined and vim_id is defined
+      tags: [phase_esxi, phase_vim_assign]
+
+    - name: "ESXi 1: Discover leaf1 node ID (label ends in -leaf1, not border)"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          query: "node('system', role='leaf', name='leaf')"
+        validate_certs: false
+      register: leaf_qe
+      tags: [phase_esxi]
+
+    - name: Set leaf1_id (first non-border leaf in topology order)
+      ansible.builtin.set_fact:
+        leaf1_id: >-
+          {{ (leaf_qe.json['items'] | default([])
+              | map(attribute='leaf')
+              | selectattr('label', 'search', connectorops_label + '-leaf1$')
+              | map(attribute='id') | list | first) }}
+        leaf1_label: >-
+          {{ (leaf_qe.json['items'] | default([])
+              | map(attribute='leaf')
+              | selectattr('label', 'search', connectorops_label + '-leaf1$')
+              | map(attribute='label') | list | first) }}
+      tags: [phase_esxi]
+
+    - name: "ESXi 2: Confirm ge-0/0/6 is free on leaf1 (not in cabling map)"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          query: >-
+            node('system', id='{{ leaf1_id }}')
+            .out('hosted_interfaces')
+            .node('interface', if_name='{{ esxi_leaf_if }}', name='intf')
+            .out('link')
+            .node('link', name='lk')
+        validate_certs: false
+      register: port_check
+      tags: [phase_esxi]
+
+    - name: Display leaf1 port availability
+      ansible.builtin.debug:
+        msg: >-
+          Leaf1 ({{ leaf1_label }}) port {{ esxi_leaf_if }}:
+          {% if port_check.json['items'] | length == 0 %}FREE ✓ — safe to add ESXi host
+          {% else %}OCCUPIED — link already exists ({{ port_check.json['items'][0].lk.id | default('?') }}){% endif %}
+      tags: [phase_esxi]
+
+    - name: "ESXi 3: Add ESXi host ({{ esxi_host_ip }}) as generic system on {{ leaf1_label }}:{{ esxi_leaf_if }}"
+      # Creates a logical fabric node representing the physical ESXi host.
+      # The VIM (vCenter at 10.204.16.35) independently tracks VMs on this host.
+      # transform_id=1: single ethernet port (no LAG/LACP).
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          name: "esxi-ub24-host"
+          hostname: "esxi-{{ esxi_host_ip | replace('.', '-') }}"
+          tags:
+            - "esxi"
+            - "vcenter-managed"
+          links:
+            - target_switch_id: "{{ leaf1_id }}"
+              target_switch_if_name: "{{ esxi_leaf_if }}"
+              target_switch_if_transform_id: 1
+              tags:
+                - "1G"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gs_esxi
+      tags: [phase_esxi]
+
+    - name: Set esxi_system_id for teardown
+      ansible.builtin.set_fact:
+        esxi_system_id: "{{ gs_esxi.system_id }}"
+      when: not gs_esxi.failed
+      tags: [phase_esxi]
+
+    - name: "ESXi 4: Assert ESXi generic system created or already present"
+      ansible.builtin.assert:
+        that:
+          - not gs_esxi.failed
+          - gs_esxi.system_id is defined
+          - gs_esxi.changed or 'no changes' in (gs_esxi.msg | default(''))
+        success_msg: >-
+          ESXi generic system 'esxi-ub24-host' ✅
+          ({{ 'created' if gs_esxi.changed else 'already present — idempotent' }})
+          system_id={{ gs_esxi.system_id }}
+        fail_msg: "ESXi generic system FAILED: {{ gs_esxi.msg | default('?') }}"
+      tags: [phase_esxi]
+
+    - name: "ESXi 5: Assign green1 VN to leaf1:{{ esxi_leaf_if }} via '{{ esxi_vn_ct_label }}' CT"
+      # For a batch CT the application point is the LEAF-SIDE interface
+      # (leaf1 port ge-0/0/6 facing the ESXi host) — NOT the generic system's
+      # host-side eth0. This was confirmed from the Apstra CT AP tree:
+      #   ge-0/0/6 -> esxi-ub24-host  (id=QgusGEz3C3x_wOESBQ, state=unused)
+      # Assigning this CT makes the VxLAN green1's tag applied on that port,
+      # so ub24 VM traffic arriving untagged gets mapped to green1 (VLAN 101).
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "{{ esxi_vn_ct_label }}"
+        body:
+          application_point_ids:
+            - system: "{{ leaf1_label }}"
+              if_name: "{{ esxi_leaf_if }}"
+        state: present
+      register: ct_assign
+      tags: [phase_esxi]
+
+    - name: "ESXi 6: Assert green1 CT assigned to leaf1:{{ esxi_leaf_if }}"
+      ansible.builtin.assert:
+        that:
+          - not ct_assign.failed
+          - ct_assign.changed or 'already' in (ct_assign.msg | default(''))
+        success_msg: >-
+          Green1 CT assigned to {{ leaf1_label }}:{{ esxi_leaf_if }} ✅
+          ({{ 'changed' if ct_assign.changed else 'already present' }})
+        fail_msg: "green1 CT assignment FAILED: {{ ct_assign.msg | default(ct_assign | string) }}"
+      tags: [phase_esxi]
+
+    - name: Display ESXi setup summary
+      ansible.builtin.debug:
+        msg: |
+          ────────────────────────────────────────────────────────
+          ESXi Setup Summary
+          ────────────────────────────────────────────────────────
+          Generic system:   esxi-ub24-host  ({{ esxi_system_id | default('?') }})
+          Fabric position:  {{ leaf1_label }}:{{ esxi_leaf_if }} (transform_id=1)
+          VN assignment:    {{ esxi_vn_ct_label }}
+          CT state:         {{ 'assigned (changed)' if ct_assign.changed else 'already present' }}
+          ESXi IP:          {{ esxi_host_ip }}
+          VM tracked:       {{ vm_target_name }} (10.204.16.36) via vCenter {{ vcenter_hostname }}
+          ────────────────────────────────────────────────────────
+      tags: [phase_esxi]
+
+    - name: "Commit blueprint after ESXi generic system + green1 CT assignment"
+      # Commit staged changes so the fabric reflects the new access port
+      # and VLAN assignment for the ESXi host in Apstra's intent store.
+      juniper.apstra.blueprint:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+      register: bp_commit_esxi
+      tags: [phase_esxi]
+
+    - name: Display ESXi commit result
+      ansible.builtin.debug:
+        msg: "Blueprint committed after ESXi setup ({{ 'changed' if bp_commit_esxi.changed else 'no staged changes' }})"
+      tags: [phase_esxi]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PHASE: phase_vim_assign — Assign VIM to connectorops blueprint
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: "VIM Assign 1: Check if VIM already assigned to blueprint"
+      juniper.apstra.virtual_infra_manager:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: vi_existing
+      tags: [phase_vim_assign]
+
+    - name: Show existing virtual_infra assignments
+      ansible.builtin.debug:
+        msg: >-
+          Existing virtual_infra nodes: {{ vi_existing.virtual_infra | length }}
+          {% if vi_existing.virtual_infra | length > 0 %}
+          — {{ vi_existing.virtual_infra | map(attribute='system_id') | list }}
+          {% endif %}
+      tags: [phase_vim_assign]
+
+    - name: "VIM Assign 2: Assign VIM to connectorops blueprint"
+      # API requires both agent_id (VIM UUID) AND system_id (VIM's own top-level
+      # system_id, NOT the ESXi host UUID).  Confirmed by live API testing.
+      juniper.apstra.virtual_infra_manager:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        body:
+          infra_type: "vcenter"
+          agent_id: "{{ vim_id }}"
+          system_id: "{{ vim_system_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: vim_bp_assign
+      tags: [phase_vim_assign]
+
+    - name: Set vi_id for teardown
+      ansible.builtin.set_fact:
+        vi_id: "{{ vim_bp_assign.id.virtual_infra }}"
+      when:
+        - not vim_bp_assign.failed
+        - vim_bp_assign.id is defined
+        - "'virtual_infra' in vim_bp_assign.id"
+      tags: [phase_vim_assign]
+
+    - name: "VIM Assign 3: Assert VIM assigned to blueprint"
+      ansible.builtin.assert:
+        that:
+          - not vim_bp_assign.failed
+          - vim_bp_assign.msg is defined
+        success_msg: >-
+          VIM assignment PASSED ✅ —
+          virtual_infra id={{ vim_bp_assign.id.virtual_infra | default('already present') }}
+          msg={{ vim_bp_assign.msg }}
+        fail_msg: "VIM assignment FAILED: {{ vim_bp_assign.msg | default(vim_bp_assign | string) }}"
+      tags: [phase_vim_assign]
+
+    - name: "Commit blueprint after VIM assignment"
+      # Commit so the VIM association is persisted in Apstra's intent store
+      # and visible in the blueprint virtual_infra graph.
+      juniper.apstra.blueprint:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+      register: bp_commit_vim
+      tags: [phase_vim_assign]
+
+    - name: Display VIM assignment commit result
+      ansible.builtin.debug:
+        msg: "Blueprint committed after VIM assignment ({{ 'changed' if bp_commit_vim.changed else 'no staged changes' }})"
+      tags: [phase_vim_assign]
+
+    - name: "VIM Assign 4: Set vnet_remediation_policy (VN type=vxlan, SZ=green)"
+      # The Apstra blueprint/virtual_infra individual GET returns {"items": [...]}
+      # making compare_and_update miss the nested policy field.  Use the URI
+      # module to PATCH directly.  API field is 'vn_type' (not 'vnet_type').
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/virtual_infra/{{ vi_id }}"
+        method: PATCH
+        headers:
+          AuthToken: "{{ auth.token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          vnet_remediation_policy:
+            vn_type: vxlan
+            security_zone_id: "{{ green_sz_id }}"
+        validate_certs: false
+        status_code: [200, 202]
+      register: vim_vnet_policy
+      tags: [phase_vim_assign]
+
+    - name: "VIM Assign 4a: Assert PATCH accepted (202)"
+      ansible.builtin.assert:
+        that:
+          - vim_vnet_policy.status in [200, 202]
+        success_msg: >-
+          vnet_remediation_policy PATCH accepted (HTTP {{ vim_vnet_policy.status }})
+          — vi_id={{ vi_id }}
+        fail_msg: >-
+          vnet_remediation_policy PATCH FAILED (HTTP {{ vim_vnet_policy.status }}):
+          {{ vim_vnet_policy.json | default(vim_vnet_policy) | to_json }}
+      tags: [phase_vim_assign]
+
+    - name: "VIM Assign 5: Fetch virtual_infra list to verify vnet_remediation_policy"
+      # Individual GET returns null (Apstra quirk) — use the list endpoint instead.
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/virtual_infra"
+        method: GET
+        headers:
+          AuthToken: "{{ auth.token }}"
+        validate_certs: false
+      register: vi_list_check
+      tags: [phase_vim_assign]
+
+    - name: "VIM Assign 6: Assert vnet_remediation_policy set correctly"
+      vars:
+        vi_entry: >-
+          {{ vi_list_check.json['items'] | default([])
+             | selectattr('id', 'equalto', vi_id) | list | first | default({}) }}
+      ansible.builtin.assert:
+        that:
+          - vi_entry.vnet_remediation_policy is defined
+          - vi_entry.vnet_remediation_policy.vn_type == 'vxlan'
+          - vi_entry.vnet_remediation_policy.security_zone_id == green_sz_id
+        success_msg: >-
+          vnet_remediation_policy PASSED ✅ —
+          vn_type=vxlan, security_zone_id={{ green_sz_id }} (green SZ, vrf=green)
+        fail_msg: >-
+          vnet_remediation_policy FAILED.
+          vi_entry={{ vi_entry | to_json }}
+      tags: [phase_vim_assign]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PHASE: phase_verify — List virtual_infra, query_vm, vnet, summary
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: "Verify 1: List all virtual_infra nodes in blueprint"
+      juniper.apstra.virtual_infra_manager:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp_vim_list
+      tags: [phase_verify]
+
+    - name: "Verify 1: Assert VIM entry present with correct system_id"
+      ansible.builtin.assert:
+        that:
+          - bp_vim_list.virtual_infra | length >= 1
+          - bp_vim_list.virtual_infra
+            | selectattr('system_id', 'equalto', vim_system_id | default(''))
+            | list | length >= 1
+        success_msg: >-
+          Verify 1 PASSED ✅ — {{ bp_vim_list.virtual_infra | length }} virtual_infra
+          node(s) in blueprint. VIM system_id {{ vim_system_id }} found.
+          Full list: {{ bp_vim_list.virtual_infra | to_json }}
+        fail_msg: >-
+          Verify 1 FAILED — VIM system_id {{ vim_system_id | default('(not set)') }}
+          not found. Present: {{ bp_vim_list.virtual_infra | map(attribute='system_id') | list }}
+      tags: [phase_verify]
+
+    - name: "Verify 2: Get virtual_infra node details by ID"
+      juniper.apstra.virtual_infra_manager:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          virtual_infra: "{{ vi_id }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: vi_detail
+      when: vi_id is defined
+      ignore_errors: true
+      tags: [phase_verify]
+
+    - name: Display virtual_infra node details
+      ansible.builtin.debug:
+        msg: |
+          virtual_infra node ({{ vi_id | default('(id not set)') }}):
+            infra_type:     {{ (vi_detail.virtual_infra | default([{}]) | first).infra_type | default('?') }}
+            system_id:      {{ (vi_detail.virtual_infra | default([{}]) | first).system_id | default('?') }}
+            system_address: {{ (vi_detail.virtual_infra | default([{}]) | first).system_address | default('?') }}
+      when: vi_id is defined and vi_detail is not skipped
+      tags: [phase_verify]
+
+    - name: "Verify 3: query_vm '{{ vm_target_name }}' — search VM inventory via VIM"
+      # POSTs to /blueprints/{id}/virtual_infra/query/vm
+      # Returns VMs in vCenter matching vm_name.
+      # ub24 (10.204.16.36) runs on ESXi 10.204.16.25.
+      # NOTE: Result depends on VIM analytics collection state.
+      #       0 results acceptable on first run; retry after a few minutes.
+      juniper.apstra.virtual_infra_manager:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        scope: query_vm
+        body:
+          vm_name: "{{ vm_target_name }}"
+        auth_token: "{{ auth.token }}"
+      register: vm_query_specific
+      ignore_errors: true
+      tags: [phase_verify]
+
+    - name: Display query_vm result for '{{ vm_target_name }}'
+      ansible.builtin.debug:
+        msg: |
+          ─────────────────────────────────────────────────────────────
+          query_vm '{{ vm_target_name }}' (ESXi {{ esxi_host_ip }}):
+            Status:    {{ 'OK' if not vm_query_specific.failed else 'ERROR — ' + (vm_query_specific.msg | default('?')) }}
+            VMs found: {{ vm_query_specific.vms | default([]) | length }}
+            Result:    {{ vm_query_specific.vms | default([]) | to_nice_json }}
+          ─────────────────────────────────────────────────────────────
+          NOTE: 0 results = VIM inventory not yet indexed.
+                Re-run --tags phase_verify after a few minutes.
+          ─────────────────────────────────────────────────────────────
+      tags: [phase_verify]
+
+    - name: "Verify 4: query_vm '*' — full vCenter inventory"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/virtual_infra/query/vm"
+        method: POST
+        headers:
+          AuthToken: "{{ auth.token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          vm_name: "*"
+        validate_certs: false
+        status_code: [200, 201]
+      register: vm_query_all
+      ignore_errors: true
+      tags: [phase_verify]
+
+    - name: Display full vCenter VM inventory
+      ansible.builtin.debug:
+        msg: |
+          Full vCenter inventory (vm_name=*):
+            Total VMs: {{ vm_query_all.json['total_count'] | default(0) }}
+            VMs:       {{ vm_query_all.json['items'] | default([]) | to_nice_json }}
+      when: not vm_query_all.failed
+      tags: [phase_verify]
+
+    - name: "Verify 5: Get green1 vnet details (scope=vnet)"
+      # Retrieves the VxLAN virtual_infra view of green1 from the blueprint.
+      # Requires the VIM to be assigned AND green1 VN to exist in the blueprint.
+      juniper.apstra.virtual_infra_manager:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          vnet: "{{ green1_vn_id | default('-uZCIbQdB1jqK0cjqg') }}"
+        scope: vnet
+        auth_token: "{{ auth.token }}"
+      register: vnet_result
+      ignore_errors: true
+      tags: [phase_verify]
+
+    - name: Display green1 vnet result
+      ansible.builtin.debug:
+        msg: |
+          green1 vnet lookup (scope=vnet):
+            Status: {{ 'OK' if not vnet_result.failed else 'ERROR — ' + (vnet_result.msg | default('?')) }}
+            Result: {{ vnet_result.vnet | default({}) | to_nice_json }}
+      tags: [phase_verify]
+
+    - name: Final verification summary
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════════
+          VIM ConnectorOps Integration Test — Final Summary
+          ═══════════════════════════════════════════════════════════════════
+          Blueprint:           {{ connectorops_label }} ({{ blueprint_id | default('?') }})
+          VIM ID:              {{ vim_id | default('(not set)') }}
+          VIM system_id:       {{ vim_system_id | default('(not set)') }}
+          vCenter:             {{ vcenter_hostname }}
+          ESXi host:           {{ esxi_host_ip }} → leaf1:{{ esxi_leaf_if }}
+          ESXi generic sys:    esxi-ub24-host ({{ esxi_system_id | default('?') }})
+          VN assignment:       {{ esxi_vn_ct_label }} on eth0
+          VIM→BP assigned:     {{ 'YES' if (bp_vim_list.virtual_infra | default([]) | length > 0) else 'NO' }}
+          virtual_infra id:    {{ vi_id | default('(not set)') }}
+          query_vm '{{ vm_target_name }}':     {{ vm_query_specific.vms | default([]) | length }} result(s)
+          query_vm '*':        {{ vm_query_all.json['total_count'] | default(0) }} total VM(s)
+          vnet green1:         {{ 'found' if (vnet_result.vnet | default({})) else 'empty/error' }}
+          ═══════════════════════════════════════════════════════════════════
+          Next: If query_vm returns 0, wait a few minutes and re-run:
+            make test-integration-vim-connectorops \
+              ANSIBLE_FLAGS="--tags phase_verify -v \
+                -e blueprint_id={{ blueprint_id | default('?') }} \
+                -e vim_id={{ vim_id | default('?') }} \
+                -e vim_system_id={{ vim_system_id | default('?') }} \
+                -e vi_id={{ vi_id | default('?') }}"
+          ═══════════════════════════════════════════════════════════════════
+      tags: [phase_verify]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PHASE: phase_ft — Functional test: ping green1 gateway from ub24 VM
+    # ══════════════════════════════════════════════════════════════════════
+    # Prerequisites before running this phase:
+    #   1. vnet_remediation_policy is set (run phase_vim_assign ✅)
+    #   2. ub24 has a second NIC (ens192) with IP 210.210.210.20/32 configured
+    #      permanently via /etc/netplan/60-green1.yaml (no runtime setup needed).
+    #      NOTE: 210.210.210.10 is reserved for h1 (testbed device in green1 VN).
+    #   3. SSH is reachable on ft_vm_host (10.204.16.36) with ft_vm_user (ubuntu).
+    #   4. leaf1:ge-0/0/6 physical link status:
+    #      NOTE: ge-0/0/6 may be DOWN in this virtual lab because the ESXi host
+    #      (10.204.16.25) has only one pNIC on the management network. The vJunos
+    #      leaf1 runs on a separate hypervisor with no direct virtual cable to ESXi.
+    #      The green1 gateway (210.210.210.1) is still reachable via OOB management
+    #      routing (through 10.204.16.254 → BGP → leaf1 IRB). Blueprint is correct.
+    # Run:
+    #   make test-integration-vim-connectorops \
+    #     ANSIBLE_FLAGS="--tags phase_ft -v ..."
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: "FT 1: SSH reachability to ub24 ({{ ft_vm_host }})"
+      ansible.builtin.wait_for:
+        host: "{{ ft_vm_host }}"
+        port: 22
+        timeout: 15
+        state: started
+      register: ft_ssh_check
+      tags: [phase_ft]
+
+    - name: "FT 2: Ping green1 gateway ({{ green1_gateway }}) from ub24"
+      # ub24 pings the green1 gateway (210.210.210.1 = leaf1 IRB) via OOB management
+      # routing (10.204.16.254 → BGP → leaf1 IRB). No /24 on ens192 so no L2 conflict.
+      # Uses sshpass with the lab vcenter_password for SSH authentication.
+      ansible.builtin.shell: |
+        sshpass -p '{{ ft_vm_password }}'           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10           {{ ft_vm_user }}@{{ ft_vm_host }}           "ping -c 3 -W 2 {{ green1_gateway }}"
+      args:
+        executable: /bin/bash
+      register: ft_ping_gw
+      delegate_to: localhost
+      tags: [phase_ft]
+
+    - name: "FT 3: Assert gateway ping passed"
+      ansible.builtin.assert:
+        that:
+          - ft_ping_gw.rc is defined
+          - ft_ping_gw.rc == 0
+        success_msg: >-
+          FT PASSED ✅ — ub24 ({{ ft_vm_host }}) can ping green1 gateway
+          {{ green1_gateway }}.  OOB routing path via 10.204.16.254 is working.
+        fail_msg: >-
+          FT FAILED — ub24 cannot ping {{ green1_gateway }}.
+          Check: (1) ub24 ens192 has IP {{ ft_vm_green1_ip }}/32 (check netplan),
+          (2) vnet_remediation_policy is set (run phase_vim_assign),
+          (3) CT 'Untagged VxLAN green1' is assigned to leaf1:{{ esxi_leaf_if }},
+          (4) leaf1:{{ esxi_leaf_if }} interface is UP in Apstra telemetry
+              (check /api/blueprints/<id>/anomalies for interface anomaly on {{ esxi_leaf_if }}).
+          stdout={{ ft_ping_gw.stdout | default('') }}
+      tags: [phase_ft]
+
+    - name: "FT 4: Ping ub24 green1 IP ({{ ft_vm_green1_ip }}) from Ansible host"
+      # Second direction: Ansible host → 10.204.16.254 → BGP → ub24:ens192 (210.210.210.20)
+      # Works via OOB management routing (same path as FT 2, reverse direction).
+      ansible.builtin.shell: "ping -c 3 -W 2 {{ ft_vm_green1_ip }}"
+      register: ft_ping_vm
+      when: ft_vm_green1_ip | length > 0
+      delegate_to: localhost
+      tags: [phase_ft]
+
+    - name: "FT Summary"
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════════════════
+          FT Results
+          ═══════════════════════════════════════════════════════════════════
+          green1 IP on ub24:   {{ ft_vm_green1_ip }}/32 on ens192
+          SSH to ub24:         {{ 'OK' if not (ft_ssh_check.failed | default(true)) else 'FAILED' }}
+          Ping GW from ub24:   {{ 'PASSED ✅' if (ft_ping_gw.rc | default(1)) == 0 else 'FAILED' }}
+          Ping VM from host:   {{ 'PASSED ✅' if (ft_ping_vm.rc | default(1)) == 0 else 'FAILED (no route)' }}
+          ═══════════════════════════════════════════════════════════════════
+      tags: [phase_ft]
+
+    # ══════════════════════════════════════════════════════════════════════
+    # PHASE: phase_teardown — Remove test artifacts ONLY
+    # ⚠ The connectorops blueprint itself is NOT deleted.
+    # ══════════════════════════════════════════════════════════════════════
+
+    - name: "Teardown 1: Unassign green1 CT from leaf1:{{ esxi_leaf_if }}"
+      # Must use the leaf-side interface (same as during assignment)
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "{{ esxi_vn_ct_label }}"
+        body:
+          application_point_ids:
+            - system: "{{ leaf1_label | default(connectorops_label + '-leaf1') }}"
+              if_name: "{{ esxi_leaf_if }}"
+        state: absent
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: "Teardown 2: Remove VIM assignment from blueprint (direct DELETE)"
+      # NOTE: SDK blueprints.virtual_infra delete has URL pluralization bug
+      # (virtual_infra → virtual_infras). Using uri module directly.
+      # Skip with: --skip-tags teardown_vim
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/virtual_infra/{{ vi_id }}"
+        method: DELETE
+        headers:
+          AuthToken: "{{ auth.token }}"
+        validate_certs: false
+        status_code: [200, 204, 404]
+      when: vi_id is defined
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: "Teardown 2b: Remove VIM assignment by system_id (fallback if vi_id not set)"
+      block:
+        - name: List current virtual_infra nodes
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/virtual_infra"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+          register: vi_list_td
+
+        - name: Delete entries matching our system_id
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/virtual_infra/{{ item.id }}"
+            method: DELETE
+            headers:
+              AuthToken: "{{ auth.token }}"
+            validate_certs: false
+            status_code: [200, 204]
+          loop: >-
+            {{ vi_list_td.json['items'] | default([])
+               | selectattr('system_id', 'equalto', vim_system_id | default('')) | list }}
+          ignore_errors: true
+      when: vi_id is not defined and vim_system_id is defined
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: "Teardown 3: Delete ESXi generic system from blueprint"
+      # id.system_id = blueprint node ID (what generic_systems module reads via id_param.get('system_id'))
+      # Do NOT use id.system — that key is not parsed by _handle_absent()
+      juniper.apstra.generic_systems:
+        id:
+          blueprint: "{{ blueprint_id }}"
+          system_id: "{{ esxi_system_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      when: esxi_system_id is defined
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: "Teardown 3b: Delete ESXi generic system by name (fallback if esxi_system_id not set)"
+      block:
+        - name: Find esxi-ub24-host node ID
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints/{{ blueprint_id }}/qe"
+            method: POST
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              query: "node('system', label='esxi-ub24-host', name='s')"
+            validate_certs: false
+          register: esxi_lookup
+
+        - name: Delete esxi-ub24-host by found node ID
+          juniper.apstra.generic_systems:
+            id:
+              blueprint: "{{ blueprint_id }}"
+              system_id: "{{ esxi_lookup.json['items'][0].s.id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: esxi_lookup.json['items'] | length > 0
+          ignore_errors: true
+      when: esxi_system_id is not defined
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: "Teardown 4: Delete VIM {{ vim_id | default('') }}"
+      # Skip with: --skip-tags teardown_vim
+      juniper.apstra.virtual_infra_manager:
+        id:
+          virtual_infra_manager: "{{ vim_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      when: vim_id is defined
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: "Commit blueprint after teardown"
+      # Commit the removed ESXi generic system + CT unassignment so the
+      # blueprint intent store reflects the clean state.
+      juniper.apstra.blueprint:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_id }}"
+        lock_state: "ignore"
+        state: committed
+      register: bp_commit_teardown
+      ignore_errors: true
+      tags: [phase_teardown, teardown_vim]
+
+    - name: Teardown complete
+      ansible.builtin.debug:
+        msg: |
+          Teardown complete.
+            VIM {{ vim_id | default('?') }} deleted
+            ESXi generic system ({{ esxi_system_id | default('esxi-ub24-host') }}) deleted
+            virtual_infra ({{ vi_id | default('?') }}) removed
+            ⚠ Blueprint '{{ connectorops_label }}' ({{ blueprint_id }}) was NOT deleted.
+      tags: [phase_teardown]

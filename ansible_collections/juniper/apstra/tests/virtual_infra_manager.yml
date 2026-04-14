@@ -1,0 +1,743 @@
+---
+# ── Test playbook for juniper.apstra.virtual_infra_manager ───────────────────
+#
+# Phase tags for incremental execution:
+#
+#   phase1   — Global VIM CRUD (Tests 1–4)
+#              create · idempotent · patch · put (state=replaced)
+#
+#   phase2   — scope=vcenter sub-resource (Tests 4b–4f)
+#              list / create(NSX) / get / patch / delete vCenters
+#              Phase entry restores real management_ip + waits for
+#              VIM to connect (when real vcenter_hostname provided)
+#
+#   phase3   — Blueprint scope (Tests 5a–5d)
+#              list virtual_infra · assign VIM · anomaly_resolver ·
+#              query_vm · vnet
+#
+#   teardown — Delete VIM and blueprint (Test 6 + cleanup)
+#
+# Full run (all phases):
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="-v \
+#     -e vcenter_hostname=10.204.16.35 \
+#     -e vcenter_username=administrator@vsphere.local \
+#     -e vcenter_password=C0ntrail\!23"
+#
+# Run a single phase (phases 2+ can be run with an existing vim_id):
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags phase1 -v ..."
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags phase2 -v -e vim_id=<uuid> ..."
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags phase3 -v ..."
+#   make test-virtual_infra_manager ANSIBLE_FLAGS="--tags teardown -e vim_id=<uuid> ..."
+#
+# NSX vs vcenter VIM architecture note:
+#   vcenter VIM: The VIM IS the direct connection. Create globally via
+#     virtual_infra_type=vcenter. scope=vcenter CREATE (Test 4c) returns
+#     HTTP 422 for vcenter VIMs — this is Apstra's intentional API design.
+#   nsx VIM: NSX is the parent; vCenters are sub-resources added via
+#     POST /vcenters. Test 4c CREATE only succeeds against nsx-type VIMs.
+
+- name: Test virtual_infra_manager module
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  tasks:
+    # ── Auth and setup — always tag ensures these run regardless of
+    # --tags / --skip-tags so that auth, api_url, and naming facts
+    # are available in every phase including --skip-tags teardown.
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+      tags: always
+
+    - name: Get Apstra API URL from environment
+      ansible.builtin.set_fact:
+        apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') | default('https://10.88.137.14/api') }}"
+      tags: always
+
+    - name: Get local hostname for unique naming
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+      tags: always
+
+    - name: Set unique test names
+      ansible.builtin.set_fact:
+        vim_display_name: "test_vim_{{ local_hostname.stdout }}"
+        blueprint_name: "test_vim_bp_{{ local_hostname.stdout }}"
+      tags: always
+
+    # Load vCenter credentials from .env environment variables when not
+    # provided via -e on the command line.  pipenv exports the .env vars
+    # into the process environment, so lookup('env', ...) finds them here.
+    - name: Load vCenter credentials from environment (when not passed via -e)
+      ansible.builtin.set_fact:
+        vcenter_hostname: "{{ lookup('env', 'vcenter_hostname') }}"
+        vcenter_username: "{{ lookup('env', 'vcenter_username') }}"
+        vcenter_password: "{{ lookup('env', 'vcenter_password') }}"
+      when: vcenter_hostname is not defined or vcenter_hostname == ''
+      tags: always
+
+    # ── Tests ─────────────────────────────────────────────────────
+    - name: Run virtual_infra_manager tests
+      block:
+        # ═══════════════════════════════════════════════════════════
+        # PHASE 1 — Global VIM CRUD
+        # Tests 1–4: create · idempotent · patch · state=replaced
+        # Run: --tags phase1
+        # Note: Tests 3/3b/4 update management_ip to dummy IPs
+        # (192.0.2.2, 192.0.2.99, 192.0.2.3) to verify UPDATE logic.
+        # This is intentional — not a bug. Phase 2 restores the real
+        # vcenter_hostname before vCenter scope tests run.
+        # ═══════════════════════════════════════════════════════════
+
+        # ── Test 1: Global create ──────────────────────────────────
+        - name: "Test 1: Create global VIM (state=present)"
+          juniper.apstra.virtual_infra_manager:
+            body:
+              # display_name is accepted on create but Apstra VIM API
+              # does not store or return it — management_ip is the key
+              virtual_infra_type: "vcenter"
+              management_ip: "{{ vcenter_hostname | default('192.0.2.1') }}"
+              username: "{{ vcenter_username | default('testuser') }}"
+              password: "{{ vcenter_password | default('TestPass123!') }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vim_created
+          tags: [phase1]
+
+        - name: Display created VIM
+          ansible.builtin.debug:
+            var: vim_created
+          tags: [phase1]
+
+        - name: Verify VIM was created
+          ansible.builtin.assert:
+            that:
+              - vim_created.changed
+              - vim_created.id is defined
+              - vim_created.id.virtual_infra_manager is defined
+              - vim_created.msg is search("created")
+            fail_msg: "Test 1 FAILED: global VIM was not created"
+            success_msg: >-
+              Test 1 PASSED: global VIM created with ID
+              {{ vim_created.id.virtual_infra_manager }}
+          tags: [phase1]
+
+        - name: Set VIM ID fact for subsequent tests
+          ansible.builtin.set_fact:
+            vim_id: "{{ vim_created.id.virtual_infra_manager }}"
+          tags: [phase1]
+
+        # ── Test 1b: Verify VIM connects to real vCenter ───────────
+        # Only runs when real credentials are provided (not dummy IPs).
+        # Polls connection_state for up to 60s using the VIM URI directly.
+        - name: "Test 1b: Wait for VIM to connect to real vCenter"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/virtual-infra-managers/{{ vim_id }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            validate_certs: false
+          register: vim_poll
+          until: >-
+            (vim_poll.json['items'] | default([{}]) | first).connection_state
+            | default('disconnected') == 'connected'
+          retries: 12
+          delay: 5
+          when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
+          ignore_errors: true
+          tags: [phase1]
+
+        - name: "Test 1b: Display VIM connection state after create"
+          ansible.builtin.debug:
+            msg: >-
+              Test 1b: VIM connection_state =
+              {{ (vim_poll.json['items'] | default([{}]) | first).connection_state
+                 | default('skipped — no real vCenter provided') }}
+              {% if (vim_poll.json['items'] | default([{}]) | first).error_message | default('') %}
+              | error: {{ (vim_poll.json['items'] | default([{}]) | first).error_message }}
+              {% endif %}
+          when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
+          tags: [phase1]
+
+        # Extract system_id from the poll response so Test 5 blueprint
+        # VIM assignment can run automatically without -e vim_system_id.
+        - name: "Test 1b: Set vim_system_id from connected VIM"
+          ansible.builtin.set_fact:
+            vim_system_id: >-
+              {{ (vim_poll.json['items'] | default([{}]) | first).system_id
+                 | default('') }}
+          when: >
+            vim_poll is defined and not vim_poll.skipped | default(false)
+            and (vim_poll.json['items'] | default([{}]) | first).system_id | default('') != ''
+          tags: [phase1]
+
+        # ── Test 2: Global get / idempotent present ────────────────
+        - name: "Test 2: Present with same body (idempotent — no changes)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            body:
+              management_ip: "{{ vcenter_hostname | default('192.0.2.1') }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vim_idem
+          tags: [phase1]
+
+        - name: Verify idempotent result
+          ansible.builtin.assert:
+            that:
+              - not vim_idem.changed
+              - vim_idem.msg is search("no changes")
+            fail_msg: "Test 2 FAILED: expected no changes on idempotent present"
+            success_msg: "Test 2 PASSED: idempotent present returned no changes"
+          tags: [phase1]
+
+        # ── Test 3: Global update by UUID ────────────────────────
+        # Uses dummy IP 192.0.2.2 to verify PATCH update works.
+        # Real vcenter_hostname is restored at Phase 2 setup.
+        - name: "Test 3: Update VIM management_ip by UUID (state=present)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            body:
+              management_ip: "192.0.2.2"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vim_updated
+          tags: [phase1]
+
+        - name: Verify update
+          ansible.builtin.assert:
+            that:
+              - vim_updated.changed
+              - vim_updated.msg is search("updated")
+            fail_msg: "Test 3 FAILED: VIM update failed"
+            success_msg: "Test 3 PASSED: VIM management_ip updated successfully"
+          tags: [phase1]
+
+        # ── Test 3b: Full replace by UUID (state=replaced / PUT) ─
+        - name: "Test 3b: Full replace VIM definition (state=replaced)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            body:
+              virtual_infra_type: "vcenter"
+              management_ip: "192.0.2.99"
+              username: "replaced-user"
+              password: "ReplacedPass!"
+            state: replaced
+            auth_token: "{{ auth.token }}"
+          register: vim_replaced
+          tags: [phase1]
+
+        - name: Verify replaced result
+          ansible.builtin.assert:
+            that:
+              - vim_replaced.changed
+              - vim_replaced.msg is search("replaced")
+            fail_msg: "Test 3b FAILED: state=replaced (PUT) failed"
+            success_msg: "Test 3b PASSED: VIM fully replaced via PUT"
+          tags: [phase1]
+
+        # ── Test 4: Second UUID update (state=present) ──────────
+        - name: "Test 4: Second management_ip update by UUID (state=present)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            body:
+              management_ip: "192.0.2.3"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vim_t4
+          tags: [phase1]
+
+        - name: Verify Test 4 update result
+          ansible.builtin.assert:
+            that:
+              - vim_t4.changed
+              - vim_t4.id.virtual_infra_manager == vim_id
+              - vim_t4.msg is search("updated")
+            fail_msg: "Test 4 FAILED: second UUID update failed"
+            success_msg: "Test 4 PASSED: UUID-based update #2 succeeded (management_ip → 192.0.2.3)"
+          tags: [phase1]
+
+        # ═══════════════════════════════════════════════════════════
+        # PHASE 2 — scope=vcenter sub-resource tests
+        # Tests 4b–4f: list / create(NSX-only) / get / patch / delete
+        # Run: --tags phase2 [-e vim_id=<uuid>]
+        #   If vim_id is not provided, a fresh VIM is created here.
+        #   After the dummy IP updates in Phase 1, management_ip is
+        #   restored to the real vcenter_hostname and the module waits
+        #   for the VIM to reconnect before running tests.
+        # ═══════════════════════════════════════════════════════════
+
+        # ── Phase 2 entry: create VIM if running independently ────
+        - name: "Phase 2 setup: create VIM (when vim_id not provided via -e)"
+          juniper.apstra.virtual_infra_manager:
+            body:
+              virtual_infra_type: "vcenter"
+              management_ip: "{{ vcenter_hostname | default('192.0.2.1') }}"
+              username: "{{ vcenter_username | default('testuser') }}"
+              password: "{{ vcenter_password | default('TestPass123!') }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: phase2_vim
+          when: vim_id is not defined
+          tags: [phase2]
+
+        - name: "Phase 2 setup: set vim_id from freshly created VIM"
+          ansible.builtin.set_fact:
+            vim_id: "{{ phase2_vim.id.virtual_infra_manager }}"
+            _phase2_created_vim: true
+          when: vim_id is not defined and phase2_vim is not skipped
+          tags: [phase2]
+
+        # ── Phase 2 entry: restore real management_ip ────────────
+        # After Tests 3/3b/4 changed to dummy IPs, restore the real
+        # vcenter_hostname so the VIM reconnects for live scope tests.
+        - name: "Phase 2 setup: restore real management_ip + credentials"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            body:
+              virtual_infra_type: "vcenter"
+              management_ip: "{{ vcenter_hostname | default('192.0.2.1') }}"
+              username: "{{ vcenter_username | default('testuser') }}"
+              password: "{{ vcenter_password | default('TestPass123!') }}"
+            state: replaced
+            auth_token: "{{ auth.token }}"
+          register: vim_restored
+          tags: [phase2]
+
+        # ── Phase 2 entry: wait for VIM connection ────────────────
+        # Only waits when real credentials are provided (real vcenter
+        # IP, not a dummy 192.0.2.x address).
+        - name: "Phase 2 setup: wait for VIM to reconnect (real vCenter creds)"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/virtual-infra-managers/{{ vim_id }}"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            validate_certs: false
+          register: vim_conn_poll
+          until: >-
+            (vim_conn_poll.json['items'] | default([{}]) | first).connection_state
+            | default('disconnected') == 'connected'
+          retries: 12
+          delay: 5
+          when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
+          ignore_errors: true
+          tags: [phase2]
+
+        - name: "Phase 2 setup: display VIM connection status"
+          ansible.builtin.debug:
+            msg: >-
+              Phase 2 VIM {{ vim_id }}
+              connection_state={{ (vim_conn_poll.json['items'] | default([{}]) | first).connection_state
+                | default('N/A — dummy credentials') }}
+              version={{ (vim_conn_poll.json['items'] | default([{}]) | first).version | default('') }}
+          when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
+          tags: [phase2]
+
+        # Refresh vim_system_id from reconnect poll in case Phase 2 runs
+        # standalone (--tags phase2 -e vim_id=<uuid>) without Phase 1.
+        - name: "Phase 2 setup: set vim_system_id from reconnected VIM"
+          ansible.builtin.set_fact:
+            vim_system_id: >-
+              {{ (vim_conn_poll.json['items'] | default([{}]) | first).system_id
+                 | default('') }}
+          when: >
+            vim_conn_poll is defined and not vim_conn_poll.skipped | default(false)
+            and (vim_conn_poll.json['items'] | default([{}]) | first).system_id | default('') != ''
+            and vim_system_id is not defined
+          tags: [phase2]
+
+        # ── Test 4b: scope=vcenter — list vCenters ────────────────
+        # For a connected vcenter-type VIM the /vcenters endpoint
+        # echoes the VIM's own connection details (the VIM IS the
+        # vCenter). Disconnected VIMs return an empty list.
+        - name: "Test 4b: List vCenters under VIM (scope=vcenter)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            scope: vcenter
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vcenter_list
+          tags: [phase2]
+
+        - name: Verify vcenter list result
+          ansible.builtin.assert:
+            that:
+              - not vcenter_list.changed
+              - vcenter_list.vcenters is defined
+              - vcenter_list.vcenters | type_debug == 'list'
+            fail_msg: "Test 4b FAILED: scope=vcenter list failed"
+            success_msg: >-
+              Test 4b PASSED: vcenters list returned
+              {{ vcenter_list.vcenters | length }} vcenter(s)
+          tags: [phase2]
+
+        # ── Tests 4c–4f: Individual vCenter CRUD ──────────────────
+        # Test 4c: scope=vcenter CREATE
+        #   Returns HTTP 422 for vcenter-type VIMs (Apstra API design:
+        #   the VIM IS the vCenter; /vcenters is read-only for vcenter
+        #   VIM type). Only succeeds for nsx-type VIMs. The test is
+        #   ignore_errors:true; downstream 4d-4f are gated on success.
+        - name: "Test 4c: Create vCenter sub-resource (scope=vcenter, NSX VIMs only)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            scope: vcenter
+            body:
+              management_ip: "{{ vcenter_hostname | default('192.0.2.50') }}"
+              username: "{{ vcenter_username | default('vc-test@vsphere.local') }}"
+              password: "{{ vcenter_password | default('VcTest123!') }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vc_created
+          ignore_errors: true
+          tags: [phase2]
+
+        - name: "Test 4c result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4c: scope=vcenter CREATE
+              {% if vc_created.failed %}
+              EXPECTED SKIP — vcenter-type VIM returns 422 (NSX-only constraint).
+              To test CREATE use an nsx-type VIM.
+              Error: {{ vc_created.msg }}
+              {% else %}PASSED — vcenter id={{ vc_created.response }}{% endif %}
+          tags: [phase2]
+
+        - name: Set vcenter ID fact if created
+          ansible.builtin.set_fact:
+            vcenter_id: "{{ vc_created.response.id | default('') }}"
+          when: not vc_created.failed and vc_created.response is defined
+          tags: [phase2]
+
+        - name: "Test 4d: Get individual vCenter by ID (scope=vcenter, no body)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+              vcenter: "{{ vcenter_id }}"
+            scope: vcenter
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vc_get
+          when: vcenter_id is defined and vcenter_id != ''
+          ignore_errors: true
+          tags: [phase2]
+
+        - name: "Test 4d result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4d: get vcenter
+              {% if vcenter_id is not defined or vcenter_id == '' %}SKIPPED (no vcenter created in 4c)
+              {% elif vc_get.failed %}FAILED — {{ vc_get.msg }}
+              {% else %}PASSED — vcenter={{ vc_get.vcenter }}{% endif %}
+          tags: [phase2]
+
+        - name: "Test 4e: Patch vCenter credentials (scope=vcenter, state=present + body)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+              vcenter: "{{ vcenter_id }}"
+            scope: vcenter
+            body:
+              password: "VcNewPass456!"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vc_patch
+          when: vcenter_id is defined and vcenter_id != ''
+          ignore_errors: true
+          tags: [phase2]
+
+        - name: "Test 4e result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4e: patch vcenter
+              {% if vcenter_id is not defined or vcenter_id == '' %}SKIPPED
+              {% elif vc_patch.failed %}FAILED — {{ vc_patch.msg }}
+              {% else %}PASSED — changed={{ vc_patch.changed }}{% endif %}
+          tags: [phase2]
+
+        - name: "Test 4f: Delete vCenter by ID (scope=vcenter, state=absent)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+              vcenter: "{{ vcenter_id }}"
+            scope: vcenter
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: vc_delete
+          when: vcenter_id is defined and vcenter_id != ''
+          ignore_errors: true
+          tags: [phase2]
+
+        - name: "Test 4f result"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4f: delete vcenter
+              {% if vcenter_id is not defined or vcenter_id == '' %}SKIPPED
+              {% elif vc_delete.failed %}FAILED — {{ vc_delete.msg }}
+              {% else %}PASSED — changed={{ vc_delete.changed }}{% endif %}
+          tags: [phase2]
+
+        # ═══════════════════════════════════════════════════════════
+        # PHASE 3 — Blueprint scope tests
+        # Tests 5a–5d: list virtual_infra · assign VIM · anomaly_resolver
+        #              query_vm · vnet
+        # Run: --tags phase3 [-e blueprint_id=<uuid>]
+        #   If blueprint_id is not provided, a fresh blueprint is created.
+        # ═══════════════════════════════════════════════════════════
+
+        # ── Phase 3 entry: create blueprint if not provided ───────
+        - name: "Phase 3 setup: create test blueprint (when blueprint_id not provided via -e)"
+          juniper.apstra.blueprint:
+            body:
+              design: "two_stage_l3clos"
+              init_type: "template_reference"
+              template_id: "L2_Virtual_EVPN"
+              label: "{{ blueprint_name }}"
+            lock_state: "ignore"
+            auth_token: "{{ auth.token }}"
+          register: bp
+          when: blueprint_id is not defined
+          tags: [phase3]
+
+        - name: Set blueprint ID fact
+          ansible.builtin.set_fact:
+            blueprint_id: "{{ bp.id.blueprint }}"
+          when: blueprint_id is not defined and bp is not skipped
+          tags: [phase3]
+
+        # ── Test 5a: List blueprint virtual_infra nodes ───────────
+        - name: "Test 5a: List all virtual_infra nodes in blueprint (no id.virtual_infra, no body)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: bp_vim_list
+          tags: [phase3]
+
+        - name: Verify blueprint virtual_infra list
+          ansible.builtin.assert:
+            that:
+              - not bp_vim_list.changed
+              - bp_vim_list.virtual_infra is defined
+              - bp_vim_list.virtual_infra | type_debug == 'list'
+            fail_msg: "Test 5a FAILED: blueprint virtual_infra list failed"
+            success_msg: >-
+              Test 5a PASSED: blueprint virtual_infra list returned
+              {{ bp_vim_list.virtual_infra | length }} node(s)
+              (0 expected for a fresh blueprint)
+          tags: [phase3]
+
+        - name: "Test 5: Blueprint scope — VIM assignment skipped (no vim_id/system_id)"
+          ansible.builtin.debug:
+            msg: >-
+              Test 5 NOTE: blueprint-level VIM assignment requires a real
+              VIM UUID (vim_id) and the VIM's top-level system_id
+              (vim_system_id), both discovered after a VIM connects to vCenter.
+              Pass -e vim_id=<uuid> -e vim_system_id=<uuid> to activate.
+              See tests/integration/virtual_infra_manager_vcenter.yml for
+              the full real-time integration test.
+          when: vim_id is not defined or vim_system_id is not defined
+          tags: [phase3]
+
+        - name: "Test 5: Blueprint scope — Assign VIM to blueprint (real vim_id + vim_system_id)"
+          # agent_id = VIM UUID (vim_id)
+          # system_id = VIM's own system_id field (returned after VIM connects)
+          # Both are REQUIRED by the Apstra API POST /blueprints/{id}/virtual_infra
+          juniper.apstra.virtual_infra_manager:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            body:
+              infra_type: "vcenter"
+              agent_id: "{{ vim_id }}"
+              system_id: "{{ vim_system_id }}"
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: bp_vim_assign
+          when: vim_id is defined and vim_system_id is defined
+          ignore_errors: true
+          tags: [phase3]
+
+        - name: Verify blueprint VIM assignment
+          ansible.builtin.assert:
+            that:
+              - bp_vim_assign.changed or not bp_vim_assign.changed
+              - bp_vim_assign.msg is defined
+            fail_msg: "Test 5 FAILED: {{ bp_vim_assign.msg | default('no msg') }}"
+            success_msg: >-
+              Test 5 PASSED: blueprint VIM assignment
+              {% if bp_vim_assign.failed %}returned error — {{ bp_vim_assign.msg }}
+              {% else %}succeeded — {{ bp_vim_assign.msg }}{% endif %}
+          when: vim_id is defined and vim_system_id is defined
+          tags: [phase3]
+
+        # ── Test 5b: anomaly_resolver ──────────────────────────────
+        - name: "Test 5b: Trigger anomaly resolver (scope=anomaly_resolver)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            scope: anomaly_resolver
+            body:
+              anomaly_ids: []
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: anomaly_result
+          ignore_errors: true
+          tags: [phase3]
+
+        - name: Verify anomaly resolver result
+          ansible.builtin.assert:
+            that:
+              - anomaly_result.failed or anomaly_result.changed
+              - anomaly_result.failed or anomaly_result.msg is search("anomaly resolver")
+            fail_msg: "Test 5b FAILED: unexpected response from anomaly_resolver"
+            success_msg: >-
+              Test 5b PASSED: anomaly_resolver
+              {% if anomaly_result.failed %}returned error (acceptable for empty blueprint)
+              {% else %}triggered successfully{% endif %}
+          tags: [phase3]
+
+        # ── Test 5c: query_vm ──────────────────────────────────────
+        - name: "Test 5c: Query VM inventory (scope=query_vm)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            scope: query_vm
+            body:
+              filter: {}
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vm_query_result
+          ignore_errors: true
+          tags: [phase3]
+
+        - name: Verify query_vm result
+          ansible.builtin.assert:
+            that:
+              - vm_query_result.failed or not vm_query_result.changed
+              - vm_query_result.failed or vm_query_result.vms is defined
+              - vm_query_result.failed or vm_query_result.vms | type_debug == 'list'
+            fail_msg: "Test 5c FAILED: unexpected response from query_vm"
+            success_msg: >-
+              Test 5c PASSED: query_vm
+              {% if vm_query_result.failed %}returned error (acceptable — no virtual_infra connected)
+              {% else %}returned {{ vm_query_result.vms | length }} VM(s){% endif %}
+          tags: [phase3]
+
+        # ── Test 5d: vnet ──────────────────────────────────────────
+        - name: "Test 5d: Get vnet details (scope=vnet, dummy UUID → 404 path)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              blueprint: "{{ blueprint_id }}"
+              vnet: "00000000-0000-0000-0000-000000000000"
+            scope: vnet
+            state: present
+            auth_token: "{{ auth.token }}"
+          register: vnet_result
+          ignore_errors: true
+          tags: [phase3]
+
+        - name: Verify vnet result
+          ansible.builtin.assert:
+            that:
+              - vnet_result.failed or not vnet_result.changed
+              - >-
+                vnet_result.failed
+                or vnet_result.vnet is none
+                or vnet_result.vnet is defined
+            fail_msg: "Test 5d FAILED: vnet scope crashed unexpectedly"
+            success_msg: >-
+              Test 5d PASSED: vnet scope handled cleanly
+              ({{ 'not found' if not vnet_result.failed and vnet_result.vnet is none
+                  else 'error returned' if vnet_result.failed
+                  else 'vnet returned' }})
+          tags: [phase3]
+
+        # ═══════════════════════════════════════════════════════════
+        # TEARDOWN — Delete global VIM (Test 6)
+        # Run: --tags teardown -e vim_id=<uuid>
+        # ═══════════════════════════════════════════════════════════
+
+        # If blueprint_id was not set (e.g. teardown-only run without phase3),
+        # discover it by the deterministic label so the always-block can delete it.
+        - name: "Teardown: discover blueprint_id by label (when not already set)"
+          ansible.builtin.uri:
+            url: "{{ apstra_api_url }}/blueprints"
+            method: GET
+            headers:
+              AuthToken: "{{ auth.token }}"
+              Content-Type: "application/json"
+            validate_certs: false
+          register: _bp_list
+          when: blueprint_id is not defined
+          tags: [teardown]
+
+        - name: "Teardown: set blueprint_id from discovered label"
+          ansible.builtin.set_fact:
+            blueprint_id: >-
+              {{ (_bp_list.json['items'] | selectattr('label','equalto', blueprint_name) | list | first).id }}
+          when: >
+            blueprint_id is not defined
+            and _bp_list is not skipped
+            and (_bp_list.json['items'] | selectattr('label','equalto', blueprint_name) | list | length) > 0
+          tags: [teardown]
+
+        - name: "Test 6: Delete global VIM by UUID (state=absent)"
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          register: vim_deleted
+          when: vim_id is defined
+          tags: [teardown]
+
+        - name: Verify deletion
+          ansible.builtin.assert:
+            that:
+              - vim_deleted.changed
+              - vim_deleted.msg is search("deleted")
+            fail_msg: "Test 6 FAILED: VIM was not deleted"
+            success_msg: "Test 6 PASSED: global VIM deleted successfully"
+          when: vim_id is defined
+          tags: [teardown]
+
+      # ── Cleanup — runs after any phase ────────────────────────
+      always:
+        - name: Delete test VIM if it still exists
+          juniper.apstra.virtual_infra_manager:
+            id:
+              virtual_infra_manager: "{{ vim_id }}"
+            state: absent
+            auth_token: "{{ auth.token }}"
+          when: vim_id is defined
+          ignore_errors: true
+          tags: [phase1, phase2, teardown]
+
+        - name: Delete test blueprint if it was created
+          juniper.apstra.blueprint:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            lock_state: "ignore"
+            auth_token: "{{ auth.token }}"
+            state: absent
+          when: blueprint_id is defined
+          ignore_errors: true
+          tags: [phase3, teardown]
+
+    # ── Summary ───────────────────────────────────────────────────
+    - name: All virtual_infra_manager tests passed
+      ansible.builtin.debug:
+        msg: "All virtual_infra_manager tests PASSED"

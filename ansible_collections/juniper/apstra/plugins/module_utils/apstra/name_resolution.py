@@ -951,3 +951,47 @@ def resolve_interconnect_domain_id(client_factory, blueprint_id, domain_ref):
         f"Interconnect domain '{domain_ref}' not found in blueprint. "
         f"Available: {available}"
     )
+
+
+def resolve_virtual_infra_manager_id(client_factory, vim_ref):
+    """Resolve a global Virtual Infra Manager reference (UUID or display_name) to its ID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param vim_ref: The VIM UUID or display_name.
+    :return: The resolved VIM ID string.
+    """
+    if not vim_ref or _is_uuid(vim_ref):
+        return vim_ref
+
+    base = client_factory.get_base_client()
+    result = base.virtual_infra_managers.list()
+    if result is None:
+        all_vims = []
+    elif isinstance(result, list):
+        all_vims = result
+    elif isinstance(result, dict) and "items" in result:
+        all_vims = result["items"]
+    else:
+        all_vims = []
+
+    # Exact ID match (IDs may not be UUIDs)
+    for vim in all_vims:
+        if vim.get("id") == vim_ref:
+            return vim_ref
+
+    # Exact display_name match
+    for vim in all_vims:
+        if vim.get("display_name") == vim_ref or vim.get("label") == vim_ref:
+            return vim["id"]
+
+    # Case-insensitive fallback
+    ref_lower = vim_ref.lower()
+    for vim in all_vims:
+        name = vim.get("display_name") or vim.get("label") or ""
+        if name.lower() == ref_lower:
+            return vim["id"]
+
+    available = [vim.get("display_name") or vim.get("label", "") for vim in all_vims]
+    raise ValueError(
+        f"Virtual Infra Manager '{vim_ref}' not found. Available: {available}"
+    )
