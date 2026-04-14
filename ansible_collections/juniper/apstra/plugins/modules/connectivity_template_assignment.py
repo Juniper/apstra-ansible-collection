@@ -354,13 +354,19 @@ def main():
         ct_id = id_param.get("ct_id")
         ct_name = id_param.get("ct_name")
         body = module.params["body"] or {}
-        application_point_ids = body.get("application_point_ids", [])
+        application_point_ids_raw = body.get("application_point_ids", [])
         state = module.params["state"]
 
         # ── Resolve application point IDs (human-readable → node ID) ──
         application_point_ids = resolve_application_point_ids(
-            client_factory, blueprint_id, application_point_ids
+            client_factory, blueprint_id, application_point_ids_raw
         )
+        # Map resolved UUID → original reference string for error reporting.
+        _id_to_ref = {
+            uid: raw
+            for uid, raw in zip(application_point_ids, application_point_ids_raw)
+            if uid != raw  # only store entries where resolution changed the value
+        }
 
         # ── Resolve CT ID ─────────────────────────────────────────────
         # If ct_id is provided but is not a UUID, treat it as a name.
@@ -392,11 +398,27 @@ def main():
         # ── Validate resolved IDs against the CT’s application-points tree ──
         invalid_ids = [i for i in application_point_ids if i not in valid_ap_ids]
         if invalid_ids:
+            # Build a human-readable representation for each invalid ID.
+            invalid_display = [
+                f"{_id_to_ref[i]!r} (resolved: {i})" if i in _id_to_ref else repr(i)
+                for i in invalid_ids
+            ]
+            # Detect whether any failing ref looks like a LAG on an individual
+            # ESI leaf member (e.g. "leaf1:ae1") so we can give a targeted hint.
+            _lag_hint = ""
+            for raw in [_id_to_ref.get(i, "") for i in invalid_ids]:
+                if re.search(r"(?<!/)[^/]+:ae\d+", str(raw), re.IGNORECASE):
+                    _lag_hint = (
+                        " Hint: ae/LAG interfaces on ESI leaf-pairs must be "
+                        "referenced as the leaf-pair, not individual leaves "
+                        "(e.g. 'leaf1/leaf2:ae1' instead of 'leaf1:ae1' and "
+                        "'leaf2:ae1')."
+                    )
+                    break
             raise ValueError(
-                f"The following interface IDs are not valid application points "
-                f"for CT '{ct_id}' in blueprint '{blueprint_id}': {invalid_ids}. "
-                f"Ensure the interfaces are configured as access/trunk ports and "
-                f"are compatible with the CT type."
+                f"The following interfaces are not valid application points "
+                f"for CT '{ct_id}' in blueprint '{blueprint_id}': "
+                f"{invalid_display}.{_lag_hint}"
             )
 
         # ── Determine needed changes ──────────────────────────────────
