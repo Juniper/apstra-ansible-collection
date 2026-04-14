@@ -146,6 +146,121 @@
         fail_msg: "Invalid template should have failed with 'not found'"
         success_msg: "PASSED: Invalid template name correctly rejected"
 
+    # ── node_updated: assignment (bulk label-based) tests ──────────────────
+
+    - name: Create L2-EVPN blueprint for node_updated tests
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}_node_assign"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+        lock_state: ignore
+        auth_token: "{{ auth.token }}"
+      register: bp_assign
+
+    - name: Query spine nodes by role
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        query_type: nodes_by_role
+        roles:
+          - spine
+        auth_token: "{{ auth.token }}"
+        state: queried
+      register: spine_nodes
+
+    - name: Show spine node labels
+      ansible.builtin.debug:
+        msg: "Spine labels: {{ spine_nodes.nodes.keys() | list }}"
+
+    - name: Build assignment dict (spine label → fake serial)
+      ansible.builtin.set_fact:
+        spine_assignment: >-
+          {{
+            spine_assignment | default({}) | combine({
+              item.key: 'FAKE_SERIAL_' ~ loop_idx
+            })
+          }}
+      loop: "{{ spine_nodes.nodes | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+        index_var: loop_idx
+
+    - name: "Test assignment — bulk assign serials to all spine nodes"
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        assignment: "{{ spine_assignment }}"
+        state: node_updated
+        auth_token: "{{ auth.token }}"
+      register: assign_result
+
+    - name: Verify assignment changed and nodes_updated contains all spines
+      ansible.builtin.assert:
+        that:
+          - assign_result.changed
+          - assign_result.nodes_updated.keys() | list | sort == spine_assignment.keys() | list | sort
+          - assign_result.nodes_unchanged | length == 0
+        fail_msg: "Bulk assignment failed: {{ assign_result }}"
+        success_msg: "PASSED: Bulk assignment set serials on {{ assign_result.nodes_updated | length }} spine(s)"
+
+    - name: "Test assignment — idempotent re-run (no change)"
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        assignment: "{{ spine_assignment }}"
+        state: node_updated
+        auth_token: "{{ auth.token }}"
+      register: assign_idem
+
+    - name: Verify idempotency (no change on second run)
+      ansible.builtin.assert:
+        that:
+          - not assign_idem.changed
+          - assign_idem.nodes_unchanged | length == spine_assignment | length
+          - assign_idem.nodes_updated | length == 0
+        fail_msg: "Assignment should be idempotent: {{ assign_idem }}"
+        success_msg: "PASSED: Re-run correctly reported no changes"
+
+    - name: "Test assignment — invalid label fails with clear error"
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        assignment:
+          nonexistent_node_xyz: "FAKE_SERIAL_999"
+        state: node_updated
+        auth_token: "{{ auth.token }}"
+      register: assign_bad_label
+      ignore_errors: true
+
+    - name: Verify invalid label produces informative error
+      ansible.builtin.assert:
+        that:
+          - assign_bad_label is failed
+          - "'nonexistent_node_xyz' in assign_bad_label.msg"
+        fail_msg: "Invalid label should fail with label name in error"
+        success_msg: "PASSED: Invalid node label correctly rejected"
+
+    - name: "Test node_id single-node path still works (regression)"
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        node_id: "{{ spine_nodes.nodes[spine_nodes.nodes.keys() | first].id }}"
+        system_id: "SINGLE_NODE_SERIAL"
+        state: node_updated
+        auth_token: "{{ auth.token }}"
+      register: single_node_result
+
+    - name: Verify single-node path works
+      ansible.builtin.assert:
+        that:
+          - single_node_result.changed
+          - single_node_result.node is defined
+        fail_msg: "Single-node node_id path broken: {{ single_node_result }}"
+        success_msg: "PASSED: Single-node path (node_id) still works"
+
+    - name: Delete node_updated test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
     - name: Logout of Apstra
       juniper.apstra.authenticate:
         logout: true
