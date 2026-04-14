@@ -42,7 +42,7 @@
 #
 # ── Fixes validated ───────────────────────────────────────────────────────────
 # Fix bdf3263 — blueprint_id key alias (ct_name param accepted)
-# Fix 4e37581 — ct_id non-UUID name resolution
+# Fix 4e37581 — ct_id non-UUID name resolution (Tests 1 + 4b — both ct_name and ct_id keys)
 # Fix f0c8d50 — valid_ap_ids pre-flight + improved error messages
 # Fix 8bfba75 — redundancy_group added to QE interface search
 # Fix b78ca6e — "not a valid AP" error shows original ref + ESI hint for ae
@@ -273,6 +273,47 @@
             success_msg: "PASSED Test 4: Idempotent — no change when already absent."
 
         ##########################################################################
+        # Test 4b — ct_id key (exact account team key) resolves non-UUID label
+        # The account team uses 'ct_id: "NewVN2"' (not 'ct_name').  Both keys
+        # go through label→UUID resolution (Fix 4e37581 + bdf3263), but ct_id
+        # is the EXACT key in their playbook and must be verified end-to-end.
+        ##########################################################################
+        - name: "Test 4b — ct_id key (account team's exact key): assign {{ single_leaf }}:ge-0/0/2"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_id: "{{ test_ct_name }}"   # ct_id with human-readable label — exact account team syntax
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+            state: present
+          register: test4b_result
+
+        - name: "Test 4b — Assert passed"
+          ansible.builtin.assert:
+            that:
+              - not test4b_result.failed | default(false)
+              - test4b_result.changed
+            fail_msg: "FAILED Test 4b: ct_id key label resolution failed. {{ test4b_result.msg | default('') }}"
+            success_msg: "PASSED Test 4b: ct_id '{{ test_ct_name }}' resolved → ge-0/0/2 assigned (Fix 4e37581 ct_id path ✓)"
+
+        - name: "Test 4b cleanup"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_id: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+            state: absent
+
+        ##########################################################################
         # Test 5 — Individual leaf ae (wrong format for ESI pair)
         # Account team mistake: "leaf1:ae1" + "leaf2:ae1" separately.
         # Exercises Fix b78ca6e: must show "not a valid application point" + ESI hint.
@@ -423,14 +464,15 @@
               ┌──────────────────────────────────────────────────────────────────┐
               │  Connectorops CT Assignment Integration Test Summary             │
               ├──────────────────────────────────────────────────────────────────┤
-              │  Test 1: ct_name label → UUID resolution         [bdf3263+4e3]  │
-              │  Test 2: Border leaf ge-0/0/3 assignment                         │
-              │  Test 3: Both border leaf ge interfaces                          │
-              │  Test 4: Idempotent unassign (changed=false)                    │
-              │  Test 5: Separate leaf ae → "not a valid AP" + ESI hint  [b78]  │
-              │  Test 6: ESI slash leaf1/leaf2:ae1 → "not found"         [e35]  │
-              │  Test 7: ESI slash ae999 → clear "not found"                    │
-              │  Test 8: Full account-team replay (ge+ae+ge)                    │
+              │  Test 1:  ct_name label → UUID resolution        [bdf3263+4e3]  │
+              │  Test 2:  Border leaf ge-0/0/3 assignment                        │
+              │  Test 3:  Both border leaf ge interfaces                         │
+              │  Test 4:  Idempotent unassign (changed=false)                   │
+              │  Test 4b: ct_id key (account team exact key) → UUID [4e37581]   │
+              │  Test 5:  Separate leaf ae → "not a valid AP" + ESI hint [b78]  │
+              │  Test 6:  ESI slash leaf1/leaf2:ae1 → "not found"        [e35]  │
+              │  Test 7:  ESI slash ae999 → clear "not found"                   │
+              │  Test 8:  Full account-team replay (ge+ae+ge)                   │
               └──────────────────────────────────────────────────────────────────┘
               Blueprint: {{ blueprint_label }}  |  CT used: {{ test_ct_name }}
 
