@@ -17,6 +17,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_pool_ids,
+    resolve_resource_group_name,
 )
 
 DOCUMENTATION = """
@@ -212,6 +213,12 @@ def main():
                 f"Must specify 'group_type' and 'group_name' in id to manage a {leaf_object_type}"
             )
 
+        # Resolve security-zone name in group_name (e.g. "sz:VRF1,leaf_loopback_ips")
+        group_name = resolve_resource_group_name(
+            client_factory, id["blueprint"], group_name
+        )
+        id["group_name"] = group_name
+
         # Get the object
         ra_client = client_factory.get_resource_allocation_client()
         resource_group = ra_client.blueprints[id["blueprint"]].resource_groups[
@@ -246,6 +253,18 @@ def main():
                         result["msg"] = (
                             f"{leaf_object_type} already up to date, no changes needed"
                         )
+            elif body:
+                # Resource group does not exist yet (e.g. VRF-scoped groups
+                # like "sz:<sz_id>,leaf_loopback_ips" are not pre-created).
+                # A PUT will create the assignment.
+                updated_object = resource_group.update(body)
+                result["changed"] = True
+                if updated_object:
+                    result["response"] = updated_object
+                result["changes"] = body
+                result["msg"] = f"{leaf_object_type} created successfully"
+                # Re-read to populate current_object after creation
+                current_object = resource_group.get()
 
             # Return the final object state (avoid re-reading after updates
             # because SDK may return stale cached data; for creates, fetch
