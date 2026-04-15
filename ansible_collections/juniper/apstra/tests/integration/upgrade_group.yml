@@ -5,7 +5,7 @@
 # Validates the juniper.apstra.upgrade_group module against the Team's
 # live Apstra 6.1.1 environment.
 #
-# ⚠️  ACCOUNT TEAM SAFETY RULES:
+# ⚠️  TEAM SAFETY RULES:
 #     - Tests 1–2 are READ-ONLY (state=gathered).  Safe at any time.
 #     - Tests 3–6 perform WRITE operations (state=present / state=absent).
 #       They use a temporary group name ("ansible_test_group") and
@@ -16,7 +16,7 @@
 #
 # ── Team environment ────────────────────────────────────────────────────────
 # Apstra version:  6.1.1
-# API URL:         https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api
+# API URL:         https://10.88.137.14/api
 # Blueprint:       apstra-pod1  (ad1cb3c1-7c83-4834-8a85-953ccf113833)
 # Devices (by blueprint label):
 #   - spine1                     172.20.34.11
@@ -38,16 +38,16 @@
 #
 # ── Usage ──────────────────────────────────────────────────────────────────
 # Read-only run (Tests 1–2 only):
-#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_API_URL="https://10.88.137.14/api" \
 #   APSTRA_USERNAME="admin" \
-#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   APSTRA_PASSWORD="ApstraPassword123" \
 #   PIPENV_DONT_LOAD_ENV=1 \
 #   make test-integration-upgrade_group ANSIBLE_FLAGS="-v --tags read_only"
 #
 # Full run (all tests — safe because always: block cleans up):
-#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_API_URL="https://10.88.137.14/api" \
 #   APSTRA_USERNAME="admin" \
-#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   APSTRA_PASSWORD="ApstraPassword123" \
 #   PIPENV_DONT_LOAD_ENV=1 \
 #   make test-integration-upgrade_group ANSIBLE_FLAGS="-v"
 #
@@ -93,7 +93,7 @@
         api_url: "{{ api_url }}"
         verify_certificates: "{{ verify_certs }}"
         username: "{{ lookup('env','APSTRA_USERNAME') | default('admin', true) }}"
-        password: "{{ lookup('env','APSTRA_PASSWORD') | default('Apstramarvis@123', true) }}"
+        password: "{{ lookup('env','APSTRA_PASSWORD') | default('ApstraPassword123', true) }}"
         logout: false
       register: auth
 
