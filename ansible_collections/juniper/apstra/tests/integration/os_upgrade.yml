@@ -2,20 +2,20 @@
 ################################################################################
 # OS Upgrade — Integration Tests
 #
-# Validates the juniper.apstra.os_upgrade module against the account team's
+# Validates the juniper.apstra.os_upgrade module against the Team's
 # live Apstra 6.1.1 environment.
 #
-# ⚠️  IMPORTANT — ACCOUNT TEAM SETUP SAFETY RULES:
+# ⚠️  IMPORTANT — TEAM SETUP SAFETY RULES:
 #     - Tests 1, 2, 3 are READ-ONLY (gathered + impact_report).
 #       They call no write APIs and are SAFE to run at any time.
 #     - Test 4 (state=present) triggers a REAL device OS upgrade.
 #       It is DISABLED by default (run_upgrade_test: false).
-#       NEVER enable it without explicit account team approval and a
+#       NEVER enable it without explicit Team approval and a
 #       maintenance window.  It cannot be undone.
 #
-# ── Account team environment ──────────────────────────────────────────────────
+# ── Team environment ──────────────────────────────────────────────────
 # Apstra version:  6.1.1
-# API URL:         https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api
+# API URL:         https://10.88.137.14/api
 # Blueprint:       apstra-pod1  (ad1cb3c1-7c83-4834-8a85-953ccf113833)
 # Devices:
 #   - apstra_esi_001_leaf1       (ESI pair member)
@@ -29,10 +29,10 @@
 # Test 4 — state=present    : DISABLED — actual upgrade (requires manual opt-in)
 #
 # ── Usage ─────────────────────────────────────────────────────────────────────
-# Read-only run (safe, account team):
-#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+# Read-only run (safe, Team):
+#   APSTRA_API_URL="https://10.88.137.14/api" \
 #   APSTRA_USERNAME="admin" \
-#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   APSTRA_PASSWORD="Apstramarvis@123" \
 #   PIPENV_DONT_LOAD_ENV=1 \
 #   make test-integration-os_upgrade ANSIBLE_FLAGS="-v"
 #
@@ -50,13 +50,13 @@
     verify_certs: false
     api_url: "{{ lookup('env','APSTRA_API_URL') | default('https://10.88.137.14/api', true) }}"
 
-    # ── Blueprint + devices (account team apstra-pod1) ─────────────────────────
+    # ── Blueprint + devices (Team apstra-pod1) ─────────────────────────
     blueprint_label: "apstra-pod1"
-    # Device labels as seen in the account team blueprint
+    # Device labels as seen in the Team blueprint
     test_device_label: "apstra_esi_001_leaf1"
 
     # ── Test guard — set to true ONLY in a maintenance window with approval ───
-    # ⚠️  NEVER enable in normal CI runs against account team.
+    # ⚠️  NEVER enable in normal CI runs against Team.
     run_upgrade_test: false
     # Image to upgrade to (only used when run_upgrade_test: true)
     upgrade_image: ""
@@ -200,7 +200,7 @@
         # Test 4 — state=present (ACTUAL UPGRADE — DISABLED BY DEFAULT)
         #
         # ⚠️  DANGER: This triggers a REAL OS upgrade on the target device.
-        #     ONLY enable with explicit account team approval + maintenance window.
+        #     ONLY enable with explicit Team approval + maintenance window.
         #     Set:  run_upgrade_test: true
         #           upgrade_image: "<filename or UUID>"
         #
@@ -216,7 +216,7 @@
             msg: >-
               Test 4 (actual upgrade) is DISABLED by default.
               To run: set run_upgrade_test=true and upgrade_image=<image> in vars.
-              ⚠️  NEVER run against account team without explicit approval.
+              ⚠️  NEVER run against Team without explicit approval.
           when: not run_upgrade_test
 
         - name: "Test 4 — Trigger OS upgrade on {{ test_device_label }}"
@@ -256,7 +256,7 @@
           ansible.builtin.debug:
             msg: >-
               Tests 1–3 are read-only (gathered + impact_report).
-              No cleanup required.  Account team setup is unchanged.
+              No cleanup required.  Team setup is unchanged.
 
     # ── Final summary ─────────────────────────────────────────────────────────
     - name: "Summary — OS Upgrade integration test results"
