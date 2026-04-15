@@ -12,8 +12,8 @@ on:
       - master
   pull_request:
 env:
-  NAMESPACE: arubanetworks
-  COLLECTION_NAME: aoscx
+  NAMESPACE: juniper
+  COLLECTION_NAME: apstra
 
 jobs:
 
