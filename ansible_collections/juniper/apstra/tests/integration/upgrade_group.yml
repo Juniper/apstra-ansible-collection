@@ -1,0 +1,431 @@
+---
+################################################################################
+# Upgrade Group — Integration Tests
+#
+# Validates the juniper.apstra.upgrade_group module against the Team's
+# live Apstra 6.1.1 environment.
+#
+# ⚠️  ACCOUNT TEAM SAFETY RULES:
+#     - Tests 1–2 are READ-ONLY (state=gathered).  Safe at any time.
+#     - Tests 3–6 perform WRITE operations (state=present / state=absent).
+#       They use a temporary group name ("ansible_test_group") and
+#       ALWAYS clean up in the always: block, resetting every touched
+#       device back to 'default'.
+#     - The 'default' group is NEVER dissolved.
+#     - No device upgrade is triggered by this playbook.
+#
+# ── Team environment ────────────────────────────────────────────────────────
+# Apstra version:  6.1.1
+# API URL:         https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api
+# Blueprint:       apstra-pod1  (ad1cb3c1-7c83-4834-8a85-953ccf113833)
+# Devices (by blueprint label):
+#   - spine1                     172.20.34.11
+#   - spine2                     172.20.34.12
+#   - apstra_esi_001_leaf1       172.20.34.13
+#   - apstra_esi_001_leaf2       172.20.34.14
+#   - apstra_single_001_leaf1    172.20.34.15
+#
+# ── What each test validates ─────────────────────────────────────────────────
+# Test 1 — state=gathered (all)              : List all groups (read-only)
+# Test 2 — state=gathered (named)            : List 'default' group (read-only)
+# Test 3 — state=present                     : Create ansible_test_group
+# Test 4 — state=present idempotent          : Same call again → changed=false
+# Test 5 — state=gathered verify             : Confirm group members in place
+# Test 6 — state=impact_report              : Impact assessment for test group
+# Test 7 — state=absent (specific members)   : Remove 2 devices from group
+# Test 8 — state=absent (dissolve group)     : Remove remaining members
+# Cleanup (always)                           : Reset all test devices to default
+#
+# ── Usage ──────────────────────────────────────────────────────────────────
+# Read-only run (Tests 1–2 only):
+#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_USERNAME="admin" \
+#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   PIPENV_DONT_LOAD_ENV=1 \
+#   make test-integration-upgrade_group ANSIBLE_FLAGS="-v --tags read_only"
+#
+# Full run (all tests — safe because always: block cleans up):
+#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_USERNAME="admin" \
+#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   PIPENV_DONT_LOAD_ENV=1 \
+#   make test-integration-upgrade_group ANSIBLE_FLAGS="-v"
+#
+# Local Apstra (6.0.0 — gathered always works; write tests may fail gracefully):
+#   make test-integration-upgrade_group ANSIBLE_FLAGS="-v"
+################################################################################
+
+- name: Upgrade Group — Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+
+  vars:
+    # ── Connection ────────────────────────────────────────────────────────────
+    verify_certs: false
+    api_url: "{{ lookup('env','APSTRA_API_URL') | default('https://10.88.137.14/api', true) }}"
+
+    # ── Blueprint + devices (Team apstra-pod1) ────────────────────────────────
+    blueprint_label: "apstra-pod1"
+
+    # Temporary group used by write tests — never matches a real group name
+    test_group_name: "ansible_test_group"
+
+    # Two devices for partial-removal test (Test 7)
+    partial_members:
+      - "apstra_esi_001_leaf1"
+      - "apstra_esi_001_leaf2"
+
+    # All test devices — assigned in Test 3, all cleaned up in always:
+    all_test_members:
+      - "apstra_esi_001_leaf1"
+      - "apstra_esi_001_leaf2"
+      - "apstra_single_001_leaf1"
+
+    # ── Safety flag ───────────────────────────────────────────────────────────
+    # Set to false to skip write tests (Tests 3–8) during read-only validation
+    run_write_tests: true
+
+  tasks:
+    # ── Authenticate ──────────────────────────────────────────────────────────
+    - name: "P0 — Authenticate to Apstra"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ lookup('env','APSTRA_USERNAME') | default('admin', true) }}"
+        password: "{{ lookup('env','APSTRA_PASSWORD') | default('Apstramarvis@123', true) }}"
+        logout: false
+      register: auth
+
+    - name: "P0 — Set auth token"
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
+
+    # ── Tests ─────────────────────────────────────────────────────────────────
+    - name: "Run Upgrade Group integration tests"
+      block:
+
+        ##########################################################################
+        # Test 1 — state=gathered (all groups)
+        # READ-ONLY.  Should always succeed.
+        ##########################################################################
+        - name: "Test 1 — state=gathered: list all upgrade groups"
+          tags: read_only
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            state: gathered
+          register: test1_result
+
+        - name: "Test 1 — Assert: gathered succeeded"
+          tags: read_only
+          ansible.builtin.assert:
+            that:
+              - not test1_result.failed | default(false)
+              - not test1_result.changed
+              - test1_result.groups is defined
+              - test1_result.groups | type_debug == 'dict'
+              - "'default' in test1_result.groups"
+            fail_msg: >-
+              FAILED Test 1: state=gathered failed.
+              {{ test1_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 1: gathered {{ test1_result.groups | length }} group(s):
+              {{ test1_result.groups.keys() | list }}
+
+        ##########################################################################
+        # Test 2 — state=gathered (named group 'default')
+        # READ-ONLY.  'default' group must always exist.
+        ##########################################################################
+        - name: "Test 2 — state=gathered: named group 'default'"
+          tags: read_only
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "default"
+            state: gathered
+          register: test2_result
+
+        - name: "Test 2 — Assert: 'default' group returned with 1-key dict"
+          tags: read_only
+          ansible.builtin.assert:
+            that:
+              - not test2_result.failed | default(false)
+              - not test2_result.changed
+              - test2_result.groups is defined
+              - test2_result.groups | length == 1
+              - "'default' in test2_result.groups"
+            fail_msg: >-
+              FAILED Test 2: named-group gathered for 'default' failed.
+              {{ test2_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 2: 'default' group has
+              {{ test2_result.groups['default'] | length }} member(s).
+
+        ##########################################################################
+        # Test 3 — state=present: create ansible_test_group with 3 devices
+        # WRITE — assigns 3 leaf devices to the test group.
+        # Cleanup in always: block restores them to 'default'.
+        ##########################################################################
+        - name: "Test 3 — state=present: create '{{ test_group_name }}'"
+          when: run_write_tests
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+              blueprint: "{{ blueprint_label }}"
+            body:
+              members: "{{ all_test_members }}"
+            state: present
+          register: test3_result
+
+        - name: "Test 3 — Assert: group created with all 3 members changed"
+          when: run_write_tests
+          ansible.builtin.assert:
+            that:
+              - not test3_result.failed | default(false)
+              - test3_result.changed
+              - test3_result.group_name == test_group_name
+              - test3_result.members_changed | length == 3
+              - test3_result.members_current | length == 3
+            fail_msg: >-
+              FAILED Test 3: failed to create '{{ test_group_name }}'.
+              {{ test3_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 3: group '{{ test_group_name }}' created —
+              {{ test3_result.members_changed | length }} device(s) moved.
+
+        ##########################################################################
+        # Test 4 — state=present idempotent (same call, no changes expected)
+        ##########################################################################
+        - name: "Test 4 — state=present: idempotent (same call)"
+          when: run_write_tests and not test3_result.failed | default(false)
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+              blueprint: "{{ blueprint_label }}"
+            body:
+              members: "{{ all_test_members }}"
+            state: present
+          register: test4_result
+
+        - name: "Test 4 — Assert: idempotent run changed=false"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.assert:
+            that:
+              - not test4_result.failed | default(false)
+              - not test4_result.changed
+              - test4_result.members_changed | length == 0
+              - test4_result.members_current | length == 3
+            fail_msg: >-
+              FAILED Test 4: idempotent run should not change anything.
+              {{ test4_result.msg | default('') }}
+            success_msg: "PASSED Test 4: idempotent — all 3 devices already in group, changed=false."
+
+        ##########################################################################
+        # Test 5 — state=gathered: verify test group exists with correct members
+        ##########################################################################
+        - name: "Test 5 — state=gathered: verify '{{ test_group_name }}' members"
+          when: run_write_tests and not test3_result.failed | default(false)
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+            state: gathered
+          register: test5_result
+
+        - name: "Test 5 — Assert: test group has exactly 3 members in Apstra"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.assert:
+            that:
+              - not test5_result.failed | default(false)
+              - not test5_result.changed
+              - test5_result.groups is defined
+              - test_group_name in test5_result.groups
+              - test5_result.groups[test_group_name] | length == 3
+              - test5_result.groups[test_group_name]
+                  | map(attribute='upgrade_group') | unique | list == [test_group_name]
+            fail_msg: >-
+              FAILED Test 5: gathered for '{{ test_group_name }}' did not show 3
+              members.  {{ test5_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 5: '{{ test_group_name }}' confirmed in Apstra with
+              {{ test5_result.groups[test_group_name] | length }} member(s):
+              {{ test5_result.groups[test_group_name]
+                 | map(attribute='device_key') | list }}
+
+        ##########################################################################
+        # Test 6 — state=impact_report for the test group
+        # READ-ONLY assessment — no device changes.
+        ##########################################################################
+        - name: "Test 6 — state=impact_report: assess '{{ test_group_name }}'"
+          when: run_write_tests and not test3_result.failed | default(false)
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+            state: impact_report
+          register: test6_result
+
+        - name: "Test 6 — Assert: impact_report returned 3 agents"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.assert:
+            that:
+              - not test6_result.failed | default(false)
+              - not test6_result.changed
+              - test6_result.group_name == test_group_name
+              - test6_result.agent_ids | length == 3
+              - test6_result.impact_report is defined
+            fail_msg: >-
+              FAILED Test 6: impact_report for '{{ test_group_name }}' failed.
+              {{ test6_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 6: impact_report assessed {{ test6_result.agent_ids | length }}
+              agent(s) in '{{ test_group_name }}', no device changes.
+
+        - name: "Test 6 — Show impact report"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.debug:
+            msg: >-
+              Impact report for '{{ test_group_name }}':
+              {{ test6_result.impact_report }}
+
+        ##########################################################################
+        # Test 7 — state=absent (specific members only)
+        # Removes 2 of the 3 test devices from the group → back to 'default'.
+        # The third device remains in the group.
+        ##########################################################################
+        - name: "Test 7 — state=absent: remove 2 specific members"
+          when: run_write_tests and not test3_result.failed | default(false)
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+              blueprint: "{{ blueprint_label }}"
+            body:
+              members: "{{ partial_members }}"
+            state: absent
+          register: test7_result
+
+        - name: "Test 7 — Assert: 2 devices removed, 1 remains"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.assert:
+            that:
+              - not test7_result.failed | default(false)
+              - test7_result.changed
+              - test7_result.members_changed | length == 2
+              - test7_result.members_current | length == 1
+            fail_msg: >-
+              FAILED Test 7: partial removal from '{{ test_group_name }}' failed.
+              {{ test7_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 7: {{ test7_result.members_changed | length }} device(s)
+              removed, {{ test7_result.members_current | length }} still in group.
+
+        ##########################################################################
+        # Test 8 — state=absent (dissolve remaining group)
+        # Removes the last device (no members specified → dissolve entire group).
+        ##########################################################################
+        - name: "Test 8 — state=absent: dissolve remaining '{{ test_group_name }}'"
+          when: run_write_tests and not test3_result.failed | default(false)
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+            state: absent
+          register: test8_result
+
+        - name: "Test 8 — Assert: group dissolved (0 members remain)"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.assert:
+            that:
+              - not test8_result.failed | default(false)
+              - test8_result.changed
+              - test8_result.members_changed | length == 1
+              - test8_result.members_current | length == 0
+            fail_msg: >-
+              FAILED Test 8: group dissolution failed.
+              {{ test8_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 8: group '{{ test_group_name }}' dissolved —
+              all member(s) returned to 'default'.
+
+        ##########################################################################
+        # Test 9 — state=absent idempotent (group already gone)
+        ##########################################################################
+        - name: "Test 9 — state=absent: idempotent (group already dissolved)"
+          when: run_write_tests and not test3_result.failed | default(false)
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+            state: absent
+          register: test9_result
+
+        - name: "Test 9 — Assert: absent idempotent changed=false"
+          when: run_write_tests and not test3_result.failed | default(false)
+          ansible.builtin.assert:
+            that:
+              - not test9_result.failed | default(false)
+              - not test9_result.changed
+              - test9_result.members_changed | length == 0
+            fail_msg: >-
+              FAILED Test 9: absent idempotency check failed.
+              {{ test9_result.msg | default('') }}
+            success_msg: "PASSED Test 9: absent idempotent — nothing to dissolve, changed=false."
+
+      # ── always block: guarantee cleanup regardless of test failures ──────────
+      always:
+        - name: "Cleanup — reset all test devices back to 'default'"
+          juniper.apstra.upgrade_group:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              name: "{{ test_group_name }}"
+              blueprint: "{{ blueprint_label }}"
+            body:
+              members: "{{ all_test_members }}"
+            state: absent
+          ignore_errors: true
+          register: cleanup_result
+
+        - name: "Cleanup — Confirm test group dissolved"
+          ansible.builtin.debug:
+            msg: >-
+              Cleanup complete: {{ cleanup_result.msg | default('no changes needed') }}
+              — all test devices are back in 'default' group.
+              Team setup is unchanged.
+
+    # ── Final summary ─────────────────────────────────────────────────────────
+    - name: "Summary — Upgrade Group integration test results"
+      ansible.builtin.debug:
+        msg:
+          - "Test 1 (gathered all):             {{ 'PASSED' if not test1_result.failed | default(false) else 'FAILED' }}"
+          - "Test 2 (gathered named default):   {{ 'PASSED' if not test2_result.failed | default(false) else 'FAILED' }}"
+          - "Test 3 (present create):           {{ 'SKIPPED' if not run_write_tests else ('PASSED' if not test3_result.failed | default(false) else 'FAILED') }}"
+          - "Test 4 (present idempotent):       {{ 'SKIPPED' if not run_write_tests or test3_result.failed | default(false) else ('PASSED' if not test4_result.failed | default(false) else 'FAILED') }}"
+          - "Test 5 (gathered verify):          {{ 'SKIPPED' if not run_write_tests or test3_result.failed | default(false) else ('PASSED' if not test5_result.failed | default(false) else 'FAILED') }}"
+          - "Test 6 (impact_report):            {{ 'SKIPPED' if not run_write_tests or test3_result.failed | default(false) else ('PASSED' if not test6_result.failed | default(false) else 'FAILED') }}"
+          - "Test 7 (absent partial):           {{ 'SKIPPED' if not run_write_tests or test3_result.failed | default(false) else ('PASSED' if not test7_result.failed | default(false) else 'FAILED') }}"
+          - "Test 8 (absent dissolve):          {{ 'SKIPPED' if not run_write_tests or test3_result.failed | default(false) else ('PASSED' if not test8_result.failed | default(false) else 'FAILED') }}"
+          - "Test 9 (absent idempotent):        {{ 'SKIPPED' if not run_write_tests or test3_result.failed | default(false) else ('PASSED' if not test9_result.failed | default(false) else 'FAILED') }}"
+          - "Cleanup:                           always executed (devices restored to 'default')"

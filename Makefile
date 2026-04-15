@@ -141,6 +141,7 @@ install: build
 	test-customize_generic_systems \
 	test-system_agents \
 	test-os_upgrade \
+	test-upgrade_group \
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
@@ -214,6 +215,9 @@ test-system_agents: install
 
 test-os_upgrade: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/os_upgrade.yml
+
+test-upgrade_group: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/upgrade_group.yml
 
 test-interface_map: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interface_map.yml
@@ -331,7 +335,7 @@ delete-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager
 
 # Integration Tests
 .PHONY: test-integration-property_set
@@ -339,6 +343,7 @@ test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy 
 .PHONY: test-integration-configlets
 .PHONY: test-integration-connectivity_template_connectorops
 .PHONY: test-integration-os_upgrade
+.PHONY: test-integration-upgrade_group
 .PHONY: test-integration-virtual_infra_manager_vcenter
 
 test-integration-property_set: install
@@ -385,6 +390,30 @@ test-integration-connectivity_template_connectorops: install
 test-integration-os_upgrade: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
 		$(APSTRA_COLLECTION_ROOT)/tests/integration/os_upgrade.yml
+
+# ── Upgrade Group Integration Test (requires account team Apstra 6.1.1) ──────
+# Tests 1–2 are READ-ONLY (state=gathered).
+# Tests 3–9 perform WRITE operations but always clean up in always: block.
+#
+# ⚠️  ACCOUNT TEAM SETUP: All write tests restore devices to 'default'.
+#     Safe to run in full at any time.  No device upgrades are triggered.
+#
+# Read-only run (gathered tests only):
+#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_USERNAME="admin" \
+#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   PIPENV_DONT_LOAD_ENV=1 \
+#   make test-integration-upgrade_group ANSIBLE_FLAGS="-v --tags read_only"
+#
+# Full run (all tests — cleanup guaranteed):
+#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_USERNAME="admin" \
+#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   PIPENV_DONT_LOAD_ENV=1 \
+#   make test-integration-upgrade_group ANSIBLE_FLAGS="-v"
+test-integration-upgrade_group: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+		$(APSTRA_COLLECTION_ROOT)/tests/integration/upgrade_group.yml
 
 # ── VIM vCenter Integration Test (requires live vCenter at 10.204.16.35) ─────
 # Full run (all phases):

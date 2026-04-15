@@ -389,27 +389,63 @@ def list_all_systems(client_factory):
     return data.get("items", []), data.get("upgrade_groups", [])
 
 
-def resolve_device_key(client_factory, system_ref):
-    """Resolve *system_ref* to a ``device_key`` for use with ``PUT /systems/{key}``.
+def resolve_device_key(client_factory, system_ref, blueprint_id=None):
+    """Resolve *system_ref* to a ``device_key`` for ``PUT /systems/{key}``.
 
-    *system_ref* may be a device_key, label (``facts.hostname``), or
-    management IP (``facts.mgmt_ipaddr``).
+    Resolution order (first match wins):
+
+    1. Direct ``device_key`` match (MAC/serial, e.g. ``525400D8C496``).
+    2. Management-IP match against ``facts.mgmt_ipaddr``.
+    3. Hostname match against ``facts.hostname`` (often ``None`` on cloud
+       Apstra installs).
+    4. Blueprint-node label via
+       ``/blueprints/{bp}/experience/web/system-info``
+       (requires *blueprint_id*; resolves human-readable node labels like
+       ``apstra_esi_001_leaf1`` — the ``system_id`` returned by that
+       endpoint is identical to ``device_key`` in ``/systems``).
 
     Raises ``ValueError`` if not found.
     """
     items, _ = list_all_systems(client_factory)
+
+    # Steps 1–3: direct match in /systems
     for system in items:
         device_key = system.get("device_key", "")
         facts = system.get("facts", {})
-        hostname = facts.get("hostname", "")
-        mgmt_ip = facts.get("mgmt_ipaddr", "")
-        label = system.get("label", "") or hostname
-        if device_key == system_ref or label == system_ref or mgmt_ip == system_ref:
+        hostname = facts.get("hostname", "") or ""
+        mgmt_ip = facts.get("mgmt_ipaddr", "") or ""
+        if device_key == system_ref or mgmt_ip == system_ref or (
+            hostname and hostname == system_ref
+        ):
             return device_key
+
+    # Step 4: blueprint-node label → system_id (== device_key)
+    if blueprint_id:
+        sys_info = list_blueprint_system_info(client_factory, blueprint_id)
+        for node in sys_info:
+            if node.get("label") == system_ref and node.get("system_id"):
+                node_sys_id = node["system_id"]
+                # system_id == device_key in /systems
+                for system in items:
+                    if system.get("device_key") == node_sys_id:
+                        return node_sys_id
     raise ValueError(
         f"System not found for '{system_ref}'. "
-        "Provide a device_key, hostname, or management IP."
+        "Provide a device_key, management IP, hostname, or blueprint node label."
     )
+
+
+def get_group_members(client_factory, group_name):
+    """Return a list of systems that currently belong to *group_name*.
+
+    Each entry is the full system dict from ``GET /systems`` (contains
+    ``device_key``, ``facts``, ``user_config``, etc.).
+    Returns an empty list when the group does not exist.
+    """
+    items, _ = list_all_systems(client_factory)
+    return [
+        s for s in items if s.get("user_config", {}).get("upgrade_group") == group_name
+    ]
 
 
 def set_upgrade_group(client_factory, device_key, group_name, current_user_config=None):
