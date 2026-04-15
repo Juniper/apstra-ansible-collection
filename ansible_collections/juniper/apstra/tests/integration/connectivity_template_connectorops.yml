@@ -34,11 +34,17 @@
 # In this blueprint the RG ae interfaces have if_name=None in the graph.
 # Apstra populates if_name only when the rack template uses member-leaf node
 # labels as the RG label (e.g. "leaf1 / leaf2").  Here the rack uses a custom
-# label ("connectorops_vjun_001_leaf_pair1"), so the ae if_name is not set.
+# label ("connectorops_vjun_001_leaf_pair1"), so the ae if_name is not set on
+# the RG-level aggregate interface node.
 #
-# Consequence: "leaf1/leaf2:ae1" fails at name-resolution ("not found"),
-# NOT at AP validation ("not a valid AP").  This is the correct behavior —
-# it proves fix e35b39e (qry_rg type-agnostic search) runs and fails cleanly.
+# The fix (qry_rg_indirect + slash-notation member matching) resolves this:
+#   1. 2-hop traversal: RG → hosted_interfaces → rg_ae(if_name=None) → out →
+#      leaf_ae(if_name="ae1")  — finds the RG ae interface via leaf members.
+#   2. Slash-notation: "leaf1/leaf2" → RG lookup by composed_of member labels.
+#
+# Consequence: "leaf1/leaf2:ae1" NOW RESOLVES and ae1 IS assigned (Tests 6+8
+# succeed).  Individual leaf ae "leaf1:ae1" still fails b/c RG-bound CT does
+# not list individual leaf ae interfaces as valid APs.
 #
 # ── Fixes validated ───────────────────────────────────────────────────────────
 # Fix bdf3263 — blueprint_id key alias (ct_name param accepted)
@@ -355,9 +361,11 @@
         ##########################################################################
         # Test 6 — ESI pair slash form ae1 (correct account team syntax)
         # Replicates: "apstra_esi_001_leaf1/apstra_esi_001_leaf2:ae1"
-        # Exercises Fix e35b39e: qry_rg runs without type filter.
-        # RG ae interfaces have if_name=None in this blueprint → ae1 not found.
-        # Error MUST be "not found" (not "not a valid AP") to prove qry_rg ran.
+        # Exercises Fix e35b39e (qry_rg_indirect 2-hop) + new slash-notation
+        # member-label matching (Fix for leaf1/leaf2 → RG lookup).
+        # Both individual leaf ae1 AND RG ae1 are in the result set; the slash
+        # fallback matches the RG by its composed_of members → returns rg_ae.id.
+        # ae1 IS a valid AP (VN bound_to includes RG) → assignment SUCCEEDS.
         ##########################################################################
         - name: "Test 6 — ESI slash form: {{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
           juniper.apstra.connectivity_template_assignment:
@@ -372,20 +380,32 @@
                 - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
             state: present
           register: test6_result
-          ignore_errors: true
 
-        - name: "Test 6 — Assert error is 'not found' (not 'not a valid AP')"
+        - name: "Test 6 — Assert SUCCESS: slash form resolves and ae1 is assigned"
           ansible.builtin.assert:
             that:
-              - test6_result.failed
-              - "'ae1' in test6_result.msg"
-              - test6_result.msg | lower is not search("not valid application point")
+              - not test6_result.failed | default(false)
+              - test6_result.changed
             fail_msg: >-
-              FAILED Test 6: Expected "not found" for ESI slash form ae1.
-              Got: {{ test6_result.msg | default('(no error — unexpectedly succeeded)') }}
+              FAILED Test 6: ESI slash form 'leaf1/leaf2:ae1' should resolve and
+              succeed (Fix e35b39e + slash-member fallback).
+              Got: {{ test6_result.msg | default('(no message)') }}
             success_msg: >-
-              PASSED Test 6: ESI slash 'leaf1/leaf2:ae1' → "not found" error
-              (not "not a valid AP"). qry_rg code path confirmed (Fix e35b39e ✓).
+              PASSED Test 6: 'leaf1/leaf2:ae1' resolved via RG member-label
+              matching → ae1 RG interface assigned (Fix e35b39e ✓).
+
+        - name: "Test 6 cleanup"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
+            state: absent
 
         ##########################################################################
         # Test 7 — ESI pair slash form ae999 (non-existent ae) → clear "not found"
@@ -417,10 +437,9 @@
             success_msg: "PASSED Test 7: 'leaf1/leaf2:ae999' gives clear 'not found' error."
 
         ##########################################################################
-        # Test 8 — Full account-team scenario replay
+        # Test 8 — Full account-team scenario replay — ALL THREE SUCCEED
         # border-leaf ge + ESI pair ae + border-leaf ge (exactly 3 entries).
-        # Expected: FAILS on ae1 ("not found"), proves the exact failure mode
-        # the account team had — and the improved error message they now get.
+        # With the fix: all 3 resolve and all 3 are valid APs → FULL SUCCESS.
         ##########################################################################
         - name: "Test 8 — Full scenario: border ge + ESI-pair ae + border ge"
           juniper.apstra.connectivity_template_assignment:
@@ -433,26 +452,37 @@
             body:
               application_point_ids:
                 - "{{ single_leaf }}:ge-0/0/2"             # valid
-                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"   # not found (RG if_name=None)
+                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"   # now resolves (Fix)
                 - "{{ single_leaf }}:ge-0/0/3"             # valid
             state: present
           register: test8_result
-          ignore_errors: true
 
-        - name: "Test 8 — Assert ae1 causes 'not found' (not 'not a valid AP')"
+        - name: "Test 8 — Assert full account-team scenario succeeds"
           ansible.builtin.assert:
             that:
-              - test8_result.failed
-              - "'ae1' in test8_result.msg"
-              - test8_result.msg | lower is not search("not valid application point")
+              - not test8_result.failed | default(false)
+              - test8_result.changed
             fail_msg: >-
-              FAILED Test 8: Expected "not found" on ae1 in full account-team scenario.
-              Got: {{ test8_result.msg | default('(module succeeded unexpectedly)') }}
+              FAILED Test 8: Full account-team scenario should succeed end-to-end.
+              Got: {{ test8_result.msg | default('(no message)') }}
             success_msg: >-
-              PASSED Test 8: Full account-team scenario replicated.
-              ge interfaces resolve OK; ae1 fails with "not found" (not "not a valid AP").
-              In a blueprint with named RG ae interfaces, this full scenario succeeds
-              after Fix e35b39e.
+              PASSED Test 8: Full account-team scenario — all 3 interfaces
+              (ge + ae + ge) resolved and assigned. Account team scenario works!
+
+        - name: "Test 8 cleanup"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ test_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
+                - "{{ single_leaf }}:ge-0/0/3"
+            state: absent
 
       ##########################################################################
       # Always block: summary + cleanup
@@ -470,9 +500,9 @@
               │  Test 4:  Idempotent unassign (changed=false)                   │
               │  Test 4b: ct_id key (account team exact key) → UUID [4e37581]   │
               │  Test 5:  Separate leaf ae → "not a valid AP" + ESI hint [b78]  │
-              │  Test 6:  ESI slash leaf1/leaf2:ae1 → "not found"        [e35]  │
+              │  Test 6:  ESI slash leaf1/leaf2:ae1 → SUCCEEDS        [new fix] │
               │  Test 7:  ESI slash ae999 → clear "not found"                   │
-              │  Test 8:  Full account-team replay (ge+ae+ge)                   │
+              │  Test 8:  Full account-team replay → ALL 3 SUCCEED   [new fix]  │
               └──────────────────────────────────────────────────────────────────┘
               Blueprint: {{ blueprint_label }}  |  CT used: {{ test_ct_name }}
 
