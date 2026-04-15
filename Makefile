@@ -334,6 +334,7 @@ test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy 
 .PHONY: test-integration-resource_pools
 .PHONY: test-integration-configlets
 .PHONY: test-integration-connectivity_template_connectorops
+.PHONY: test-integration-os_upgrade
 .PHONY: test-integration-virtual_infra_manager_vcenter
 
 test-integration-property_set: install
@@ -360,6 +361,26 @@ test-integration-configlets: install
 test-integration-connectivity_template_connectorops: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
 		$(APSTRA_COLLECTION_ROOT)/tests/integration/connectivity_template_connectorops.yml
+
+# ── OS Upgrade Integration Test (requires account team Apstra 6.1.1) ─────────
+# Tests state=gathered and state=impact_report (READ-ONLY — safe for account team).
+# state=present (actual upgrade) is DISABLED by default (run_upgrade_test=false).
+#
+# ⚠️  ACCOUNT TEAM SETUP: Tests 1–3 are read-only and safe at any time.
+#     Test 4 (upgrade) requires explicit opt-in — NEVER run without approval.
+#
+# Usage against account team (read-only):
+#   APSTRA_API_URL="https://apstra-d5b0895e-3549-4f9c-a786-6d7f68bb071a.aws.apstra.com/api" \
+#   APSTRA_USERNAME="admin" \
+#   APSTRA_PASSWORD="SwiftChimpanzee4+" \
+#   PIPENV_DONT_LOAD_ENV=1 \
+#   make test-integration-os_upgrade ANSIBLE_FLAGS="-v"
+#
+# Usage against local Apstra (6.0.0 — gathered/impact may return empty):
+#   make test-integration-os_upgrade ANSIBLE_FLAGS="-v"
+test-integration-os_upgrade: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+		$(APSTRA_COLLECTION_ROOT)/tests/integration/os_upgrade.yml
 
 # ── VIM vCenter Integration Test (requires live vCenter at 10.204.16.35) ─────
 # Full run (all phases):
