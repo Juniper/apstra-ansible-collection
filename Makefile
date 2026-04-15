@@ -333,6 +333,7 @@ test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy 
 .PHONY: test-integration-property_set
 .PHONY: test-integration-resource_pools
 .PHONY: test-integration-configlets
+.PHONY: test-integration-connectivity_template_connectorops
 .PHONY: test-integration-virtual_infra_manager_vcenter
 
 test-integration-property_set: install
@@ -343,6 +344,22 @@ test-integration-resource_pools: install
 
 test-integration-configlets: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/integration/configlets.yml
+
+# ── Connectivity Template Assignment — Connectorops Integration Test ──────────
+# Replicates the exact account team scenario that triggered fix_ct_issue fixes.
+# Runs against the live "vg-am-cops-tb-0" connectorops blueprint with real devices.
+# Creates + destroys a temporary SZ + VN; the existing blueprint is not modified.
+#
+# Prerequisites:
+#   - Blueprint "vg-am-cops-tb-0" must already exist (create-connectorops-blueprint)
+#   - AOS at 10.88.137.14 must be reachable
+#
+# Usage:
+#   make test-integration-connectivity_template_connectorops
+#   make test-integration-connectivity_template_connectorops ANSIBLE_FLAGS="-v"
+test-integration-connectivity_template_connectorops: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+		$(APSTRA_COLLECTION_ROOT)/tests/integration/connectivity_template_connectorops.yml
 
 # ── VIM vCenter Integration Test (requires live vCenter at 10.204.16.35) ─────
 # Full run (all phases):

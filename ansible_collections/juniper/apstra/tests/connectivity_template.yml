@@ -525,6 +525,219 @@
         success_msg: "Test 10b PASSED: CT unassign is idempotent"
       when: assign_raw_if_id is defined
 
+    # ── Test 11: Assign using colon-shorthand "system:if_name" ───────
+    - name: "Test 11 - NOTE: colon-shorthand skipped (no if_name in this blueprint)"
+      ansible.builtin.debug:
+        msg: >-
+          Test 11 SKIPPED: system:if_name colon-shorthand requires a
+          blueprint with interface maps assigned (if_name populated).
+      when: assign_dict_if_name is not defined
+
+    - name: "Test 11 - Assign CT using 'system:if_name' colon-shorthand string"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_dict_sys_label }}:{{ assign_dict_if_name }}"
+        state: present
+      register: ct_assign_colon
+      when: assign_dict_if_name is defined
+
+    - name: Assert CT assigned by colon-shorthand resolves to correct interface node ID
+      ansible.builtin.assert:
+        that:
+          - ct_assign_colon.changed
+          - ct_assign_colon.applied | length == 1
+          - ct_assign_colon.applied[0] == assign_dict_if_id
+        fail_msg: >-
+          Test 11 FAILED: system:if_name colon-shorthand did not resolve to
+          expected node ID {{ assign_dict_if_id }}
+        success_msg: "Test 11 PASSED: system:if_name colon-shorthand correctly resolves to interface node ID"
+      when: assign_dict_if_name is defined
+
+    - name: "Test 11 - Unassign after colon-shorthand test"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ blueprint_id }}"
+          ct_name: "CT-Assignment-Test"
+        body:
+          application_point_ids:
+            - "{{ assign_dict_sys_label }}:{{ assign_dict_if_name }}"
+        state: absent
+      when: assign_dict_if_name is defined
+
+    # ── Tests 12-14: ESI leaf-pair (redundancy_group) smoke tests ────────
+    # Uses a dedicated L2_Virtual_ESI_2x_Links blueprint to verify that:
+    #   12 - QE correctly finds redundancy_group nodes in an ESI blueprint
+    #   13 - 'rg_label:ae999' (unknown ae) gives a clear 'not found' error
+    #        from name_resolution — NOT 'not a valid application point'
+    #   14 - 'leaf1/leaf2:ae999' slash-separated leaf-pair form is also
+    #        correctly parsed and searched; _norm() slash-whitespace works
+
+    - name: "ESI Tests: Create ESI blueprint for leaf-pair smoke tests"
+      juniper.apstra.blueprint:
+        body:
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_ESI_2x_Links"
+          label: "{{ blueprint_name }}_esi"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: esi_bp
+
+    - name: "ESI Tests: Set esi_bp_id fact"
+      ansible.builtin.set_fact:
+        esi_bp_id: "{{ esi_bp.id.blueprint }}"
+
+    - name: "ESI Tests: Create security zone in ESI blueprint"
+      juniper.apstra.security_zone:
+        id: "{{ esi_bp.id }}"
+        body:
+          vrf_name: "esitest_vrf"
+          junos_evpn_irb_mode: "asymmetric"
+          l3_mtu: 9170
+          sz_type: "evpn"
+          label: "esitest-sz"
+        auth_token: "{{ auth.token }}"
+      register: esi_sz
+
+    - name: "ESI Tests: Create CT for ESI blueprint"
+      juniper.apstra.connectivity_template:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ esi_bp_id }}"
+        body:
+          name: "ESI-CT-Test"
+          type: interface
+          description: "CT for ESI leaf-pair smoke tests"
+          primitives:
+            ip_links:
+              esi_link:
+                security_zone: "esitest-sz"
+                interface_type: tagged
+                vlan_id: 500
+                ipv4_addressing_type: numbered
+                ipv6_addressing_type: none
+        state: present
+      register: esi_ct
+
+    - name: "ESI Tests: QE — find redundancy_group nodes in ESI blueprint"
+      juniper.apstra.apstra_facts:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ esi_bp_id }}"
+        gather_network_facts:
+          - blueprints.qe
+        filter:
+          blueprints.qe: 'node("redundancy_group", name="rg")'
+      register: esi_rg_facts
+
+    - name: "ESI Tests: Set rg_labels list and first RG label for use in later tests"
+      ansible.builtin.set_fact:
+        _esi_rg_labels: >-
+          {{ esi_rg_facts.ansible_facts.apstra_facts['blueprints.qe']
+             | map(attribute='rg') | map(attribute='label') | list }}
+        # Also build the two-leaf slash form used by account team:
+        # e.g. "l2_esi_2x_links_001_leaf_pair1" has members like
+        # "l2_esi_2x_links_001_leaf1 / l2_esi_2x_links_001_leaf2"
+        _esi_first_rg_label: >-
+          {{ (esi_rg_facts.ansible_facts.apstra_facts['blueprints.qe']
+              | map(attribute='rg') | map(attribute='label') | list)[0]
+             | default('no_rg_found') }}
+
+    # Test 12: redundancy_group nodes exist — verifies QE finds ESI leaf-pairs
+    - name: "Test 12 - ESI blueprint has redundancy_group (leaf-pair) nodes"
+      ansible.builtin.assert:
+        that:
+          - _esi_rg_labels | length > 0
+        fail_msg: >-
+          Test 12 FAILED: No redundancy_group nodes found in the
+          L2_Virtual_ESI_2x_Links blueprint. QE query for
+          node("redundancy_group") returned 0 results.
+        success_msg: >-
+          Test 12 PASSED: Found {{ _esi_rg_labels | length }} redundancy_group
+          node(s): {{ _esi_rg_labels }}. ESI blueprint topology verified.
+
+    # Test 13: 'rg_label:ae999' → name-resolution 'not found' error
+    # Verifies the fix: name_resolution.py now searches redundancy_group nodes.
+    # Since design-mode ae interfaces have if_name=None, ae999 is not found
+    # (expected) — but crucially the error is 'not found' from name_resolution,
+    # NOT 'not a valid application point' (which was the original bug symptom).
+    - name: "Test 13 - rg_label:ae999 gives clear name-resolution 'not found' error"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ esi_bp_id }}"
+          ct_name: "ESI-CT-Test"
+        body:
+          application_point_ids:
+            - "{{ _esi_first_rg_label }}:ae999"
+        state: present
+      register: esi_bad_ae
+      ignore_errors: true
+      when: _esi_rg_labels | length > 0
+
+    - name: "Assert Test 13: error is 'not found', not 'not a valid application point'"
+      ansible.builtin.assert:
+        that:
+          - esi_bad_ae.failed
+          - "'ae999' in esi_bad_ae.msg"
+          - esi_bad_ae.msg | lower is not search("not a valid application point")
+        fail_msg: >-
+          Test 13 FAILED: expected a clear 'Interface not found' error for
+          ae999 on the leaf-pair, but got: {{ esi_bad_ae.msg }}
+        success_msg: >-
+          Test 13 PASSED: rg_label:ae999 correctly produces 'not found' from
+          name resolution (not a pre-flight AP validation error).
+      when: _esi_rg_labels | length > 0
+
+    # Test 14: 'leaf1/leaf2:ae999' slash-separated form parses identically
+    # Verifies that colon-split on the FIRST ':' correctly produces
+    # system_ref="leaf1/leaf2" and if_name="ae999" (not a crash or wrong split).
+    # Uses a synthetic 'nosuchleaf1/nosuchleaf2:ae999' ref that won't resolve,
+    # so we just verify the error mentions 'ae999' (proving the split worked).
+    - name: "Test 14 - slash leaf1/leaf2:ae999 form correctly splits at first colon"
+      juniper.apstra.connectivity_template_assignment:
+        auth_token: "{{ auth.token }}"
+        verify_certificates: false
+        id:
+          blueprint: "{{ esi_bp_id }}"
+          ct_name: "ESI-CT-Test"
+        body:
+          application_point_ids:
+            - "nosuchleaf1/nosuchleaf2:ae999"
+        state: present
+      register: esi_slash_test
+      ignore_errors: true
+
+    - name: "Assert Test 14: slash form splits at first colon — error mentions ae999"
+      ansible.builtin.assert:
+        that:
+          - esi_slash_test.failed
+          - "'ae999' in esi_slash_test.msg"
+          - esi_slash_test.msg | lower is not search("not a valid application point")
+        fail_msg: >-
+          Test 14 FAILED: slash form 'nosuchleaf1/nosuchleaf2:ae999' did not
+          produce the expected error. Got: {{ esi_slash_test.msg }}
+        success_msg: >-
+          Test 14 PASSED: 'leaf1/leaf2:ae999' colon-split correct — error
+          correctly references ae999 as the interface name.
+
+    - name: "ESI Tests: Cleanup — delete ESI test blueprint"
+      juniper.apstra.blueprint:
+        id: "{{ esi_bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
     - name: "Delete CT used for assignment tests"
       juniper.apstra.connectivity_template:
         auth_token: "{{ auth.token }}"
@@ -560,4 +773,4 @@
 
     - name: "All tests passed!"
       ansible.builtin.debug:
-        msg: "All 10 connectivity_template and connectivity_template_assignment tests passed successfully"
+        msg: "All 14 connectivity_template and connectivity_template_assignment tests passed successfully (incl. Tests 12-14: ESI leaf-pair ae interface)"

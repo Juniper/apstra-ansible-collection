@@ -532,12 +532,19 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
     Accepts one of the following forms:
 
     * A raw string graph node ID (pass-through, no API call performed).
+    * A colon-separated shorthand string ``"<system_label>:<if_name>"``
+      (e.g. ``"leaf1:ge-0/0/3"`` or ``"leaf1:ae1"``) which is resolved
+      via a QE graph query.  For ESI leaf-pairs use the leaf-pair label
+      as the system reference, e.g.
+      ``"leaf1/leaf2:ae1"`` or ``"leaf1 / leaf2:ae1"`` — whitespace
+      around the slash is normalised automatically.
     * A dict ``{"system": "<system_label_or_id>", "if_name": "<if_name>"}``
       which is resolved via a QE graph query.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.
-    :param ap_ref: A raw string node ID or a resolution dict.
+    :param ap_ref: A raw string node ID, a ``system:if_name`` shorthand
+        string, or a resolution dict.
     :return: The resolved interface graph node ID string.
     :raises ValueError: If the system or interface cannot be found.
     """
@@ -545,22 +552,56 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
         return ap_ref
 
     if isinstance(ap_ref, str):
-        return ap_ref  # already a raw node ID — pass through unchanged
-
-    system_ref = ap_ref.get("system")
-    if_name = ap_ref.get("if_name")
+        # Colon-shorthand: "system_label:if_name" (must contain exactly one ':')
+        # Distinguish from raw node IDs which never contain ':'
+        if ":" in ap_ref:
+            parts = ap_ref.split(":", 1)
+            system_ref = parts[0]
+            if_name = parts[1]
+        else:
+            return ap_ref  # already a raw node ID — pass through unchanged
+    else:
+        system_ref = ap_ref.get("system")
+        if_name = ap_ref.get("if_name")
     if not system_ref or not if_name:
         raise ValueError(
-            "Interface reference dict must have 'system' and 'if_name' keys, "
-            f"got: {ap_ref}"
+            "Interface reference must be a 'system:if_name' string, "
+            "a dict with 'system' and 'if_name' keys, or a raw node ID. "
+            f"Got: {ap_ref}"
         )
 
-    qry = (
+    # Query both system nodes (individual devices) and redundancy_group nodes
+    # (ESI leaf-pairs).  Redundancy groups have labels like
+    # "leaf1 / leaf2" and own the LAG (ae) interfaces in EVPN multi-homing.
+    qry_system = (
         'node(type="system", name="sys")'
         '.out(type="hosted_interfaces")'
         f'.node(type="interface", if_name="{if_name}", name="intf")'
     )
-    results = _run_qe(client_factory, blueprint_id, qry)
+    # Direct: for blueprints where the RG's hosted interface has if_name set.
+    # (type filter omitted — ae/LAG interfaces have if_type="port_channel", not
+    # type="interface", so the RG query intentionally omits the type filter.)
+    qry_rg_direct = (
+        'node(type="redundancy_group", name="sys")'
+        '.out(type="hosted_interfaces")'
+        f'.node(if_name="{if_name}", name="intf")'
+    )
+    # Indirect: for blueprints where the RG's aggregate ae has if_name=None but
+    # its out-edges point to per-leaf ae interfaces that carry the if_name.
+    # Traversal: RG -> hosted_interfaces -> rg_ae(if_name=None) -> out ->
+    # leaf_ae(if_name=<requested>).  We return rg_ae.id as the application
+    # point (the aggregate LAG on the RG, not the per-leaf member interface).
+    qry_rg_indirect = (
+        'node(type="redundancy_group", name="sys")'
+        '.out(type="hosted_interfaces")'
+        '.node(name="intf")'
+        f'.out().node(if_name="{if_name}")'
+    )
+    results = (
+        (_run_qe(client_factory, blueprint_id, qry_system) or [])
+        + (_run_qe(client_factory, blueprint_id, qry_rg_direct) or [])
+        + (_run_qe(client_factory, blueprint_id, qry_rg_indirect) or [])
+    )
 
     if results:
         # Exact label or ID match
@@ -575,6 +616,61 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
             sys_node = r.get("sys", {})
             if (sys_node.get("label") or "").lower() == ref_lower:
                 return r["intf"]["id"]
+
+        # Whitespace-normalized fallback: Apstra stores leaf-pair labels with
+        # spaces around the slash (e.g. "leaf1 / leaf2") but users often omit
+        # spaces.  Normalize by stripping whitespace around "/" for comparison.
+        def _norm(s):
+            import re as _re
+
+            return _re.sub(r"\s*/\s*", "/", str(s)).lower()
+
+        ref_norm = _norm(system_ref)
+        for r in results:
+            sys_node = r.get("sys", {})
+            if _norm(sys_node.get("label") or "") == ref_norm:
+                return r["intf"]["id"]
+
+        # Slash-notation fallback: the user specified "leaf1/leaf2:ae1" to
+        # identify a redundancy_group by listing its member leaf labels, rather
+        # than using the RG label directly (e.g. "rg_label:ae1").
+        # For each RG in the results, query its composed_of member system labels
+        # and check if all user-specified leaf names appear among them.
+        if "/" in str(system_ref):
+            import re as _re
+
+            user_leaves = {
+                _re.sub(r"\s*/\s*", "/", p.strip()).lower()
+                for p in str(system_ref).split("/")
+                if p.strip()
+            }
+            seen_rg_ids = set()
+            for r in results:
+                sys_node = r.get("sys", {})
+                if sys_node.get("type") != "redundancy_group":
+                    continue
+                rg_id = sys_node.get("id")
+                if not rg_id or rg_id in seen_rg_ids:
+                    continue
+                seen_rg_ids.add(rg_id)
+                # Fetch the RG's member system labels.  The edge from
+                # redundancy_group to member systems has no fixed type in
+                # Apstra's graph model, so we traverse all out-edges.
+                member_items = (
+                    _run_qe(
+                        client_factory,
+                        blueprint_id,
+                        f'node(id="{rg_id}", name="rg")'
+                        '.out().node(type="system", name="mbr")',
+                    )
+                    or []
+                )
+                member_labels = {
+                    (m.get("mbr") or {}).get("label", "").lower() for m in member_items
+                }
+                if user_leaves <= member_labels:
+                    # All user-specified leaf names are members of this RG
+                    return r["intf"]["id"]
 
     available_systems = sorted(
         {r.get("sys", {}).get("label", "") for r in (results or [])} - {""}
@@ -593,8 +689,11 @@ def resolve_interface_node_id(client_factory, blueprint_id, ap_ref):
 def resolve_application_point_ids(client_factory, blueprint_id, ap_refs):
     """Resolve a list of application-point references to interface node IDs.
 
-    Each entry may be a raw string graph node ID or a resolution dict
-    ``{"system": "<label_or_id>", "if_name": "<if_name>"}``.
+    Each entry may be:
+    - A raw string graph node ID (pass-through).
+    - A colon-separated shorthand string ``"system_label:if_name"``
+      (e.g. ``"leaf1:ge-0/0/3"``).
+    - A resolution dict ``{"system": "<label_or_id>", "if_name": "<if_name>"}``.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.

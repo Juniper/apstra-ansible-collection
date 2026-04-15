@@ -7,6 +7,7 @@
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
+import re
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
@@ -89,12 +90,15 @@ options:
     suboptions:
       blueprint:
         description:
-          - The ID of the Apstra blueprint.
+          - The ID or label of the Apstra blueprint.
+          - C(blueprint_id) is accepted as an alias for this key.
         required: true
         type: str
       ct_id:
         description:
-          - The UUID of the Connectivity Template to assign.
+          - The UUID or name (label) of the Connectivity Template to assign.
+          - If a non-UUID value is supplied it is automatically resolved
+            to a UUID by looking up the CT name in the blueprint.
           - Either C(ct_id) or C(ct_name) must be provided.
         required: false
         type: str
@@ -110,10 +114,14 @@ options:
       - Must contain C(application_point_ids) list of application-point
         references to assign the CT to (when state is present) or unassign
         from (when state is absent).
-      - Each entry may be a raw blueprint graph node ID string
-        (e.g. C(G31G9dCSVcDS9PoeYg)) or a resolution dict with
-        C(system) and C(if_name) keys that is resolved to the
-        interface node ID via a QE graph query.
+      - Each entry may be:
+      - A raw blueprint graph node ID string
+        (e.g. C(G31G9dCSVcDS9PoeYg)).
+      - A colon-separated shorthand string C("<system_label>:<if_name>")
+        (e.g. C("leaf1:ge-0/0/3") or C("leaf1:ae1")) that is resolved
+        to the interface node ID via a QE graph query.
+      - A resolution dict with C(system) and C(if_name) keys that is
+        resolved to the interface node ID via a QE graph query.
     type: dict
     required: true
   state:
@@ -128,6 +136,21 @@ options:
 """
 
 EXAMPLES = """
+# ── Assign using colon-shorthand (system:if_name) strings ────────────
+
+- name: Assign CT using system:if_name shorthand
+  juniper.apstra.connectivity_template_assignment:
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_name: "NewVN2"
+    body:
+      application_point_ids:
+        - "leaf1:ge-0/0/3"
+        - "leaf1:ae1"
+        - "leaf2:ae1"
+        - "leaf3:ge-0/0/2"
+    state: present
+
 # ── Assign by CT ID using raw node IDs ───────────────────────────────
 
 - name: Assign CT to multiple interfaces (raw node IDs)
@@ -206,6 +229,16 @@ msg:
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_uuid(value):
+    """Return True if *value* looks like a UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)."""
+    return bool(_UUID_RE.match(str(value))) if value else False
+
 
 def _find_ct_by_name(ep_client, blueprint_id, name):
     """
@@ -232,7 +265,12 @@ def _get_current_assignments(ep_client, blueprint_id, ct_id):
     Get the current assignment states for a CT by walking the
     application-points tree.
 
-    Returns a dict: {interface_id: "used"|"unused"}
+    Returns a tuple:
+      - states:       dict {interface_id: state_string}
+                      ALL valid application-point interface IDs are present,
+                      even those never assigned (state defaults to "unused").
+      - valid_ap_ids: set of all valid application-point interface IDs for
+                      this CT (used for input validation).
     """
     app_points = (
         ep_client.blueprints[blueprint_id]
@@ -240,32 +278,45 @@ def _get_current_assignments(ep_client, blueprint_id, ct_id):
         .application_points.get()
     )
     states = {}
-    _walk_app_points_tree(app_points, ct_id, states)
-    return states
+    valid_ap_ids = set()
+    _walk_app_points_tree(app_points, ct_id, states, valid_ap_ids)
+    return states, valid_ap_ids
 
 
-def _walk_app_points_tree(node, ct_id, states):
-    """Recursively walk the app-points tree and extract interface states."""
+def _walk_app_points_tree(node, ct_id, states, valid_ap_ids):
+    """Recursively walk the app-points tree and extract interface states.
+
+    Every interface node found is added to *valid_ap_ids* regardless of
+    whether the CT has been assigned to it.  The state for each interface
+    defaults to ``"unused"`` and is overwritten when a matching policy
+    entry is found.
+    """
     if not isinstance(node, dict):
         return
 
-    # Check if this node has policies for our CT
     if node.get("type") == "interface":
-        for pol in node.get("policies", []):
-            if pol.get("policy") == ct_id:
-                states[node["id"]] = pol.get("state", "unused")
+        node_id = node.get("id")
+        if node_id:
+            valid_ap_ids.add(node_id)
+            # Default to unused; overwrite if the CT has a policy entry here.
+            ct_state = "unused"
+            for pol in node.get("policies", []):
+                if pol.get("policy") == ct_id:
+                    ct_state = pol.get("state", "unused")
+                    break
+            states[node_id] = ct_state
 
     # Walk children
     children = node.get("children", [])
     if isinstance(children, list):
         for child in children:
-            _walk_app_points_tree(child, ct_id, states)
+            _walk_app_points_tree(child, ct_id, states, valid_ap_ids)
 
     # Also walk nested 'application_points' key (top-level response)
     ap = node.get("application_points")
     if isinstance(ap, dict):
         for child in ap.get("children", []):
-            _walk_app_points_tree(child, ct_id, states)
+            _walk_app_points_tree(child, ct_id, states, valid_ap_ids)
 
 
 # ── Main module logic ─────────────────────────────────────────────────────────
@@ -296,22 +347,33 @@ def main():
 
         # Validate params
         id_param = module.params["id"] or {}
-        blueprint_id = id_param.get("blueprint")
+        blueprint_id = id_param.get("blueprint") or id_param.get("blueprint_id")
         if blueprint_id:
             blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
             id_param["blueprint"] = blueprint_id
         ct_id = id_param.get("ct_id")
         ct_name = id_param.get("ct_name")
         body = module.params["body"] or {}
-        application_point_ids = body.get("application_point_ids", [])
+        application_point_ids_raw = body.get("application_point_ids", [])
         state = module.params["state"]
 
         # ── Resolve application point IDs (human-readable → node ID) ──
         application_point_ids = resolve_application_point_ids(
-            client_factory, blueprint_id, application_point_ids
+            client_factory, blueprint_id, application_point_ids_raw
         )
+        # Map resolved UUID → original reference string for error reporting.
+        _id_to_ref = {
+            uid: raw
+            for uid, raw in zip(application_point_ids, application_point_ids_raw)
+            if uid != raw  # only store entries where resolution changed the value
+        }
 
         # ── Resolve CT ID ─────────────────────────────────────────────
+        # If ct_id is provided but is not a UUID, treat it as a name.
+        if ct_id and not _is_uuid(ct_id):
+            ct_name = ct_name or ct_id
+            ct_id = None
+
         if not ct_id:
             if ct_name:
                 ct_id = _find_ct_by_name(ep_client, blueprint_id, ct_name)
@@ -321,7 +383,7 @@ def main():
                         f"not found in blueprint '{blueprint_id}'"
                     )
             else:
-                raise ValueError("Either 'ct_id' or 'ct_name' is required")
+                raise ValueError("Either 'ct_id' (UUID) or 'ct_name' is required")
 
         if not application_point_ids:
             result["msg"] = "No application_point_ids specified, nothing to do"
@@ -329,7 +391,35 @@ def main():
             return
 
         # ── Get current state ─────────────────────────────────────────
-        current_states = _get_current_assignments(ep_client, blueprint_id, ct_id)
+        current_states, valid_ap_ids = _get_current_assignments(
+            ep_client, blueprint_id, ct_id
+        )
+
+        # ── Validate resolved IDs against the CT’s application-points tree ──
+        invalid_ids = [i for i in application_point_ids if i not in valid_ap_ids]
+        if invalid_ids:
+            # Build a human-readable representation for each invalid ID.
+            invalid_display = [
+                f"{_id_to_ref[i]!r} (resolved: {i})" if i in _id_to_ref else repr(i)
+                for i in invalid_ids
+            ]
+            # Detect whether any failing ref looks like a LAG on an individual
+            # ESI leaf member (e.g. "leaf1:ae1") so we can give a targeted hint.
+            _lag_hint = ""
+            for raw in [_id_to_ref.get(i, "") for i in invalid_ids]:
+                if re.search(r"(?<!/)[^/]+:ae\d+", str(raw), re.IGNORECASE):
+                    _lag_hint = (
+                        " Hint: ae/LAG interfaces on ESI leaf-pairs must be "
+                        "referenced as the leaf-pair, not individual leaves "
+                        "(e.g. 'leaf1/leaf2:ae1' instead of 'leaf1:ae1' and "
+                        "'leaf2:ae1')."
+                    )
+                    break
+            raise ValueError(
+                f"The following interfaces are not valid application points "
+                f"for CT '{ct_id}' in blueprint '{blueprint_id}': "
+                f"{invalid_display}.{_lag_hint}"
+            )
 
         # ── Determine needed changes ──────────────────────────────────
         to_apply = []
