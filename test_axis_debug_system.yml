@@ -1,6 +1,6 @@
 ---
 # Debug playbook — dumps raw /systems/{device_key} for one device.
-# Runs a small inline Python script using the same env vars as the module.
+# Runs a small inline Python task using uri module.
 #
 # Usage:
 #   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_debug_system.yml
@@ -10,61 +10,37 @@
   gather_facts: false
   connection: local
 
+  vars:
+    apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
+    apstra_username: "{{ lookup('env', 'APSTRA_USERNAME') }}"
+    apstra_password: "{{ lookup('env', 'APSTRA_PASSWORD') }}"
+
   tasks:
-    - name: "Fetch and print full /systems record via inline script"
-      ansible.builtin.script:
-        executable: python3
-        cmd: |
-          import os, json, urllib.request, ssl
+    - name: "Login to Apstra"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/aaa/login"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ apstra_username }}"
+          password: "{{ apstra_password }}"
+        validate_certs: false
+        status_code: [200, 201]
+      register: login
 
-          api_url  = os.environ['APSTRA_API_URL'].rstrip('/')
-          username = os.environ['APSTRA_USERNAME']
-          password = os.environ['APSTRA_PASSWORD']
-          ctx = ssl.create_default_context()
-          ctx.check_hostname = False
-          ctx.verify_mode = ssl.CERT_NONE
+    - name: "Set auth token"
+      ansible.builtin.set_fact:
+        auth_token: "{{ login.json.token | default(login.json.auth_token) | default(login.json.value) }}"
 
-          # Auth — try both known endpoints
-          token = None
-          for path in ['/aaa/login', '/user-sessions']:
-              req = urllib.request.Request(
-                  api_url + path,
-                  data=json.dumps({'username': username, 'password': password}).encode(),
-                  headers={'Content-Type': 'application/json'},
-              )
-              try:
-                  resp = urllib.request.urlopen(req, context=ctx)
-                  body = json.loads(resp.read())
-                  token = body.get('token') or body.get('auth_token') or body.get('value')
-                  if token:
-                      print(f'Auth OK via {path}')
-                      break
-              except Exception as e:
-                  print(f'Auth {path} failed: {e}')
+    - name: "GET /systems"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/systems"
+        method: GET
+        headers:
+          AuthToken: "{{ auth_token }}"
+        validate_certs: false
+      register: systems_resp
 
-          if not token:
-              raise SystemExit('ERROR: could not authenticate')
-
-          # List systems
-          req = urllib.request.Request(
-              api_url + '/systems',
-              headers={'AuthToken': token},
-          )
-          body = json.loads(urllib.request.urlopen(req, context=ctx).read())
-          items = body.get('items', body) if isinstance(body, dict) else body
-          if not items:
-              raise SystemExit('No systems found')
-
-          # Print first device — full record
-          dev = items[0]
-          print('\n=== Full /systems record for device', dev.get('device_key'), '===')
-          print(json.dumps(dev, indent=2))
-      register: debug_out
-      environment:
-        APSTRA_API_URL: "{{ lookup('env', 'APSTRA_API_URL') }}"
-        APSTRA_USERNAME: "{{ lookup('env', 'APSTRA_USERNAME') }}"
-        APSTRA_PASSWORD: "{{ lookup('env', 'APSTRA_PASSWORD') }}"
-
-    - name: "Show output"
+    - name: "Show FULL record for first device"
       ansible.builtin.debug:
-        msg: "{{ debug_out.stdout_lines }}"
+        msg: "{{ systems_resp.json.items[0] | to_nice_json }}"
