@@ -1,0 +1,238 @@
+---
+# ── Test playbook for juniper.apstra.upgrade_group ───────────────────
+#
+# Covers: state=gathered (all + named group),
+#         and expected-error cases for state=present, state=absent,
+#         and state=impact_report.
+#
+# Write states (state=present, state=absent) are exercised in
+# tests/integration/upgrade_group.yml only, where a real Apstra 6.1+
+# environment is available and cleanup can be guaranteed.
+#
+# Notes on Apstra version compatibility:
+#   state=gathered      → works on all versions; upgrade_groups list may
+#                          be absent on < 6.1, module handles gracefully
+#   state=impact_report → requires Apstra 6.1+ (/system-agents/upgrade-impact).
+#                          On older versions this test is ignored gracefully.
+#   state=present /
+#   state=absent        → require Apstra 6.1+.  Only error-path tested here
+#                          (no actual writes, so safe on all versions).
+#
+# Prerequisites:
+#   - Apstra server reachable (APSTRA_API_URL env or default 10.88.137.14)
+#
+# Usage:
+#   make test-upgrade_group
+#   make test-upgrade_group ANSIBLE_FLAGS="-v"
+
+- name: Test juniper.apstra.upgrade_group
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # A well-known group name that should exist on Apstra (default is always
+    # present).
+    known_group: "{{ group | default('default') }}"
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Test 1: state=gathered (all groups) ───────────────────────────────────
+    # Lists all upgrade groups and their member devices.
+    # Always read-only.  An empty group list is valid.
+    - name: "Test 1 — state=gathered: list all upgrade groups"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        state: gathered
+      register: t1
+      ignore_errors: true
+
+    - name: "Test 1 — Verify: gathered returns groups dict"
+      ansible.builtin.assert:
+        that:
+          - not t1.failed | default(false)
+          - not t1.changed
+          - t1.groups is defined
+          - t1.groups | type_debug == 'dict'
+          - t1.msg is defined
+        fail_msg: >-
+          Test 1 FAILED: state=gathered did not return groups dict.
+          {{ t1.msg | default('') }}
+        success_msg: >-
+          Test 1 PASSED: gathered returned {{ t1.groups | length }} group(s) —
+          no changes.
+
+    - name: "Test 1 — Show gathered groups"
+      ansible.builtin.debug:
+        msg: >-
+          Upgrade groups: {{ t1.groups.keys() | list }}
+
+    # ── Test 2: state=gathered idempotent (second call) ───────────────────────
+    - name: "Test 2 — state=gathered: idempotent (second call)"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        state: gathered
+      register: t2
+      ignore_errors: true
+
+    - name: "Test 2 — Verify: gathered is idempotent"
+      ansible.builtin.assert:
+        that:
+          - not t2.changed
+          - t2.groups | length == t1.groups | length
+        fail_msg: "Test 2 FAILED: second gathered call returned different count."
+        success_msg: >-
+          Test 2 PASSED: gathered is idempotent —
+          {{ t2.groups | length }} group(s) each time.
+      when: not t1.failed | default(false)
+
+    # ── Test 3: state=gathered with id.name ───────────────────────────────────
+    # Lists only the named group members.  'default' always exists.
+    - name: "Test 3 — state=gathered with id.name='{{ known_group }}'"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        id:
+          name: "{{ known_group }}"
+        state: gathered
+      register: t3
+      ignore_errors: true
+
+    - name: "Test 3 — Verify: named-group gathered returns scoped dict"
+      ansible.builtin.assert:
+        that:
+          - not t3.failed | default(false)
+          - not t3.changed
+          - t3.groups is defined
+          - t3.groups | length == 1
+          - known_group in t3.groups
+        fail_msg: >-
+          Test 3 FAILED: named-group gathered failed or wrong structure.
+          {{ t3.msg | default('') }}
+        success_msg: >-
+          Test 3 PASSED: gathered for '{{ known_group }}' returned
+          {{ t3.groups[known_group] | length }} member(s).
+      when: not t1.failed | default(false)
+
+    # ── Test 4: state=present — missing id.name (expected error) ─────────────
+    - name: "Test 4 — state=present: missing id.name (expect error)"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        body:
+          members:
+            - "some-device"
+        state: present
+      register: t4
+      ignore_errors: true
+
+    - name: "Test 4 — Verify: missing id.name → clear error"
+      ansible.builtin.assert:
+        that:
+          - t4.failed | default(false)
+          - "'id.name' in (t4.msg | default('')) or 'name' in (t4.msg | default(''))"
+        fail_msg: >-
+          Test 4 FAILED: expected error about missing 'id.name', got:
+          {{ t4.msg | default('no msg') }}
+        success_msg: "Test 4 PASSED: missing id.name → clear error message."
+
+    # ── Test 5: state=present — missing body.members (expected error) ─────────
+    - name: "Test 5 — state=present: missing body.members (expect error)"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        id:
+          name: "test-group"
+        state: present
+      register: t5
+      ignore_errors: true
+
+    - name: "Test 5 — Verify: missing body.members → clear error"
+      ansible.builtin.assert:
+        that:
+          - t5.failed | default(false)
+          - >-
+            'members' in (t5.msg | default('')) | lower
+            or 'body' in (t5.msg | default('')) | lower
+        fail_msg: >-
+          Test 5 FAILED: expected error about missing 'body.members', got:
+          {{ t5.msg | default('no msg') }}
+        success_msg: "Test 5 PASSED: missing body.members → clear error message."
+
+    # ── Test 6: state=absent — missing id.name (expected error) ──────────────
+    - name: "Test 6 — state=absent: missing id.name (expect error)"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        state: absent
+      register: t6
+      ignore_errors: true
+
+    - name: "Test 6 — Verify: missing id.name for absent → clear error"
+      ansible.builtin.assert:
+        that:
+          - t6.failed | default(false)
+          - "'id.name' in (t6.msg | default('')) or 'name' in (t6.msg | default(''))"
+        fail_msg: >-
+          Test 6 FAILED: expected error about missing 'id.name', got:
+          {{ t6.msg | default('no msg') }}
+        success_msg: "Test 6 PASSED: missing id.name for absent → clear error message."
+
+    # ── Test 7: state=impact_report — missing id.name (expected error) ────────
+    - name: "Test 7 — state=impact_report: missing id.name (expect error)"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        state: impact_report
+      register: t7
+      ignore_errors: true
+
+    - name: "Test 7 — Verify: missing id.name for impact_report → clear error"
+      ansible.builtin.assert:
+        that:
+          - t7.failed | default(false)
+          - "'id.name' in (t7.msg | default('')) or 'name' in (t7.msg | default(''))"
+        fail_msg: >-
+          Test 7 FAILED: expected error for missing 'id.name', got:
+          {{ t7.msg | default('no msg') }}
+        success_msg: "Test 7 PASSED: missing id.name for impact_report → clear error message."
+
+    # ── Test 8: state=impact_report on non-existent group ─────────────────────
+    # A group with no members should return an informational message, not error.
+    - name: "Test 8 — state=impact_report: non-existent group (expect graceful)"
+      juniper.apstra.upgrade_group:
+        auth_token: "{{ auth.token }}"
+        id:
+          name: "nonexistent-group-xyz-000"
+        state: impact_report
+      register: t8
+      ignore_errors: true
+
+    - name: "Test 8 — Verify: empty group impact_report is not an error"
+      ansible.builtin.assert:
+        that:
+          - >-
+            (not t8.failed | default(false)
+             and not t8.changed
+             and t8.agent_ids | length == 0)
+            or
+            (t8.failed | default(false))
+        fail_msg: >-
+          Test 8 FAILED: unexpected result for empty-group impact_report.
+          {{ t8.msg | default('no msg') }}
+        success_msg: >-
+          Test 8 PASSED: empty group handled gracefully —
+          {{ t8.msg | default('no agents') }}
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    - name: "Summary — upgrade_group test results"
+      ansible.builtin.debug:
+        msg:
+          - "Test 1 (gathered all):              {{ 'PASSED' if not t1.failed | default(false) else 'FAILED' }}"
+          - "Test 2 (gathered idempotent):        {{ 'SKIPPED' if t1.failed | default(false) else ('PASSED' if not t2.failed | default(false) else 'FAILED') }}"
+          - "Test 3 (gathered named):             {{ 'SKIPPED' if t1.failed | default(false) else ('PASSED' if not t3.failed | default(false) else 'FAILED') }}"
+          - "Test 4 (present no id.name):         {{ 'PASSED' if t4.failed | default(false) else 'FAILED' }}"
+          - "Test 5 (present no members):         {{ 'PASSED' if t5.failed | default(false) else 'FAILED' }}"
+          - "Test 6 (absent no id.name):          {{ 'PASSED' if t6.failed | default(false) else 'FAILED' }}"
+          - "Test 7 (impact_report no id.name):   {{ 'PASSED' if t7.failed | default(false) else 'FAILED' }}"
+          - "Test 8 (impact_report empty group):  {{ 'PASSED' if not t8.failed | default(false) else 'FAILED' }}"

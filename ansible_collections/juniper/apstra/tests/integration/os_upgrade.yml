@@ -1,0 +1,270 @@
+---
+################################################################################
+# OS Upgrade — Integration Tests
+#
+# Validates the juniper.apstra.os_upgrade module against the Team's
+# live Apstra 6.1.1 environment.
+#
+# ⚠️  IMPORTANT — TEAM SETUP SAFETY RULES:
+#     - Tests 1, 2, 3 are READ-ONLY (gathered + impact_report).
+#       They call no write APIs and are SAFE to run at any time.
+#     - Test 4 (state=present) triggers a REAL device OS upgrade.
+#       It is DISABLED by default (run_upgrade_test: false).
+#       NEVER enable it without explicit Team approval and a
+#       maintenance window.  It cannot be undone.
+#
+# ── Team environment ──────────────────────────────────────────────────
+# Apstra version:  6.1.1
+# API URL:         https://10.88.137.14/api
+# Blueprint:       apstra-pod1  (ad1cb3c1-7c83-4834-8a85-953ccf113833)
+# Devices:
+#   - apstra_esi_001_leaf1       (ESI pair member)
+#   - apstra_esi_001_leaf2       (ESI pair member)
+#   - apstra_single_001_leaf1    (single leaf)
+#
+# ── What each test validates ────────────────────────────────────────────────
+# Test 1 — state=gathered   : List all globally available OS images (read-only)
+# Test 2 — state=impact_report (all devices) : Blueprint-wide impact assessment
+# Test 3 — state=impact_report (single device): Scoped to apstra_esi_001_leaf1
+# Test 4 — state=present    : DISABLED — actual upgrade (requires manual opt-in)
+#
+# ── Usage ─────────────────────────────────────────────────────────────────────
+# Read-only run (safe, Team):
+#   APSTRA_API_URL="https://10.88.137.14/api" \
+#   APSTRA_USERNAME="admin" \
+#   APSTRA_PASSWORD="Apstramarvis@123" \
+#   PIPENV_DONT_LOAD_ENV=1 \
+#   make test-integration-os_upgrade ANSIBLE_FLAGS="-v"
+#
+# Local Apstra (6.0.0 — images/impact may be unavailable, graceful skips):
+#   make test-integration-os_upgrade ANSIBLE_FLAGS="-v"
+################################################################################
+
+- name: OS Upgrade — Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+
+  vars:
+    # ── Connection ─────────────────────────────────────────────────────────────
+    verify_certs: false
+    api_url: "{{ lookup('env','APSTRA_API_URL') | default('https://10.88.137.14/api', true) }}"
+
+    # ── Blueprint + devices (Team apstra-pod1) ─────────────────────────
+    blueprint_label: "apstra-pod1"
+    # Device labels as seen in the Team blueprint
+    test_device_label: "apstra_esi_001_leaf1"
+
+    # ── Test guard — set to true ONLY in a maintenance window with approval ───
+    # ⚠️  NEVER enable in normal CI runs against Team.
+    run_upgrade_test: false
+    # Image to upgrade to (only used when run_upgrade_test: true)
+    upgrade_image: ""
+
+  tasks:
+    # ── Authenticate ──────────────────────────────────────────────────────────
+    - name: "P0 — Authenticate to Apstra"
+      juniper.apstra.authenticate:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        username: "{{ lookup('env','APSTRA_USERNAME') | default('admin', true) }}"
+        password: "{{ lookup('env','APSTRA_PASSWORD') | default('Apstramarvis@123', true) }}"
+        logout: false
+      register: auth
+
+    - name: "P0 — Set auth token"
+      ansible.builtin.set_fact:
+        token: "{{ auth.token }}"
+
+    # ── Tests ─────────────────────────────────────────────────────────────────
+    - name: "Run OS Upgrade integration tests"
+      block:
+
+        ########################################################################
+        # Test 1 — state=gathered
+        # Lists all globally available OS images (NOT blueprint-scoped).
+        # OS images in Apstra are managed globally at /device-os/images.
+        # READ-ONLY — no changes made.
+        # Accepts an empty image list gracefully (no images uploaded yet).
+        ########################################################################
+        - name: "Test 1 — state=gathered: list all globally available OS images"
+          juniper.apstra.os_upgrade:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+            state: gathered
+          register: test1_result
+
+        - name: "Test 1 — Assert: gathered succeeded (read-only)"
+          ansible.builtin.assert:
+            that:
+              - not test1_result.failed | default(false)
+              - not test1_result.changed
+              - test1_result.blueprint_id is defined
+              - test1_result.images is defined
+              - test1_result.images | type_debug == 'list'
+            fail_msg: >-
+              FAILED Test 1: state=gathered failed.
+              {{ test1_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 1: gathered succeeded — found
+              {{ test1_result.images | length }} globally available OS image(s)
+              (images are not blueprint-scoped).
+
+        - name: "Test 1 — Show discovered images"
+          ansible.builtin.debug:
+            msg: >-
+              Found {{ test1_result.images | length }} globally available OS image(s)
+              (not per-blueprint):
+              {{ test1_result.images
+                 | map(attribute='image_name') | list
+                 | default(['(none uploaded yet)']) }}
+
+        ########################################################################
+        # Test 2 — state=impact_report (all devices in blueprint)
+        # Calls POST /blueprints/{id}/upgrade-impact for all blueprint agents.
+        # READ-ONLY — this is an assessment only, no device changes.
+        ########################################################################
+        - name: "Test 2 — state=impact_report: assess all blueprint devices"
+          juniper.apstra.os_upgrade:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+            state: impact_report
+          register: test2_result
+
+        - name: "Test 2 — Assert: impact_report succeeded (read-only)"
+          ansible.builtin.assert:
+            that:
+              - not test2_result.failed | default(false)
+              - not test2_result.changed
+              - test2_result.blueprint_id is defined
+              - test2_result.agent_ids is defined
+              - test2_result.impact_report is defined
+            fail_msg: >-
+              FAILED Test 2: state=impact_report (all devices) failed.
+              {{ test2_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 2: impact_report for {{ test2_result.agent_ids | length }}
+              device(s) completed — no device changes.
+
+        - name: "Test 2 — Show impact report summary"
+          ansible.builtin.debug:
+            msg: >-
+              Impact report for {{ test2_result.agent_ids | length }} agents:
+              {{ test2_result.impact_report }}
+
+        ########################################################################
+        # Test 3 — state=impact_report (single device by label)
+        # Uses id.system to scope the assessment to one device.
+        # READ-ONLY — assertion only, no device changes.
+        # Also validates that system label → agent UUID resolution works.
+        ########################################################################
+        - name: "Test 3 — state=impact_report: scoped to {{ test_device_label }}"
+          juniper.apstra.os_upgrade:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              system: "{{ test_device_label }}"
+            state: impact_report
+          register: test3_result
+
+        - name: "Test 3 — Assert: single-device impact_report succeeded"
+          ansible.builtin.assert:
+            that:
+              - not test3_result.failed | default(false)
+              - not test3_result.changed
+              - test3_result.blueprint_id is defined
+              - test3_result.agent_ids | length == 1
+              - test3_result.impact_report is defined
+            fail_msg: >-
+              FAILED Test 3: scoped impact_report for '{{ test_device_label }}'.
+              {{ test3_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 3: impact_report for '{{ test_device_label }}'
+              (agent {{ test3_result.agent_ids[0] }}) — system label resolved,
+              no device changes.
+
+        - name: "Test 3 — Show single-device impact report"
+          ansible.builtin.debug:
+            msg: >-
+              Single-device impact report for '{{ test_device_label }}'
+              (agent_id={{ test3_result.agent_ids[0] }}):
+              {{ test3_result.impact_report }}
+
+        ########################################################################
+        # Test 4 — state=present (ACTUAL UPGRADE — DISABLED BY DEFAULT)
+        #
+        # ⚠️  DANGER: This triggers a REAL OS upgrade on the target device.
+        #     ONLY enable with explicit Team approval + maintenance window.
+        #     Set:  run_upgrade_test: true
+        #           upgrade_image: "<filename or UUID>"
+        #
+        # When enabled, validates:
+        #   - Image filename → UUID resolution
+        #   - System label → agent UUID resolution
+        #   - dos-upgrade POST triggers successfully
+        #   - Job polling waits for terminal state
+        #   - changed=true and state=success returned
+        ########################################################################
+        - name: "Test 4 — state=present: OS upgrade (DISABLED — read run_upgrade_test)"
+          ansible.builtin.debug:
+            msg: >-
+              Test 4 (actual upgrade) is DISABLED by default.
+              To run: set run_upgrade_test=true and upgrade_image=<image> in vars.
+              ⚠️  NEVER run against Team without explicit approval.
+          when: not run_upgrade_test
+
+        - name: "Test 4 — Trigger OS upgrade on {{ test_device_label }}"
+          juniper.apstra.os_upgrade:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              system: "{{ test_device_label }}"
+            body:
+              image: "{{ upgrade_image }}"
+              wait_timeout: 900
+            state: present
+          register: test4_result
+          when: run_upgrade_test | bool
+
+        - name: "Test 4 — Assert: upgrade completed successfully"
+          ansible.builtin.assert:
+            that:
+              - not test4_result.failed | default(false)
+              - test4_result.changed
+              - test4_result.state == 'success'
+              - test4_result.agent_id is defined
+            fail_msg: >-
+              FAILED Test 4: upgrade did not succeed.
+              State={{ test4_result.state | default('unknown') }},
+              {{ test4_result.msg | default('') }}
+            success_msg: >-
+              PASSED Test 4: upgrade of '{{ test_device_label }}'
+              completed with state={{ test4_result.state }}.
+          when: run_upgrade_test | bool
+
+      # ── always block: nothing to clean up for read-only tests ────────────────
+      always:
+        - name: "Cleanup — nothing to revert for read-only tests (Tests 1-3)"
+          ansible.builtin.debug:
+            msg: >-
+              Tests 1–3 are read-only (gathered + impact_report).
+              No cleanup required.  Team setup is unchanged.
+
+    # ── Final summary ─────────────────────────────────────────────────────────
+    - name: "Summary — OS Upgrade integration test results"
+      ansible.builtin.debug:
+        msg:
+          - "Test 1 (gathered):               {{ 'PASSED' if not test1_result.failed | default(false) else 'FAILED' }} — {{ test1_result.images | length }} image(s) found"
+          - "Test 2 (impact_report all):       {{ 'PASSED' if not test2_result.failed | default(false) else 'FAILED' }} — {{ test2_result.agent_ids | length }} agent(s) assessed"
+          - "Test 3 (impact_report scoped):    {{ 'PASSED' if not test3_result.failed | default(false) else 'FAILED' }} — agent {{ test3_result.agent_ids[0] | default('?') }}"
+          - "Test 4 (upgrade):                 {{ 'SKIPPED (disabled)' if not run_upgrade_test else ('PASSED' if not test4_result.failed | default(false) else 'FAILED') }}"
