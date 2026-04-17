@@ -471,75 +471,47 @@ def set_upgrade_group(client_factory, device_key, group_name, current_user_confi
     Preserves all existing ``user_config`` fields (including required fields
     like ``aos_hcl_model`` and ``admin_state``).
     Returns ``True`` if changed, ``False`` if already in the target group.
+
+    NOTE: The individual GET ``/systems/{key}`` endpoint in Apstra 6.1 may
+    return an incomplete ``user_config`` (e.g. empty ``aos_hcl_model``) while
+    the list GET ``/systems`` returns the full record.  Always pass the
+    ``current_user_config`` obtained from the list to avoid this.
     """
     base = client_factory.get_base_client()
 
-    # Use cached config for idempotency check only
+    # If not supplied, fetch via the individual endpoint and patch any
+    # empty required fields from facts (last resort — list endpoint preferred).
     if current_user_config is None:
         resp = base.raw_request(f"/systems/{device_key}")
         if resp.status_code != 200:
             raise Exception(
                 f"GET /systems/{device_key} failed: {resp.status_code} {resp.text}"
             )
-        current_user_config = resp.json().get("user_config", {})
+        data = resp.json()
+        current_user_config = dict(data.get("user_config", {}))
+        # Individual endpoint may return empty aos_hcl_model — fall back to facts
+        if not current_user_config.get("aos_hcl_model"):
+            facts = data.get("facts", {})
+            model = (
+                facts.get("aos_hcl_model")
+                or facts.get("hcl_model")
+                or facts.get("os_family")
+                or ""
+            )
+            current_user_config["aos_hcl_model"] = model
 
     if current_user_config.get("upgrade_group") == group_name:
         return False  # Already in target group — idempotent
 
-    # Always fetch the FULL system record before PUT.  The list endpoint
-    # (/systems) may omit required fields like aos_hcl_model / admin_state
-    # that the PUT schema validates as mandatory.
-    resp = base.raw_request(f"/systems/{device_key}")
-    if resp.status_code != 200:
-        raise Exception(
-            f"GET /systems/{device_key} failed: {resp.status_code} {resp.text}"
-        )
-    data = resp.json()
-    full_user_config = dict(data.get("user_config", {}))
-    facts = data.get("facts", {})
-    status = data.get("status", {})
+    # Build the PUT body from the list-sourced user_config (which is complete).
+    new_user_config = dict(current_user_config)
+    new_user_config["upgrade_group"] = group_name
 
-    # Apstra PUT requires aos_hcl_model and admin_state to be non-empty.
-    # The GET response may include the key but with an empty string value,
-    # so check for truthiness (not just key presence).
-    if not full_user_config.get("aos_hcl_model"):
-        model = (
-            facts.get("aos_hcl_model")
-            or facts.get("hcl_model")
-            or status.get("aos_hcl_model")
-            or status.get("device_profile_id")
-            or facts.get("hw_model")
-            or facts.get("os_family")
-            or ""
-        )
-        if model:
-            full_user_config["aos_hcl_model"] = model
-        else:
-            # Cannot determine model — raise with full context so the user
-            # can identify the correct field from the device record.
-            raise Exception(
-                f"Cannot determine aos_hcl_model for device '{device_key}'. "
-                f"Run the debug playbook (test_axis_debug_system.yml) to inspect "
-                f"the raw /systems/{device_key} response.\n"
-                f"  user_config={data.get('user_config')}\n"
-                f"  facts keys={list(facts.keys())}\n"
-                f"  status keys={list(status.keys())}"
-            )
-
-    if not full_user_config.get("admin_state"):
-        full_user_config["admin_state"] = (
-            facts.get("admin_state")
-            or status.get("admin_state")
-            or "normal"
-        )
-
-    full_user_config["upgrade_group"] = group_name
-
-    put_body = {"user_config": full_user_config}
+    put_body = {"user_config": new_user_config}
     resp = base.raw_request(f"/systems/{device_key}", "PUT", data=put_body)
     if resp.status_code not in (200, 201, 204):
         raise Exception(
             f"PUT /systems/{device_key} failed: {resp.status_code} {resp.text}\n"
-            f"  user_config sent: {full_user_config}"
+            f"  user_config sent: {new_user_config}"
         )
     return True  # Changed
