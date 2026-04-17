@@ -494,13 +494,39 @@ def set_upgrade_group(client_factory, device_key, group_name, current_user_confi
         raise Exception(
             f"GET /systems/{device_key} failed: {resp.status_code} {resp.text}"
         )
-    full_user_config = resp.json().get("user_config", {})
+    data = resp.json()
+    full_user_config = dict(data.get("user_config", {}))
+    facts = data.get("facts", {})
+    status = data.get("status", {})
+
+    # Apstra PUT requires aos_hcl_model and admin_state.  Search all fields
+    # in the response before giving up — different Apstra versions store the
+    # model in different places.
+    if "aos_hcl_model" not in full_user_config:
+        model = (
+            facts.get("aos_hcl_model")
+            or facts.get("hcl_model")
+            or status.get("aos_hcl_model")
+            or status.get("device_profile_id")
+            or facts.get("device_type")
+            or ""
+        )
+        full_user_config["aos_hcl_model"] = model
+
+    if "admin_state" not in full_user_config:
+        full_user_config["admin_state"] = (
+            facts.get("admin_state")
+            or status.get("admin_state")
+            or "normal"
+        )
+
     full_user_config["upgrade_group"] = group_name
 
     put_body = {"user_config": full_user_config}
     resp = base.raw_request(f"/systems/{device_key}", "PUT", data=put_body)
     if resp.status_code not in (200, 201, 204):
         raise Exception(
-            f"PUT /systems/{device_key} failed: {resp.status_code} {resp.text}"
+            f"PUT /systems/{device_key} failed: {resp.status_code} {resp.text}\n"
+            f"  user_config sent: {full_user_config}"
         )
     return True  # Changed
