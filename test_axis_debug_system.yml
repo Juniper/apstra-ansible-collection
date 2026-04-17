@@ -43,4 +43,4 @@
 
     - name: "Show FULL record for first device"
       ansible.builtin.debug:
-        msg: "{{ systems_resp.json.items[0] | to_nice_json }}"
+        msg: "{{ systems_resp.json['items'][0] | to_nice_json }}"

@@ -32,17 +32,28 @@
         state: gathered
       register: all_groups
 
-    - name: "P0 — Pick first 2 devices from 'default' group for testing"
+    - name: "P0 — Collect all real (non-vCenter) devices across all groups"
       ansible.builtin.set_fact:
-        test_devices: "{{ all_groups.groups['default'][:2] | map(attribute='device_key') | list }}"
-        all_default_count: "{{ all_groups.groups['default'] | length }}"
+        all_real_devices: >-
+          {{ all_groups.groups.values() | list | flatten
+             | rejectattr('user_config.aos_hcl_model', 'in', ['vcenter', ''])
+             | list }}
 
-    - name: "P0 — Verify we have at least 2 devices to test with"
+    - name: "P0 — Pick first 2 real devices for testing"
+      ansible.builtin.set_fact:
+        test_devices: "{{ all_real_devices[:2] | map(attribute='device_key') | list }}"
+        test_device_orig_groups: >-
+          {{ dict(
+               all_real_devices[:2] | map(attribute='device_key') | list
+               | zip(all_real_devices[:2] | map(attribute='upgrade_group') | list)
+             ) }}
+
+    - name: "P0 — Verify we have at least 2 real devices to test with"
       ansible.builtin.assert:
         that:
           - test_devices | length >= 2
         fail_msg: >-
-          Need at least 2 devices in 'default' group but found
+          Need at least 2 non-vCenter devices but found
           {{ test_devices | length }}.
           All groups: {{ all_groups.groups.keys() | list }}
         success_msg: >-
@@ -55,7 +66,7 @@
           - "Blueprint: {{ blueprint_label }}"
           - "Test group: {{ test_group_name }}"
           - "Test devices: {{ test_devices }}"
-          - "Total 'default' devices: {{ all_default_count }}"
+          - "Original groups: {{ test_device_orig_groups }}"
 
     # ── Test block (with guaranteed cleanup) ───────────────────────────────
     - name: "Run upgrade_group lifecycle tests"
@@ -206,21 +217,23 @@
 
       # ── Cleanup (always runs) ─────────────────────────────────────────────
       always:
-        - name: "Cleanup — Reset all test devices to 'default'"
+        - name: "Cleanup — Dissolve test group (return members to their original groups)"
           juniper.apstra.upgrade_group:
             id:
-              name: "{{ test_group_name }}"
+              name: "{{ item.value }}"
             body:
-              members: "{{ test_devices }}"
-            state: absent
+              members:
+                - "{{ item.key }}"
+            state: present
+          loop: "{{ test_device_orig_groups | dict2items }}"
           ignore_errors: true
           register: cleanup
 
         - name: "Cleanup — Confirm"
           ansible.builtin.debug:
             msg: >-
-              Cleanup: {{ cleanup.msg | default('done') }}
-              — all devices restored to 'default'.
+              Cleanup complete — devices restored to original groups:
+              {{ test_device_orig_groups }}
 
     # ── Final Summary ──────────────────────────────────────────────────────
     - name: "Summary"
