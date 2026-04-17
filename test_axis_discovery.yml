@@ -70,21 +70,6 @@
           {{ impact_all.impact_report | default('N/A') }}
       when: not impact_all.failed | default(false)
 
-    # ── Phase 4: List system-agents in blueprint ───────────────────────────
-    - name: "4. Gather system agents (apstra_facts as fallback)"
-      juniper.apstra.apstra_facts:
-        id:
-          blueprints: "{{ blueprint_label }}"
-          type: system_agents
-        state: gathered
-      register: agents_result
-      ignore_errors: true
-
-    - name: "4. Show system agents"
-      ansible.builtin.debug:
-        var: agents_result
-      when: not agents_result.failed | default(false)
-
     # ── Summary ─────────────────────────────────────────────────────────────
     - name: "Summary"
       ansible.builtin.debug:

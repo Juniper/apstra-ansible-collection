@@ -236,9 +236,6 @@ EXAMPLES = """
       name: "spines"
     state: impact_report
   register: impact
-  failed_when: >-
-    impact.impact_report.items
-    | selectattr('status', 'equalto', 'red') | list | length > 0
 
 - name: 3 Trigger upgrade on each member individually
   juniper.apstra.os_upgrade:

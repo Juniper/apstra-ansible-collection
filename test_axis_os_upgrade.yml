@@ -90,10 +90,7 @@
       ansible.builtin.debug:
         msg: |
           Impact report for {{ p2.agent_ids | default([]) | length }} agent(s):
-          {% for item in (p2.impact_report.items | default([])) %}
-            Agent {{ item.system_agent }}: status={{ item.status }}
-              Impacts: {{ item.impact_summary | default([]) | map(attribute='impact') | list }}
-          {% endfor %}
+          {{ p2.impact_report | default({}) | to_nice_json }}
       when: not p2.failed | default(false)
 
     ########################################################################

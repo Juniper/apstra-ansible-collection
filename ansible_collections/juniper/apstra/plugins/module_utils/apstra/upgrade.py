@@ -468,12 +468,13 @@ def get_group_members(client_factory, group_name):
 def set_upgrade_group(client_factory, device_key, group_name, current_user_config=None):
     """PUT ``/api/systems/{device_key}`` to set ``user_config.upgrade_group``.
 
-    Preserves all existing ``user_config`` fields.
+    Preserves all existing ``user_config`` fields (including required fields
+    like ``aos_hcl_model`` and ``admin_state``).
     Returns ``True`` if changed, ``False`` if already in the target group.
     """
     base = client_factory.get_base_client()
 
-    # Fetch current user_config if not provided
+    # Use cached config for idempotency check only
     if current_user_config is None:
         resp = base.raw_request(f"/systems/{device_key}")
         if resp.status_code != 200:
@@ -485,10 +486,18 @@ def set_upgrade_group(client_factory, device_key, group_name, current_user_confi
     if current_user_config.get("upgrade_group") == group_name:
         return False  # Already in target group — idempotent
 
-    new_user_config = dict(current_user_config)
-    new_user_config["upgrade_group"] = group_name
+    # Always fetch the FULL system record before PUT.  The list endpoint
+    # (/systems) may omit required fields like aos_hcl_model / admin_state
+    # that the PUT schema validates as mandatory.
+    resp = base.raw_request(f"/systems/{device_key}")
+    if resp.status_code != 200:
+        raise Exception(
+            f"GET /systems/{device_key} failed: {resp.status_code} {resp.text}"
+        )
+    full_user_config = resp.json().get("user_config", {})
+    full_user_config["upgrade_group"] = group_name
 
-    put_body = {"user_config": new_user_config}
+    put_body = {"user_config": full_user_config}
     resp = base.raw_request(f"/systems/{device_key}", "PUT", data=put_body)
     if resp.status_code not in (200, 201, 204):
         raise Exception(
