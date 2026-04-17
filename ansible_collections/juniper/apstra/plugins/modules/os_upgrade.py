@@ -136,8 +136,9 @@ options:
         C(impact_report) first to assess readiness.
       - C(impact_report) runs a pre-upgrade impact assessment (read-only)
         and returns the assessment report without changing any device state.
-      - C(gathered) lists all OS images currently available in the blueprint
-        and returns their metadata.  No changes are made.
+      - C(gathered) lists all OS images currently available globally in Apstra
+        and returns their metadata.  OS images are not tied to a blueprint —
+        they are managed globally at ``/device-os/images``.  No changes are made.
     type: str
     required: false
     choices: ["present", "impact_report", "gathered"]
@@ -147,7 +148,7 @@ options:
 EXAMPLES = """
 # ── List available OS images ──────────────────────────────────────
 
-- name: Gather OS images in blueprint
+- name: Gather all available OS images (globally managed, not per-blueprint)
   juniper.apstra.os_upgrade:
     id:
       blueprint: "my-blueprint"
@@ -257,7 +258,7 @@ agent:
   returned: when state=present
 images:
   description: >
-    List of OS images available in the blueprint.
+    List of OS images available globally in Apstra (not blueprint-scoped).
     Each item contains C(id), C(filename), C(label), C(platform),
     and additional metadata returned by the API.
   type: list
@@ -288,7 +289,7 @@ msg:
 
 
 def _handle_gathered(module, client_factory, blueprint_id):
-    """List available OS images in the blueprint."""
+    """List all OS images available globally (not blueprint-scoped)."""
     raw_images = list_blueprint_images(client_factory, blueprint_id)
 
     images = []

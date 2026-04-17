@@ -208,8 +208,9 @@ def resolve_image_id(client_factory, blueprint_id, image_ref):
             return img_id
 
     raise ValueError(
-        f"OS image not found for '{image_ref}' in blueprint '{blueprint_id}'. "
-        "Provide an image UUID, filename, or label."
+        f"OS image not found for '{image_ref}'. "
+        "Provide an image UUID, filename, or label from the globally available "
+        "images (check 'state=gathered' for the full list)."
     )
 
 
