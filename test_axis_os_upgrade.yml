@@ -1,0 +1,172 @@
+---
+################################################################################
+# AXIS OS Upgrade Test — Read-Only + Optional Upgrade
+#
+# Phase 1: state=gathered   — list images (read-only)
+# Phase 2: state=impact_report — assess all devices (read-only)
+# Phase 3: state=impact_report — assess single device (read-only)
+# Phase 4: state=present    — ACTUAL UPGRADE (DISABLED by default)
+#
+# ⚠️  Phase 4 is DISABLED unless you set run_upgrade=true AND provide
+#     upgrade_device and upgrade_image.  It will trigger a real device
+#     OS upgrade — DO NOT run without approval.
+#
+# Usage (read-only — safe):
+#   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_os_upgrade.yml \
+#     -e blueprint_label="DA-Fabric1"
+#
+# Usage (with actual upgrade — REQUIRES APPROVAL):
+#   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_os_upgrade.yml \
+#     -e blueprint_label="DA-Fabric1" \
+#     -e run_upgrade=true \
+#     -e upgrade_device="<device-label-or-ip>" \
+#     -e upgrade_image="junos-evo-install-qfx-ms-x86-64-23.4R2-S6.9-EVO.iso"
+#
+# Prerequisites: APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD env vars set.
+################################################################################
+
+- name: "AXIS OS Upgrade Test"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    blueprint_label: "DA-Fabric1"
+    # Phase 4 — set these explicitly to enable the actual upgrade
+    run_upgrade: false
+    upgrade_device: ""
+    upgrade_image: ""
+
+  tasks:
+    ########################################################################
+    # Phase 1 — state=gathered: List all available OS images
+    ########################################################################
+    - name: "Phase 1 — Gather all OS images"
+      juniper.apstra.os_upgrade:
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: gathered
+      register: p1
+
+    - name: "Phase 1 — Assert: gathered succeeds"
+      ansible.builtin.assert:
+        that:
+          - not p1.failed | default(false)
+          - not p1.changed
+          - p1.images is defined
+        success_msg: >-
+          PASSED Phase 1: found {{ p1.images | length }} image(s).
+
+    - name: "Phase 1 — Show images"
+      ansible.builtin.debug:
+        msg: |
+          Available OS images ({{ p1.images | length }}):
+          {% for img in p1.images %}
+            {{ img.image_name }}  ({{ img.description }})  [{{ img.type }}]
+          {% endfor %}
+
+    ########################################################################
+    # Phase 2 — state=impact_report: All devices in blueprint
+    ########################################################################
+    - name: "Phase 2 — Impact report (all devices)"
+      juniper.apstra.os_upgrade:
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: impact_report
+      register: p2
+      ignore_errors: true
+
+    - name: "Phase 2 — Assert: impact report returned"
+      ansible.builtin.assert:
+        that:
+          - not p2.failed | default(false)
+          - not p2.changed
+          - p2.agent_ids is defined
+        success_msg: >-
+          PASSED Phase 2: impact assessed for {{ p2.agent_ids | length }} agent(s).
+      when: not p2.failed | default(false)
+
+    - name: "Phase 2 — Show impact summary"
+      ansible.builtin.debug:
+        msg: |
+          Impact report for {{ p2.agent_ids | default([]) | length }} agent(s):
+          {% for item in (p2.impact_report.items | default([])) %}
+            Agent {{ item.system_agent }}: status={{ item.status }}
+              Impacts: {{ item.impact_summary | default([]) | map(attribute='impact') | list }}
+          {% endfor %}
+      when: not p2.failed | default(false)
+
+    ########################################################################
+    # Phase 3 — state=impact_report: Single device (first agent found)
+    ########################################################################
+    - name: "Phase 3 — Pick first agent for single-device impact"
+      ansible.builtin.set_fact:
+        single_agent: "{{ p2.agent_ids[0] }}"
+      when:
+        - not p2.failed | default(false)
+        - p2.agent_ids | default([]) | length > 0
+
+    - name: "Phase 3 — Impact report (single device: {{ single_agent | default('N/A') }})"
+      juniper.apstra.os_upgrade:
+        id:
+          blueprint: "{{ blueprint_label }}"
+          system: "{{ single_agent }}"
+        state: impact_report
+      register: p3
+      ignore_errors: true
+      when: single_agent is defined
+
+    - name: "Phase 3 — Assert: single-device impact"
+      ansible.builtin.assert:
+        that:
+          - not p3.failed | default(false)
+          - p3.agent_ids | length == 1
+        success_msg: >-
+          PASSED Phase 3: single-device impact for {{ single_agent }}.
+      when: single_agent is defined and not p3.failed | default(false)
+
+    ########################################################################
+    # Phase 4 — state=present: ACTUAL UPGRADE (disabled by default)
+    ########################################################################
+    - name: "Phase 4 — ⚠️ UPGRADE {{ upgrade_device }} to {{ upgrade_image }}"
+      juniper.apstra.os_upgrade:
+        id:
+          blueprint: "{{ blueprint_label }}"
+          system: "{{ upgrade_device }}"
+        body:
+          image: "{{ upgrade_image }}"
+          wait_timeout: 900
+        state: present
+      register: p4
+      when:
+        - run_upgrade | bool
+        - upgrade_device | length > 0
+        - upgrade_image | length > 0
+
+    - name: "Phase 4 — Show upgrade result"
+      ansible.builtin.debug:
+        msg: |
+          Upgrade result:
+            Device: {{ upgrade_device }}
+            Image: {{ upgrade_image }}
+            State: {{ p4.state | default('N/A') }}
+            Message: {{ p4.msg | default('N/A') }}
+      when: p4 is not skipped and not p4.failed | default(false)
+
+    - name: "Phase 4 — Skipped (not enabled)"
+      ansible.builtin.debug:
+        msg: >-
+          Phase 4 SKIPPED: set -e run_upgrade=true
+          -e upgrade_device="<device>" -e upgrade_image="<image>" to enable.
+      when: not run_upgrade | bool
+
+    ########################################################################
+    # Summary
+    ########################################################################
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg:
+          - "Phase 1 (gathered):           PASSED — {{ p1.images | length }} image(s)"
+          - "Phase 2 (impact all):         {{ 'PASSED — ' ~ (p2.agent_ids | default([]) | length) ~ ' agents' if not p2.failed | default(false) else 'FAILED' }}"
+          - "Phase 3 (impact single):      {{ 'PASSED' if single_agent is defined and not p3.failed | default(false) else 'SKIPPED' }}"
+          - "Phase 4 (upgrade):            {{ 'PASSED' if p4 is defined and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}"

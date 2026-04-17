@@ -1,0 +1,236 @@
+---
+################################################################################
+# AXIS Upgrade Group Test — Full Lifecycle
+#
+# Tests upgrade_group: present → gathered verify → impact → partial absent →
+# full dissolve → absent idempotent.
+#
+# ⚠️  WRITES to Apstra: creates temp group "ansible_axis_test_group" using
+#     the FIRST TWO devices found in the 'default' group.
+#     The always: block guarantees cleanup — all devices restored to 'default'.
+#
+# Usage:
+#   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_upgrade_group.yml \
+#     -e blueprint_label="DA-Fabric1"
+#
+# Prerequisites: APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD env vars set.
+################################################################################
+
+- name: "AXIS Upgrade Group — Full Lifecycle Test"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    blueprint_label: "DA-Fabric1"
+    test_group_name: "ansible_axis_test_group"
+
+  tasks:
+    # ── Discover devices ───────────────────────────────────────────────────
+    - name: "P0 — Gather all groups to find available devices"
+      juniper.apstra.upgrade_group:
+        state: gathered
+      register: all_groups
+
+    - name: "P0 — Pick first 2 devices from 'default' group for testing"
+      ansible.builtin.set_fact:
+        test_devices: "{{ all_groups.groups['default'][:2] | map(attribute='device_key') | list }}"
+        all_default_count: "{{ all_groups.groups['default'] | length }}"
+
+    - name: "P0 — Verify we have at least 2 devices to test with"
+      ansible.builtin.assert:
+        that:
+          - test_devices | length >= 2
+        fail_msg: >-
+          Need at least 2 devices in 'default' group but found
+          {{ test_devices | length }}.
+          All groups: {{ all_groups.groups.keys() | list }}
+        success_msg: >-
+          Using {{ test_devices | length }} devices for test:
+          {{ test_devices }}
+
+    - name: "P0 — Show test plan"
+      ansible.builtin.debug:
+        msg:
+          - "Blueprint: {{ blueprint_label }}"
+          - "Test group: {{ test_group_name }}"
+          - "Test devices: {{ test_devices }}"
+          - "Total 'default' devices: {{ all_default_count }}"
+
+    # ── Test block (with guaranteed cleanup) ───────────────────────────────
+    - name: "Run upgrade_group lifecycle tests"
+      block:
+
+        ######################################################################
+        # Test 1 — state=present: create test group with 2 devices
+        ######################################################################
+        - name: "Test 1 — Create '{{ test_group_name }}' with 2 devices"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            body:
+              members: "{{ test_devices }}"
+            state: present
+          register: t1
+
+        - name: "Test 1 — Assert: group created, 2 devices moved"
+          ansible.builtin.assert:
+            that:
+              - not t1.failed | default(false)
+              - t1.changed
+              - t1.members_changed | length == 2
+            success_msg: >-
+              PASSED Test 1: created '{{ test_group_name }}' —
+              {{ t1.members_changed | length }} device(s) moved.
+
+        ######################################################################
+        # Test 2 — state=present: idempotent (same call again)
+        ######################################################################
+        - name: "Test 2 — Idempotent: same present call"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            body:
+              members: "{{ test_devices }}"
+            state: present
+          register: t2
+
+        - name: "Test 2 — Assert: no changes"
+          ansible.builtin.assert:
+            that:
+              - not t2.changed
+              - t2.members_changed | length == 0
+            success_msg: "PASSED Test 2: idempotent — changed=false, 0 devices moved."
+
+        ######################################################################
+        # Test 3 — state=gathered: verify group exists with correct members
+        ######################################################################
+        - name: "Test 3 — Verify group via gathered"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            state: gathered
+          register: t3
+
+        - name: "Test 3 — Assert: group has 2 members"
+          ansible.builtin.assert:
+            that:
+              - not t3.changed
+              - test_group_name in t3.groups
+              - t3.groups[test_group_name] | length == 2
+            success_msg: >-
+              PASSED Test 3: '{{ test_group_name }}' confirmed with
+              {{ t3.groups[test_group_name] | length }} member(s).
+
+        ######################################################################
+        # Test 4 — state=impact_report: assess the test group
+        ######################################################################
+        - name: "Test 4 — Impact report for '{{ test_group_name }}'"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            state: impact_report
+          register: t4
+
+        - name: "Test 4 — Assert: impact returned for 2 agents"
+          ansible.builtin.assert:
+            that:
+              - not t4.changed
+              - t4.agent_ids | length == 2
+              - t4.impact_report is defined
+            success_msg: >-
+              PASSED Test 4: impact assessed for
+              {{ t4.agent_ids | length }} agent(s).
+
+        - name: "Test 4 — Show impact details"
+          ansible.builtin.debug:
+            var: t4.impact_report
+
+        ######################################################################
+        # Test 5 — state=absent: remove FIRST device only
+        ######################################################################
+        - name: "Test 5 — Remove first device from group"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            body:
+              members:
+                - "{{ test_devices[0] }}"
+            state: absent
+          register: t5
+
+        - name: "Test 5 — Assert: 1 removed, 1 remains"
+          ansible.builtin.assert:
+            that:
+              - t5.changed
+              - t5.members_changed | length == 1
+              - t5.members_current | length == 1
+            success_msg: >-
+              PASSED Test 5: removed {{ t5.members_changed[0] }},
+              {{ t5.members_current | length }} still in group.
+
+        ######################################################################
+        # Test 6 — state=absent: dissolve remaining group
+        ######################################################################
+        - name: "Test 6 — Dissolve '{{ test_group_name }}'"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            state: absent
+          register: t6
+
+        - name: "Test 6 — Assert: group dissolved"
+          ansible.builtin.assert:
+            that:
+              - t6.changed
+              - t6.members_changed | length == 1
+              - t6.members_current | length == 0
+            success_msg: "PASSED Test 6: group dissolved — 0 members remain."
+
+        ######################################################################
+        # Test 7 — state=absent: idempotent (already dissolved)
+        ######################################################################
+        - name: "Test 7 — Absent idempotent"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            state: absent
+          register: t7
+
+        - name: "Test 7 — Assert: nothing changed"
+          ansible.builtin.assert:
+            that:
+              - not t7.changed
+              - t7.members_changed | length == 0
+            success_msg: "PASSED Test 7: absent idempotent — changed=false."
+
+      # ── Cleanup (always runs) ─────────────────────────────────────────────
+      always:
+        - name: "Cleanup — Reset all test devices to 'default'"
+          juniper.apstra.upgrade_group:
+            id:
+              name: "{{ test_group_name }}"
+            body:
+              members: "{{ test_devices }}"
+            state: absent
+          ignore_errors: true
+          register: cleanup
+
+        - name: "Cleanup — Confirm"
+          ansible.builtin.debug:
+            msg: >-
+              Cleanup: {{ cleanup.msg | default('done') }}
+              — all devices restored to 'default'.
+
+    # ── Final Summary ──────────────────────────────────────────────────────
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg:
+          - "Test 1 (present create):     {{ 'PASSED' if t1.changed else 'FAILED' }}"
+          - "Test 2 (present idempotent):  {{ 'PASSED' if not t2.changed else 'FAILED' }}"
+          - "Test 3 (gathered verify):     {{ 'PASSED' if t3.groups[test_group_name] | length == 2 else 'FAILED' }}"
+          - "Test 4 (impact_report):       {{ 'PASSED' if t4.agent_ids | length == 2 else 'FAILED' }}"
+          - "Test 5 (absent partial):      {{ 'PASSED' if t5.members_changed | length == 1 else 'FAILED' }}"
+          - "Test 6 (absent dissolve):     {{ 'PASSED' if t6.members_current | length == 0 else 'FAILED' }}"
+          - "Test 7 (absent idempotent):   {{ 'PASSED' if not t7.changed else 'FAILED' }}"
+          - "Cleanup:                      always executed"

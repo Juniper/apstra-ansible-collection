@@ -1,0 +1,96 @@
+---
+################################################################################
+# AXIS Discovery Playbook — READ-ONLY
+#
+# Discovers the environment: images, devices, upgrade groups, and impact.
+# Makes NO changes to the Apstra instance.  Safe to run at any time.
+#
+# Usage:
+#   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_discovery.yml \
+#     -e blueprint_label="DA-Fabric1"
+#
+# Prerequisites: APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD env vars set.
+################################################################################
+
+- name: "AXIS Discovery — Read-Only"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    blueprint_label: "DA-Fabric1"
+
+  tasks:
+    # ── Phase 1: Gather OS Images ──────────────────────────────────────────
+    - name: "1. Gather all OS images"
+      juniper.apstra.os_upgrade:
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: gathered
+      register: images_result
+
+    - name: "1. Show images"
+      ansible.builtin.debug:
+        msg: |
+          Found {{ images_result.images | length }} OS image(s):
+          {% for img in images_result.images %}
+            - {{ img.image_name }} ({{ img.description }}) [{{ img.platform }}] id={{ img.id }}
+          {% endfor %}
+
+    # ── Phase 2: Gather Upgrade Groups ─────────────────────────────────────
+    - name: "2. Gather all upgrade groups"
+      juniper.apstra.upgrade_group:
+        state: gathered
+      register: groups_result
+
+    - name: "2. Show upgrade groups"
+      ansible.builtin.debug:
+        msg: |
+          Found {{ groups_result.groups | length }} upgrade group(s):
+          {% for grp_name, members in groups_result.groups.items() %}
+            Group '{{ grp_name }}' — {{ members | length }} member(s):
+          {% for m in members %}
+              - {{ m.device_key }}  {{ m.hostname }}  {{ m.mgmt_ip }}  (group={{ m.upgrade_group }})
+          {% endfor %}
+          {% endfor %}
+
+    # ── Phase 3: Impact Report (all devices in blueprint) ──────────────────
+    - name: "3. Run upgrade-impact for all devices in blueprint"
+      juniper.apstra.os_upgrade:
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: impact_report
+      register: impact_all
+      ignore_errors: true
+
+    - name: "3. Show impact report (all)"
+      ansible.builtin.debug:
+        msg: |
+          Impact report for all devices ({{ impact_all.agent_ids | default([]) | length }} agents):
+          {{ impact_all.impact_report | default('N/A') }}
+      when: not impact_all.failed | default(false)
+
+    # ── Phase 4: List system-agents in blueprint ───────────────────────────
+    - name: "4. Gather system agents (apstra_facts as fallback)"
+      juniper.apstra.apstra_facts:
+        id:
+          blueprints: "{{ blueprint_label }}"
+          type: system_agents
+        state: gathered
+      register: agents_result
+      ignore_errors: true
+
+    - name: "4. Show system agents"
+      ansible.builtin.debug:
+        var: agents_result
+      when: not agents_result.failed | default(false)
+
+    # ── Summary ─────────────────────────────────────────────────────────────
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg:
+          - "Blueprint: {{ blueprint_label }} ({{ images_result.blueprint_id }})"
+          - "OS Images: {{ images_result.images | map(attribute='image_name') | list }}"
+          - "Upgrade Groups: {{ groups_result.groups.keys() | list }}"
+          - "Devices in 'default' group: {{ (groups_result.groups['default'] | default([])) | length }}"
+          - "Impact report agents: {{ impact_all.agent_ids | default([]) | length }}"
