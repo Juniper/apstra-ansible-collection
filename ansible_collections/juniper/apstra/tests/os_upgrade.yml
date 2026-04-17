@@ -75,7 +75,7 @@
       ansible.builtin.debug:
         msg: >-
           Globally available OS images (not per-blueprint):
-          {{ t1.images | map(attribute='filename') | list
+          {{ t1.images | map(attribute='image_name') | list
              | default(['(none uploaded)']) }}
 
     # ── Test 2: state=gathered idempotent (second call) ───────────

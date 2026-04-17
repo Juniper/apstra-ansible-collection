@@ -188,8 +188,9 @@ def resolve_image_id(client_factory, blueprint_id, image_ref):
 
     *image_ref* may be:
     - An image UUID (returned as-is)
-    - An image ``filename``
-    - An image ``label``
+    - An image name (``image_name`` field, e.g. the .tgz/.iso filename)
+    - An image description (``description`` field)
+    - Legacy ``filename`` or ``label`` fields (for older API versions)
 
     Raises ``ValueError`` if not found.
     """
@@ -202,15 +203,30 @@ def resolve_image_id(client_factory, blueprint_id, image_ref):
     images = list_blueprint_images(client_factory, blueprint_id)
     for image in images:
         img_id = image.get("id", "")
+        # 6.1+ fields
+        image_name = image.get("image_name", "")
+        description = image.get("description", "")
+        # Legacy fields (older API versions)
         filename = image.get("filename", "")
         label = image.get("label", "")
-        if filename == image_ref or label == image_ref or img_id == image_ref:
+        if (
+            image_ref == image_name
+            or image_ref == description
+            or image_ref == filename
+            or image_ref == label
+            or image_ref == img_id
+        ):
             return img_id
 
+    # Build a helpful list of available images for the error message
+    available = [
+        image.get("image_name") or image.get("filename") or image.get("id", "?")
+        for image in images
+    ]
     raise ValueError(
         f"OS image not found for '{image_ref}'. "
-        "Provide an image UUID, filename, or label from the globally available "
-        "images (check 'state=gathered' for the full list)."
+        f"Available images: {available}. "
+        "Provide an image UUID, image_name, or description."
     )
 
 

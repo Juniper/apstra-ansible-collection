@@ -119,7 +119,7 @@
               Found {{ test1_result.images | length }} globally available OS image(s)
               (not per-blueprint):
               {{ test1_result.images
-                 | map(attribute='filename') | list
+                 | map(attribute='image_name') | list
                  | default(['(none uploaded yet)']) }}
 
         ########################################################################

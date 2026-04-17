@@ -106,7 +106,8 @@ options:
     suboptions:
       image:
         description:
-          - The target OS image — accepts an image UUID or filename.
+          - The target OS image — accepts an image UUID, image_name
+            (the .tgz/.iso filename shown in the UI), or description.
           - Required for C(state=present).
         type: str
         required: false
@@ -259,8 +260,8 @@ agent:
 images:
   description: >
     List of OS images available globally in Apstra (not blueprint-scoped).
-    Each item contains C(id), C(filename), C(label), C(platform),
-    and additional metadata returned by the API.
+    Each item contains C(id), C(image_name), C(description), C(platform),
+    C(type), C(image_url), C(image_size), and C(checksum).
   type: list
   elements: dict
   returned: when state=gathered
@@ -297,10 +298,12 @@ def _handle_gathered(module, client_factory, blueprint_id):
         images.append(
             {
                 "id": img.get("id", ""),
-                "filename": img.get("filename", ""),
-                "label": img.get("label", ""),
+                "image_name": img.get("image_name", "") or img.get("filename", ""),
+                "description": img.get("description", "") or img.get("label", ""),
                 "platform": img.get("platform", ""),
-                "version": img.get("version", ""),
+                "type": img.get("type", ""),
+                "image_url": img.get("image_url", ""),
+                "image_size": img.get("image_size", 0),
                 "checksum": img.get("checksum", ""),
             }
         )
@@ -370,7 +373,7 @@ def _handle_present(module, client_factory, blueprint_id):
     if not image_ref:
         raise ValueError(
             "'body.image' is required for state=present. "
-            "Provide an OS image UUID or filename."
+            "Provide an OS image UUID, image_name, or description."
         )
 
     # Resolve identifiers
