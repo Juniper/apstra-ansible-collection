@@ -1,0 +1,70 @@
+---
+# Debug playbook — dumps raw /systems/{device_key} for one device.
+# Runs a small inline Python script using the same env vars as the module.
+#
+# Usage:
+#   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_debug_system.yml
+
+- name: "Debug — dump raw /systems record"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  tasks:
+    - name: "Fetch and print full /systems record via inline script"
+      ansible.builtin.script:
+        executable: python3
+        cmd: |
+          import os, json, urllib.request, ssl
+
+          api_url  = os.environ['APSTRA_API_URL'].rstrip('/')
+          username = os.environ['APSTRA_USERNAME']
+          password = os.environ['APSTRA_PASSWORD']
+          ctx = ssl.create_default_context()
+          ctx.check_hostname = False
+          ctx.verify_mode = ssl.CERT_NONE
+
+          # Auth — try both known endpoints
+          token = None
+          for path in ['/aaa/login', '/user-sessions']:
+              req = urllib.request.Request(
+                  api_url + path,
+                  data=json.dumps({'username': username, 'password': password}).encode(),
+                  headers={'Content-Type': 'application/json'},
+              )
+              try:
+                  resp = urllib.request.urlopen(req, context=ctx)
+                  body = json.loads(resp.read())
+                  token = body.get('token') or body.get('auth_token') or body.get('value')
+                  if token:
+                      print(f'Auth OK via {path}')
+                      break
+              except Exception as e:
+                  print(f'Auth {path} failed: {e}')
+
+          if not token:
+              raise SystemExit('ERROR: could not authenticate')
+
+          # List systems
+          req = urllib.request.Request(
+              api_url + '/systems',
+              headers={'AuthToken': token},
+          )
+          body = json.loads(urllib.request.urlopen(req, context=ctx).read())
+          items = body.get('items', body) if isinstance(body, dict) else body
+          if not items:
+              raise SystemExit('No systems found')
+
+          # Print first device — full record
+          dev = items[0]
+          print('\n=== Full /systems record for device', dev.get('device_key'), '===')
+          print(json.dumps(dev, indent=2))
+      register: debug_out
+      environment:
+        APSTRA_API_URL: "{{ lookup('env', 'APSTRA_API_URL') }}"
+        APSTRA_USERNAME: "{{ lookup('env', 'APSTRA_USERNAME') }}"
+        APSTRA_PASSWORD: "{{ lookup('env', 'APSTRA_PASSWORD') }}"
+
+    - name: "Show output"
+      ansible.builtin.debug:
+        msg: "{{ debug_out.stdout_lines }}"

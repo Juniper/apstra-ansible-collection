@@ -499,21 +499,34 @@ def set_upgrade_group(client_factory, device_key, group_name, current_user_confi
     facts = data.get("facts", {})
     status = data.get("status", {})
 
-    # Apstra PUT requires aos_hcl_model and admin_state.  Search all fields
-    # in the response before giving up — different Apstra versions store the
-    # model in different places.
-    if "aos_hcl_model" not in full_user_config:
+    # Apstra PUT requires aos_hcl_model and admin_state to be non-empty.
+    # The GET response may include the key but with an empty string value,
+    # so check for truthiness (not just key presence).
+    if not full_user_config.get("aos_hcl_model"):
         model = (
             facts.get("aos_hcl_model")
             or facts.get("hcl_model")
             or status.get("aos_hcl_model")
             or status.get("device_profile_id")
-            or facts.get("device_type")
+            or facts.get("hw_model")
+            or facts.get("os_family")
             or ""
         )
-        full_user_config["aos_hcl_model"] = model
+        if model:
+            full_user_config["aos_hcl_model"] = model
+        else:
+            # Cannot determine model — raise with full context so the user
+            # can identify the correct field from the device record.
+            raise Exception(
+                f"Cannot determine aos_hcl_model for device '{device_key}'. "
+                f"Run the debug playbook (test_axis_debug_system.yml) to inspect "
+                f"the raw /systems/{device_key} response.\n"
+                f"  user_config={data.get('user_config')}\n"
+                f"  facts keys={list(facts.keys())}\n"
+                f"  status keys={list(status.keys())}"
+            )
 
-    if "admin_state" not in full_user_config:
+    if not full_user_config.get("admin_state"):
         full_user_config["admin_state"] = (
             facts.get("admin_state")
             or status.get("admin_state")
