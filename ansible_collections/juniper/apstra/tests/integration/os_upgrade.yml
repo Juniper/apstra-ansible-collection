@@ -23,7 +23,7 @@
 #   - apstra_single_001_leaf1    (single leaf)
 #
 # ── What each test validates ────────────────────────────────────────────────
-# Test 1 — state=gathered   : List OS images in blueprint (read-only)
+# Test 1 — state=gathered   : List all globally available OS images (read-only)
 # Test 2 — state=impact_report (all devices) : Blueprint-wide impact assessment
 # Test 3 — state=impact_report (single device): Scoped to apstra_esi_001_leaf1
 # Test 4 — state=present    : DISABLED — actual upgrade (requires manual opt-in)
@@ -82,11 +82,12 @@
 
         ########################################################################
         # Test 1 — state=gathered
-        # Lists all OS images in the blueprint.
+        # Lists all globally available OS images (NOT blueprint-scoped).
+        # OS images in Apstra are managed globally at /device-os/images.
         # READ-ONLY — no changes made.
         # Accepts an empty image list gracefully (no images uploaded yet).
         ########################################################################
-        - name: "Test 1 — state=gathered: list OS images in blueprint"
+        - name: "Test 1 — state=gathered: list all globally available OS images"
           juniper.apstra.os_upgrade:
             api_url: "{{ api_url }}"
             verify_certificates: "{{ verify_certs }}"
@@ -109,13 +110,14 @@
               {{ test1_result.msg | default('') }}
             success_msg: >-
               PASSED Test 1: gathered succeeded — found
-              {{ test1_result.images | length }} OS image(s) in blueprint
-              '{{ blueprint_label }}'.
+              {{ test1_result.images | length }} globally available OS image(s)
+              (images are not blueprint-scoped).
 
         - name: "Test 1 — Show discovered images"
           ansible.builtin.debug:
             msg: >-
-              Found {{ test1_result.images | length }} OS image(s):
+              Found {{ test1_result.images | length }} globally available OS image(s)
+              (not per-blueprint):
               {{ test1_result.images
                  | map(attribute='filename') | list
                  | default(['(none uploaded yet)']) }}

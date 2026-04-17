@@ -41,7 +41,7 @@ description:
   - Triggers a device OS upgrade (DOS) for a single device in an Apstra blueprint.
   - Waits for the upgrade job to reach a terminal state (success or error).
   - Can also run an upgrade-impact assessment (C(state=impact_report)) or
-    list available OS images in the blueprint (C(state=gathered)).
+    list all globally available OS images (C(state=gathered)).
   - Requires Apstra 6.0+ for single-device upgrade.
     Upgrade groups (C(upgrade_group.py)) require Apstra 6.1+.
 
@@ -309,7 +309,7 @@ def _handle_gathered(module, client_factory, blueprint_id):
         changed=False,
         blueprint_id=blueprint_id,
         images=images,
-        msg=f"gathered {len(images)} OS image(s) from blueprint '{blueprint_id}'",
+        msg=f"gathered {len(images)} globally available OS image(s)",
     )
 
 

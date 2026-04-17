@@ -74,7 +74,7 @@
     - name: "Test 1 — Show gathered images"
       ansible.builtin.debug:
         msg: >-
-          OS images in blueprint '{{ blueprint_label }}':
+          Globally available OS images (not per-blueprint):
           {{ t1.images | map(attribute='filename') | list
              | default(['(none uploaded)']) }}
 
