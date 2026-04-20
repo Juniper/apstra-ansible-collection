@@ -727,6 +727,75 @@
         success_msg: "PASSED: L3 DCI is idempotent"
 
     # ==============================================================
+    #  STEP 9b: Simplified L3 DCI — single task with all options
+    # ==============================================================
+    # Instead of separate steps for routing policy creation, payload
+    # building, and L3 DCI enablement, users can combine everything
+    # into a single interconnect_gateway domain task.
+    #
+    # The security_zones field accepts:
+    #   - VRF label or ID as the dict key (auto-resolved)
+    #   - routing_policy_id: routing policy label or ID (auto-resolved)
+    #   - interconnect_route_target: the L3 route target string
+    #   - enabled_for_l3: true to enable Type-5 DCI
+    #
+    # This is equivalent to Steps 8 + 9 combined: the routing policy
+    # must already exist (created in Step 8), but everything else is
+    # handled in one task — no separate set_fact needed.
+
+    - name: "BP0: Simplified L3 DCI — single task with routing policy, route target, and Type-5 enable"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          security_zones: >-
+            {{ { vrf_label: {
+                   'routing_policy_id': routing_policy_label,
+                   'interconnect_route_target': l3_route_target,
+                   'enabled_for_l3': true
+                 }
+            } }}
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_l3_simple
+
+    - name: "BP1: Simplified L3 DCI — single task with routing policy, route target, and Type-5 enable"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          security_zones: >-
+            {{ { vrf_label: {
+                   'routing_policy_id': routing_policy_label,
+                   'interconnect_route_target': l3_route_target,
+                   'enabled_for_l3': true
+                 }
+            } }}
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_l3_simple
+
+    - name: Show simplified L3 DCI results
+      ansible.builtin.debug:
+        msg: |
+          BP0 L3 DCI (simplified): changed={{ bp0_l3_simple.changed }}
+          BP1 L3 DCI (simplified): changed={{ bp1_l3_simple.changed }}
+
+    - name: Verify simplified L3 DCI is idempotent (no change since Step 9 already applied)
+      ansible.builtin.assert:
+        that:
+          - not bp0_l3_simple.changed
+          - not bp1_l3_simple.changed
+        fail_msg: "Simplified L3 DCI should be idempotent (same config as Step 9)"
+        success_msg: "PASSED: Simplified single-task L3 DCI is idempotent"
+
+    # ==============================================================
     #  STEP 10: Set VN connection type (L2+L3) and translation VNI
     # ==============================================================
     # Uses virtual_networks body field -> resolved to
@@ -804,6 +873,73 @@
           - not bp0_vn_idem.changed
         fail_msg: "VN connection type should be idempotent"
         success_msg: "PASSED: VN connection type is idempotent"
+
+    # ==============================================================
+    #  STEP 10b: Simplified VN connection type — single task
+    # ==============================================================
+    # Instead of separate steps for payload building and VN connection
+    # type enablement, users can specify virtual_networks directly
+    # in the interconnect_gateway domain task.
+    #
+    # The virtual_networks field accepts:
+    #   - VN label or ID as the dict key (auto-resolved)
+    #   - l2: true/false to enable Layer-2 (EVPN Type 2)
+    #   - l3: true/false to enable Layer-3 (EVPN Type 5)
+    #   - translation_vni: integer VNI for translation
+    #
+    # This eliminates the need for a separate set_fact task.
+
+    - name: "BP0: Simplified VN connection type — single task with L2, L3, and translation VNI"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp0.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          virtual_networks: >-
+            {{ { bp0_vn_label: {
+                   'l2': true,
+                   'l3': true,
+                   'translation_vni': bp0_vn_vni | int
+                 }
+            } }}
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp0_vn_simple
+
+    - name: "BP1: Simplified VN connection type — single task with L2, L3, and translation VNI"
+      juniper.apstra.interconnect_gateway:
+        type: domain
+        id:
+          blueprint: "{{ bp1.id.blueprint }}"
+        body:
+          label: "{{ dci_domain_label }}"
+          route_target: "{{ dci_route_target }}"
+          virtual_networks: >-
+            {{ { bp1_vn_label: {
+                   'l2': true,
+                   'l3': true,
+                   'translation_vni': bp1_vn_vni | int
+                 }
+            } }}
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp1_vn_simple
+
+    - name: Show simplified VN connection type results
+      ansible.builtin.debug:
+        msg: |
+          BP0 VN DCI (simplified): changed={{ bp0_vn_simple.changed }}
+          BP1 VN DCI (simplified): changed={{ bp1_vn_simple.changed }}
+
+    - name: Verify simplified VN connection type is idempotent (no change since Step 10 already applied)
+      ansible.builtin.assert:
+        that:
+          - not bp0_vn_simple.changed
+          - not bp1_vn_simple.changed
+        fail_msg: "Simplified VN connection type should be idempotent (same config as Step 10)"
+        success_msg: "PASSED: Simplified single-task VN connection type is idempotent"
 
     # ==============================================================
     #  DCI Setup Summary
