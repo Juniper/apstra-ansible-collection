@@ -145,11 +145,11 @@ EXAMPLES = """
 - name: Gather all upgrade groups
   juniper.apstra.upgrade_group:
     state: gathered
-  register: groups
+  register: groups_result
 
 - name: Show groups
   ansible.builtin.debug:
-    var: groups.groups
+    var: groups_result.groups
 
 # ── List a specific group ─────────────────────────────────────────
 
@@ -245,7 +245,7 @@ EXAMPLES = """
     body:
       image: "{{ target_image }}"
     state: present
-  loop: "{{ groups_result.groups['spines'] | map(attribute='device_key') | list }}"
+  loop: "{{ groups_result.groups['spines'] | map(attribute='device_key') | list }}"  # groups_result from the Gather step above
   when: not impact.failed
 
 - name: 4 Dissolve group after upgrade
