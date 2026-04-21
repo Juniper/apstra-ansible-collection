@@ -237,15 +237,43 @@ EXAMPLES = """
     state: impact_report
   register: impact
 
-- name: 3 Trigger upgrade on each member individually
+- name: 3a Trigger upgrade SEQUENTIALLY (one device at a time — safe default)
   juniper.apstra.os_upgrade:
     id:
       blueprint: "{{ bp_id }}"
       system: "{{ item }}"
     body:
       image: "{{ target_image }}"
+      wait_timeout: 1800
     state: present
-  loop: "{{ groups_result.groups['spines'] | map(attribute='device_key') | list }}"  # groups_result from the Gather step above
+  loop: "{{ impact.agent_ids }}"
+  when: not impact.failed
+
+# ── OR ── parallel upgrade (matches WebUI behaviour) ─────────────
+
+- name: 3b Trigger upgrade IN PARALLEL (all devices simultaneously — like WebUI)
+  juniper.apstra.os_upgrade:
+    id:
+      blueprint: "{{ bp_id }}"
+      system: "{{ item }}"
+    body:
+      image: "{{ target_image }}"
+      wait_timeout: 1800
+    state: present
+  loop: "{{ impact.agent_ids }}"
+  when: not impact.failed
+  async: 1800   # must be >= wait_timeout; tells Ansible to run the task asynchronously
+  poll: 0       # fire and move on immediately — do not wait before launching next device
+  register: upgrade_jobs
+
+- name: 3b Wait for all parallel upgrades to complete
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop: "{{ upgrade_jobs.results | selectattr('ansible_job_id', 'defined') | list }}"
+  register: job_results
+  until: job_results.finished
+  retries: 120
+  delay: 30
   when: not impact.failed
 
 - name: 4 Dissolve group after upgrade
