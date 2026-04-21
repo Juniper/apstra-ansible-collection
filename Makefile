@@ -79,6 +79,10 @@ image: build
 	mkdir -p build/collections
 	rm -f build/collections/juniper-apstra.tar.gz
 	cp "$(APSTRA_COLLECTION)" build/collections/juniper-apstra.tar.gz
+	@AOS_SDK_WHL=$$(ls build/wheels/aos_sdk-*.whl 2>/dev/null | sort -V | tail -1); \
+	AOS_SDK_BASENAME=$$(basename $$AOS_SDK_WHL); \
+	echo "Updating ee-builder.yml with SDK wheel: $$AOS_SDK_BASENAME"; \
+	sed -i "s|aos_sdk-[^/]*\.whl|$$AOS_SDK_BASENAME|g" build/ee-builder.yml
 	TAG=$(VERSION) pipenv run build/build_image.sh
 
 release-build: docs
