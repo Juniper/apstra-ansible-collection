@@ -707,6 +707,68 @@ def resolve_application_point_ids(client_factory, blueprint_id, ap_refs):
     ]
 
 
+def resolve_graph_node_id(client_factory, blueprint_id, label_node_id):
+    """Resolve a label-based node reference to its graph node UUID.
+
+    Accepts colon-separated shorthand ``"system_label:if_name"`` and
+    resolves it via a QE graph query.
+
+    Supported formats:
+
+    * ``"system_label:if_name"`` — physical interface
+      (e.g. ``"leaf1:xe-0/0/7"``).
+    * ``"system_label:if_name.subid"`` — subinterface
+      (e.g. ``"leaf1:xe-0/0/7.100"``).  Resolved via
+      ``system → hosted_interfaces → interface(if_name=parent) →
+      composed_of → interface(if_type=subinterface, if_name=full)``.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param label_node_id: A ``"system_label:if_name"`` string.
+    :return: The resolved graph node UUID string.
+    :raises ValueError: If the reference cannot be resolved.
+    """
+    if not label_node_id or ":" not in str(label_node_id):
+        raise ValueError(
+            f"Label-based node_id must be 'system_label:if_name', "
+            f"got '{label_node_id}'"
+        )
+
+    system_label, if_name = str(label_node_id).split(":", 1)
+
+    if "." in if_name:
+        # Subinterface: system → hosted_interfaces → phys → composed_of → subif
+        query = (
+            f"node('system', label='{system_label}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', name='phys')"
+            f".out('composed_of')"
+            f".node('interface', if_type='subinterface', "
+            f"if_name='{if_name}', name='subif')"
+        )
+        items = _run_qe(client_factory, blueprint_id, query)
+        if not items:
+            raise ValueError(
+                f"Subinterface '{if_name}' not found on system "
+                f"'{system_label}' in blueprint '{blueprint_id}'"
+            )
+        return items[0]["subif"]["id"]
+    else:
+        # Physical interface
+        query = (
+            f"node('system', label='{system_label}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_name='{if_name}', name='intf')"
+        )
+        items = _run_qe(client_factory, blueprint_id, query)
+        if not items:
+            raise ValueError(
+                f"Interface '{if_name}' not found on system "
+                f"'{system_label}' in blueprint '{blueprint_id}'"
+            )
+        return items[0]["intf"]["id"]
+
+
 # ──────────────────────────────────────────────────────────────────
 #  IBA Probe resolution
 # ──────────────────────────────────────────────────────────────────
