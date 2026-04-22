@@ -281,6 +281,67 @@ EXAMPLES = """
     id:
       name: "spines"
     state: absent
+
+# ── Mixed OS types in one group (JunOS + JunOS-EVO) ───────────────
+#
+# Option A (recommended): use separate upgrade groups per OS type so
+# each group maps cleanly to one image.  Create "spines-junos" and
+# "spines-evo", then run the workflow above for each group.
+#
+# Option B: single group, filter by os_family at playbook level.
+# The gathered member dicts include os_family / os_variant / os_version
+# so you can split agent_ids into two lists and apply different images.
+
+- name: Gather group members (includes os_family per device)
+  juniper.apstra.upgrade_group:
+    id:
+      name: "mixed-spines"
+    state: gathered
+  register: grp
+
+- name: Build per-OS agent lists
+  ansible.builtin.set_fact:
+    junos_keys:     "{{ grp.groups['mixed-spines'] | selectattr('os_variant', 'ne', 'qfx-ms-fixed') | map(attribute='device_key') | list }}"
+    evo_keys:       "{{ grp.groups['mixed-spines'] | selectattr('os_variant', 'equalto', 'qfx-ms-fixed') | map(attribute='device_key') | list }}"
+
+- name: Upgrade JunOS devices
+  juniper.apstra.os_upgrade:
+    id:
+      blueprint: "{{ bp_id }}"
+      system: "{{ item }}"
+    body:
+      image: "jinstall-host-qfx-5e-x86-64-23.4R2-S6.10-secure-signed.tgz"
+      wait_timeout: 1800
+    state: present
+  loop: "{{ junos_keys }}"
+  async: 1800
+  poll: 0
+  register: junos_jobs
+
+- name: Upgrade JunOS-EVO devices
+  juniper.apstra.os_upgrade:
+    id:
+      blueprint: "{{ bp_id }}"
+      system: "{{ item }}"
+    body:
+      image: "junos-evo-install-qfx-ms-x86-64-23.4R2-S6.9-EVO.iso"
+      wait_timeout: 1800
+    state: present
+  loop: "{{ evo_keys }}"
+  async: 1800
+  poll: 0
+  register: evo_jobs
+
+- name: Wait for all upgrades to complete
+  ansible.builtin.async_status:
+    jid: "{{ item.ansible_job_id }}"
+  loop: >-
+    {{ (junos_jobs.results | default([]) + evo_jobs.results | default([]))
+       | selectattr('ansible_job_id', 'defined') | list }}
+  register: all_results
+  until: all_results.finished
+  retries: 120
+  delay: 30
 """
 
 RETURN = """
@@ -296,7 +357,8 @@ groups:
   description: >
     Dict mapping group name → list of member dicts.
     Each member dict contains C(device_key), C(mgmt_ip), C(hostname),
-    C(upgrade_group), and C(user_config) (full).
+    C(upgrade_group), C(os_family), C(os_variant), C(os_version),
+    and C(user_config) (full).
   type: dict
   returned: when state=gathered
 members_changed:
@@ -308,7 +370,7 @@ members_current:
   description: >
     Current members of the group after the operation.
     Each item contains C(device_key), C(mgmt_ip), C(hostname),
-    and C(user_config).
+    C(os_family), C(os_variant), C(os_version), and C(user_config).
   type: list
   elements: dict
   returned: when state=present or absent
@@ -345,6 +407,9 @@ def _system_summary(system):
         "mgmt_ip": facts.get("mgmt_ipaddr", ""),
         "hostname": facts.get("hostname", ""),
         "upgrade_group": system.get("user_config", {}).get("upgrade_group", ""),
+        "os_family": facts.get("os_family", ""),
+        "os_variant": facts.get("os_variant", ""),
+        "os_version": facts.get("os_version", ""),
         "user_config": system.get("user_config", {}),
     }
 
