@@ -296,22 +296,32 @@ def _run_qe(client_factory, blueprint_id, query_str):
     return run_qe_query(client_factory, blueprint_id, query_str)
 
 
-def resolve_security_zone_id(client_factory, blueprint_id, sz_ref):
-    """Resolve a security-zone reference (UUID or label) to its node ID.
+def resolve_security_zone_id(
+    client_factory, blueprint_id, sz_ref, raise_on_missing=True
+):
+    """Resolve a security-zone reference (UUID, label, or vrf_name) to its node ID.
+
+    Resolution order: exact ID → exact label → case-insensitive label →
+    exact vrf_name → case-insensitive vrf_name.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.
-    :param sz_ref: The security-zone UUID or label.
-    :return: The resolved security-zone node ID string.
+    :param sz_ref: The security-zone UUID, label, or vrf_name.
+    :param raise_on_missing: If ``True`` (default), raise ``ValueError``
+        when the security zone is not found.  If ``False``, return ``None``.
+    :return: The resolved security-zone node ID string, or ``None`` when
+        *raise_on_missing* is ``False`` and no match is found.
     """
     if not sz_ref or _is_uuid(sz_ref):
         return sz_ref
 
     results = _run_qe(client_factory, blueprint_id, "node('security_zone', name='sz')")
     if not results:
-        raise ValueError(
-            f"Security zone '{sz_ref}' not found — no security zones exist in blueprint."
-        )
+        if raise_on_missing:
+            raise ValueError(
+                f"Security zone '{sz_ref}' not found — no security zones exist in blueprint."
+            )
+        return None
 
     # Exact ID match (Apstra graph node IDs are short strings, not UUIDs)
     for r in results:
@@ -344,10 +354,13 @@ def resolve_security_zone_id(client_factory, blueprint_id, sz_ref):
         if (sz.get("vrf_name") or "").lower() == ref_lower:
             return sz["id"]
 
-    available = [r.get("sz", {}).get("label", "") for r in results]
-    raise ValueError(
-        f"Security zone '{sz_ref}' not found in blueprint. " f"Available: {available}"
-    )
+    if raise_on_missing:
+        available = [r.get("sz", {}).get("label", "") for r in results]
+        raise ValueError(
+            f"Security zone '{sz_ref}' not found in blueprint. "
+            f"Available: {available}"
+        )
+    return None
 
 
 def resolve_resource_group_name(client_factory, blueprint_id, group_name):

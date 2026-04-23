@@ -308,20 +308,23 @@ def main():
         lookup_label = (body or {}).get("label") or sz_name
         if object_id is None:
             if lookup_label:
-                id_found = client_factory.get_id_by_label(
-                    id["blueprint"], leaf_object_type, lookup_label
+                # All name resolution goes through resolve_security_zone_id
+                # which checks: exact ID → label → case-insensitive label
+                # → vrf_name → case-insensitive vrf_name.
+                # When body is None (lookup-only via sz_name), raise if
+                # not found; otherwise return None so creation can proceed.
+                id_found = resolve_security_zone_id(
+                    client_factory,
+                    id["blueprint"],
+                    lookup_label,
+                    raise_on_missing=(body is None),
                 )
-                if id_found:
-                    id[leaf_object_type] = id_found
-                    current_object = client_factory.object_request(
-                        object_type, "get", id
-                    )
-                elif sz_name:
-                    raise ValueError(
-                        f"Security zone '{sz_name}' not found in blueprint "
-                        f"'{id['blueprint']}'. Use 'label', 'sz_type', and "
-                        f"'vrf_name' to create a new routing zone."
-                    )
+            else:
+                id_found = None
+
+            if id_found:
+                id[leaf_object_type] = id_found
+                current_object = client_factory.object_request(object_type, "get", id)
         else:
             current_object = client_factory.object_request(object_type, "get", id)
 
@@ -397,6 +400,7 @@ def main():
     except Exception as e:
         tb = traceback.format_exc()
         module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
+        result.pop("msg", None)
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)
