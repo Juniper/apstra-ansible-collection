@@ -96,7 +96,7 @@ options:
   body:
     description:
       - Dictionary containing the configlet object details.
-      - For catalog configlets, keys include C(display_name), C(ref_archs), and C(generators).
+      - For catalog configlets, keys include C(display_name), C(ref_archs) (optional, defaults to C(["two_stage_l3clos"])), and C(generators).
       - For blueprint configlets, keys include C(label), C(condition), and C(configlet)
         (which itself contains C(display_name) and C(generators)).
       - Each generator is a dictionary with C(config_style), C(template_text),
@@ -509,6 +509,9 @@ def _manage_catalog_configlet(module, client_factory):
         else:
             if body is None:
                 raise ValueError(f"Must specify 'body' to create a {leaf_object_type}")
+            # Default ref_archs when not provided (matches Apstra UI behaviour)
+            if "ref_archs" not in body:
+                body["ref_archs"] = ["two_stage_l3clos"]
             created_object = client_factory.object_request(
                 object_type, "create", id, body
             )
