@@ -770,6 +770,105 @@ def resolve_graph_node_id(client_factory, blueprint_id, label_node_id):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  VRF interface pair resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_vrf_interface_pair(client_factory, blueprint_id, sz_id, interface_ref):
+    """Resolve a VRF interface reference to its endpoint pair node IDs.
+
+    Given a physical or subinterface name, finds the matching
+    subinterface within the specified security zone and (optionally)
+    the link partner on the other side.
+
+    Supported ``interface_ref`` formats:
+
+    * ``"xe-0/0/3"`` — physical interface name (must be unique in VRF)
+    * ``"xe-0/0/3.100"`` — subinterface name
+    * ``"leaf1:xe-0/0/3"`` — with system label for disambiguation
+
+    Graph traversal::
+
+        physical(if_name) → composed_of → subinterface(ep1)
+        ← sz_instance ← security_zone(sz_id)
+
+    Link partner::
+
+        ep1 → out('link') → link → in_('link') → ep2
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param sz_id: The security-zone node ID.
+    :param interface_ref: Interface reference string.
+    :return: Tuple ``(ep1_id, ep2_id)`` where *ep2_id* may be ``None``
+             if no link partner is found.
+    :raises ValueError: If the interface is not found or ambiguous.
+    """
+    system_label = None
+    if_name = interface_ref
+    if ":" in interface_ref:
+        system_label, if_name = interface_ref.split(":", 1)
+
+    is_sub = "." in if_name
+    phys_name = if_name.rsplit(".", 1)[0] if is_sub else if_name
+
+    # ── Build query: [system→] physical → composed_of → subif → VRF
+    if system_label:
+        q = (
+            f"node('system', label='{system_label}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_name='{phys_name}', name='phys')"
+        )
+    else:
+        q = f"node('interface', if_name='{phys_name}', name='phys')"
+
+    if is_sub:
+        q += (
+            f".out('composed_of')"
+            f".node('interface', if_name='{if_name}', name='ep1')"
+        )
+    else:
+        q += f".out('composed_of')" f".node('interface', name='ep1')"
+
+    q += (
+        f".in_().node('sz_instance', name='szi')"
+        f".in_().node('security_zone', id='{sz_id}', name='sz')"
+    )
+
+    ep1_results = _run_qe(client_factory, blueprint_id, q)
+    if not ep1_results:
+        raise ValueError(
+            f"Interface '{interface_ref}' not found in security zone "
+            f"'{sz_id}' in blueprint '{blueprint_id}'"
+        )
+    if len(ep1_results) > 1:
+        raise ValueError(
+            f"Ambiguous: '{if_name}' matches {len(ep1_results)} "
+            f"interfaces in the VRF. Use 'system_label:{if_name}' "
+            f"to disambiguate."
+        )
+
+    ep1_id = ep1_results[0]["ep1"]["id"]
+
+    # ── Find link partner (ep2) ──────────────────────────────────
+    ep2_q = (
+        f"node('interface', id='{ep1_id}', name='ep1')"
+        f".out('link').node('link', name='lnk')"
+        f".in_('link').node('interface', name='ep2')"
+    )
+    ep2_results = _run_qe(client_factory, blueprint_id, ep2_q)
+
+    ep2_id = None
+    if ep2_results:
+        for r in ep2_results:
+            if r["ep2"]["id"] != ep1_id:
+                ep2_id = r["ep2"]["id"]
+                break
+
+    return ep1_id, ep2_id
+
+
+# ──────────────────────────────────────────────────────────────────
 #  IBA Probe resolution
 # ──────────────────────────────────────────────────────────────────
 
