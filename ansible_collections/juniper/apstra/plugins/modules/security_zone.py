@@ -270,11 +270,18 @@ def main():
 
         # Pop custom fields that the Apstra API does not understand
         interfaces_ip_assignments = None
+        sz_name = None
         if body:
             interfaces_ip_assignments = body.pop("interfaces_ip_assignments", None)
             sz_name = body.pop("sz_name", None)
             if sz_name:
                 body.setdefault("label", sz_name)
+                # When sz_name is the only source of "label" and no other
+                # creation/update fields were supplied, mark this as a
+                # lookup-only operation so we don't accidentally try to
+                # create a VRF with incomplete data.
+                if set(body.keys()) == {"label"}:
+                    body = None
 
         # Resolve blueprint name to ID if needed
         if "blueprint" in id:
@@ -298,15 +305,22 @@ def main():
 
         # See if the object exists
         current_object = None
+        lookup_label = (body or {}).get("label") or sz_name
         if object_id is None:
-            if (body is not None) and ("label" in body):
+            if lookup_label:
                 id_found = client_factory.get_id_by_label(
-                    id["blueprint"], leaf_object_type, body["label"]
+                    id["blueprint"], leaf_object_type, lookup_label
                 )
                 if id_found:
                     id[leaf_object_type] = id_found
                     current_object = client_factory.object_request(
                         object_type, "get", id
+                    )
+                elif sz_name:
+                    raise ValueError(
+                        f"Security zone '{sz_name}' not found in blueprint "
+                        f"'{id['blueprint']}'. Use 'label', 'sz_type', and "
+                        f"'vrf_name' to create a new routing zone."
                     )
         else:
             current_object = client_factory.object_request(object_type, "get", id)
