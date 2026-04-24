@@ -274,6 +274,15 @@ def main():
         if body:
             interfaces_ip_assignments = body.pop("interfaces_ip_assignments", None)
             sz_name = body.pop("sz_name", None)
+            # Pop tags from body and merge with top-level tags parameter
+            # Tags must go through update_tags(), not the create/patch API
+            body_tags = body.pop("tags", None)
+            if body_tags is not None:
+                if tags is not None:
+                    # Merge: top-level tags take precedence, add any from body
+                    tags = list(set(tags) | set(body_tags))
+                else:
+                    tags = body_tags
             if sz_name:
                 body.setdefault("label", sz_name)
                 # When sz_name is the only source of "label" and no other
@@ -282,10 +291,21 @@ def main():
                 # create a VRF with incomplete data.
                 if set(body.keys()) == {"label"}:
                     body = None
+            elif not body:
+                body = None
 
         # Resolve blueprint name to ID if needed
         if "blueprint" in id:
             id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
+
+        # Resolve security_zone name/label to ID if needed
+        if leaf_object_type in id and id[leaf_object_type]:
+            id[leaf_object_type] = resolve_security_zone_id(
+                client_factory,
+                id["blueprint"],
+                id[leaf_object_type],
+                raise_on_missing=True,
+            )
 
         # Coerce integer fields that the API requires as int, not str
         if body:
@@ -361,8 +381,8 @@ def main():
                 result["response"] = object
                 result["msg"] = f"{leaf_object_type} created successfully"
 
-            # Apply tags if specified
-            if tags:
+            # Apply tags if specified (tags=[] removes all tags)
+            if tags is not None:
                 result["tag_response"] = client_factory.update_tags(
                     id, leaf_object_type, tags
                 )

@@ -115,6 +115,98 @@
       ansible.builtin.debug:
         var: sz_modify
 
+    # ── Tag tests ─────────────────────────────────────────────
+    - name: Create tag 'red' in blueprint
+      juniper.apstra.tag:
+        id: "{{ bp.id }}"
+        body:
+          label: "red"
+          description: "Red tag"
+        auth_token: "{{ auth.token }}"
+
+    - name: Create tag 'blue' in blueprint
+      juniper.apstra.tag:
+        id: "{{ bp.id }}"
+        body:
+          label: "blue"
+          description: "Blue tag"
+        auth_token: "{{ auth.token }}"
+
+    - name: Add tags via top-level tags param
+      juniper.apstra.security_zone:
+        id: "{{ sz.id }}"
+        tags:
+          - red
+        auth_token: "{{ auth.token }}"
+      register: sz_tag_toplevel
+
+    - name: Show tagged security_zone (top-level)
+      ansible.builtin.debug:
+        var: sz_tag_toplevel
+
+    - name: Add tags via body (should be extracted and applied)
+      juniper.apstra.security_zone:
+        id: "{{ sz.id }}"
+        body:
+          tags:
+            - red
+            - blue
+        auth_token: "{{ auth.token }}"
+      register: sz_tag_body
+
+    - name: Show tagged security_zone (body tags)
+      ansible.builtin.debug:
+        var: sz_tag_body
+
+    - name: Lookup security_zone by VRF name and add tags
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "{{ blueprint_name }}"
+          security_zone: "test_vrf"
+        body:
+          tags:
+            - blue
+        auth_token: "{{ auth.token }}"
+      register: sz_tag_by_name
+
+    - name: Show tagged security_zone (by VRF name)
+      ansible.builtin.debug:
+        var: sz_tag_by_name
+
+    - name: Remove one tag (keep only red)
+      juniper.apstra.security_zone:
+        id: "{{ sz.id }}"
+        tags:
+          - red
+        auth_token: "{{ auth.token }}"
+      register: sz_tag_remove_one
+
+    - name: Show security_zone after removing one tag
+      ansible.builtin.debug:
+        var: sz_tag_remove_one
+
+    - name: Verify only red tag remains
+      ansible.builtin.assert:
+        that:
+          - sz_tag_remove_one.tag_response == ["red"]
+
+    - name: Remove all tags
+      juniper.apstra.security_zone:
+        id: "{{ sz.id }}"
+        tags: []
+        auth_token: "{{ auth.token }}"
+      register: sz_tag_remove_all
+
+    - name: Show security_zone after removing all tags
+      ansible.builtin.debug:
+        var: sz_tag_remove_all
+
+    - name: Verify all tags removed
+      ansible.builtin.assert:
+        that:
+          - sz_tag_remove_all.tag_response == []
+    # ── End tag tests ─────────────────────────────────────────
+
     - name: Delete the security_zone
       juniper.apstra.security_zone:
         id: "{{ sz.id }}"
