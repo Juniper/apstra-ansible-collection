@@ -1,0 +1,46 @@
+---
+# Debug playbook — dumps raw /systems/{device_key} for one device.
+# Runs a small inline Python task using uri module.
+#
+# Usage:
+#   PIPENV_DONT_LOAD_ENV=1 pipenv run ansible-playbook -v test_axis_debug_system.yml
+
+- name: "Debug — dump raw /systems record"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
+    apstra_username: "{{ lookup('env', 'APSTRA_USERNAME') }}"
+    apstra_password: "{{ lookup('env', 'APSTRA_PASSWORD') }}"
+
+  tasks:
+    - name: "Login to Apstra"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/aaa/login"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ apstra_username }}"
+          password: "{{ apstra_password }}"
+        validate_certs: false
+        status_code: [200, 201]
+      register: login
+
+    - name: "Set auth token"
+      ansible.builtin.set_fact:
+        auth_token: "{{ login.json.token | default(login.json.auth_token) | default(login.json.value) }}"
+
+    - name: "GET /systems"
+      ansible.builtin.uri:
+        url: "{{ apstra_api_url }}/systems"
+        method: GET
+        headers:
+          AuthToken: "{{ auth_token }}"
+        validate_certs: false
+      register: systems_resp
+
+    - name: "Show FULL record for first device"
+      ansible.builtin.debug:
+        msg: "{{ systems_resp.json['items'][0] | to_nice_json }}"

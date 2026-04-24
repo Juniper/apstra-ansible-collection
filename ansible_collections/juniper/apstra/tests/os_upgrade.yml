@@ -1,0 +1,279 @@
+---
+# ── Test playbook for juniper.apstra.os_upgrade ───────────────────
+#
+# Covers: state=gathered, state=impact_report (all + single device),
+#         and expected-error cases for state=present.
+#
+# state=present (actual upgrade trigger) is NOT exercised here because
+# it requires a pre-uploaded OS image and a maintenance window.
+# Use tests/integration/os_upgrade.yml (with run_upgrade_test=true)
+# in a controlled environment for that path.
+#
+# Notes on Apstra version compatibility:
+#   state=gathered      → works on all versions (returns empty list if
+#                          no images uploaded)
+#   state=impact_report → requires the /system-agents/upgrade-impact
+#                          endpoint (Apstra 6.1+).  On older versions
+#                          the task will be skipped/ignored gracefully.
+#   state=present       → requires Apstra 6.1+.
+#
+# Prerequisites:
+#   - Apstra server reachable (APSTRA_API_URL env or default 10.88.137.14)
+#   - Blueprint specified by blueprint_label must exist
+#   - For Test 3: at least one assigned device in that blueprint
+#
+# Usage:
+#   make test-os_upgrade
+#   make test-os_upgrade ANSIBLE_FLAGS="-v"
+#   # With a different blueprint:
+#   make test-os_upgrade ANSIBLE_FLAGS="-v -e blueprint_label=my-blueprint"
+
+- name: Test juniper.apstra.os_upgrade
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # Blueprint that already exists on the local Apstra server.
+    # Override with -e blueprint_label=<name> if needed.
+    blueprint_label: "{{ blueprint | default('vg-am-cops-tb-0') }}"
+
+    # A device node label that exists in the blueprint above.
+    # Used for single-device impact_report and expected-error tests.
+    device_label: "{{ esi_leaf1 | default('vg-am-cops-tb-0-leaf1') }}"
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Test 1: state=gathered ─────────────────────────────────────
+    # Lists OS images globally.  Always read-only.
+    # An empty images list is valid (no images uploaded yet).
+    - name: "Test 1 — state=gathered: list OS images"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: gathered
+      register: t1
+
+    - name: "Test 1 — Verify: gathered returns image list"
+      ansible.builtin.assert:
+        that:
+          - not t1.failed | default(false)
+          - not t1.changed
+          - t1.blueprint_id is defined
+          - t1.images is defined
+          - t1.images | type_debug == 'list'
+        fail_msg: "Test 1 FAILED: state=gathered did not return images list. {{ t1.msg | default('') }}"
+        success_msg: "Test 1 PASSED: gathered returned {{ t1.images | length }} image(s) — no changes."
+
+    - name: "Test 1 — Show gathered images"
+      ansible.builtin.debug:
+        msg: >-
+          Globally available OS images (not per-blueprint):
+          {{ t1.images | map(attribute='image_name') | list
+             | default(['(none uploaded)']) }}
+
+    # ── Test 2: state=gathered idempotent (second call) ───────────
+    # Calling gathered twice must always return the same result.
+    - name: "Test 2 — state=gathered: idempotent (second call)"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: gathered
+      register: t2
+
+    - name: "Test 2 — Verify: gathered is idempotent"
+      ansible.builtin.assert:
+        that:
+          - not t2.changed
+          - t2.images | length == t1.images | length
+        fail_msg: "Test 2 FAILED: second gathered call returned different count."
+        success_msg: "Test 2 PASSED: gathered is idempotent — {{ t2.images | length }} image(s) each time."
+
+    # ── Test 3: state=impact_report (all blueprint devices) ────────
+    # Attempts upgrade-impact for every assigned device in the blueprint.
+    # Requires Apstra 6.1+; on older versions gracefully logs the skip.
+    - name: "Test 3 — state=impact_report: all devices in '{{ blueprint_label }}'"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        state: impact_report
+      register: t3
+      ignore_errors: true
+
+    - name: "Test 3 — Verify: impact_report (all) succeeded or API unavailable"
+      ansible.builtin.assert:
+        that:
+          - >-
+            (not t3.failed | default(false)
+             and not t3.changed
+             and t3.agent_ids is defined
+             and t3.impact_report is defined)
+            or
+            (t3.failed | default(false)
+             and ('HTTP' in (t3.msg | default(''))
+                  or 'upgrade' in (t3.msg | default('')) | lower))
+        fail_msg: >-
+          Test 3 FAILED: unexpected error from impact_report.
+          {{ t3.msg | default('') }}
+        success_msg: >-
+          Test 3 PASSED: impact_report for all devices
+          {% if not t3.failed | default(false) %}
+          — {{ t3.agent_ids | length }} agent(s) assessed, no device changes.
+          {% else %}
+          — API unavailable on this Apstra version (requires 6.1+): {{ t3.msg | default('') }}
+          {% endif %}
+
+    # ── Test 4: state=impact_report (single device by label) ──────
+    # Verifies blueprint-node label → system_id → agent UUID resolution.
+    # Only run if Test 3 succeeded (i.e. upgrade API is available).
+    - name: "Test 4 — state=impact_report: single device '{{ device_label }}'"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          system: "{{ device_label }}"
+        state: impact_report
+      register: t4
+      ignore_errors: true
+      when: not t3.failed | default(false)
+
+    - name: "Test 4 — Verify: single-device impact_report"
+      ansible.builtin.assert:
+        that:
+          - not t4.failed | default(false)
+          - not t4.changed
+          - t4.agent_ids | length == 1
+          - t4.impact_report is defined
+        fail_msg: >-
+          Test 4 FAILED: single-device impact_report for '{{ device_label }}'.
+          {{ t4.msg | default('') }}
+        success_msg: >-
+          Test 4 PASSED: '{{ device_label }}' resolved to agent
+          {{ t4.agent_ids[0] }} — no device changes.
+      when: not t3.failed | default(false)
+
+    - name: "Test 4 — Skip note (upgrade API unavailable)"
+      ansible.builtin.debug:
+        msg: "Test 4 SKIPPED: upgrade-impact API not available on this Apstra version."
+      when: t3.failed | default(false)
+
+    # ── Test 5: state=present — missing id.system (expected error) ─
+    # Confirms the module rejects a request with no system specified.
+    - name: "Test 5 — state=present: missing id.system (expect error)"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        body:
+          image: "some-image.tgz"
+        state: present
+      register: t5
+      ignore_errors: true
+
+    - name: "Test 5 — Verify: missing id.system produces clear error"
+      ansible.builtin.assert:
+        that:
+          - t5.failed | default(false)
+          - "'system' in (t5.msg | default('')) | lower"
+        fail_msg: >-
+          Test 5 FAILED: expected error about missing 'system', got:
+          {{ t5.msg | default('no msg') }}
+        success_msg: "Test 5 PASSED: missing id.system → clear error message."
+
+    # ── Test 6: state=present — missing body.image (expected error) ─
+    # Confirms the module rejects a request with no image specified.
+    - name: "Test 6 — state=present: missing body.image (expect error)"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          system: "{{ device_label }}"
+        state: present
+      register: t6
+      ignore_errors: true
+
+    - name: "Test 6 — Verify: missing body.image produces clear error"
+      ansible.builtin.assert:
+        that:
+          - t6.failed | default(false)
+          - "'image' in (t6.msg | default('')) | lower"
+        fail_msg: >-
+          Test 6 FAILED: expected error about missing 'image', got:
+          {{ t6.msg | default('no msg') }}
+        success_msg: "Test 6 PASSED: missing body.image → clear error message."
+
+    # ── Test 7: state=present — non-existent image (expected error) ─
+    # Confirms that an image name that does not exist in the blueprint
+    # produces a clear "not found" error rather than a cryptic API failure.
+    - name: "Test 7 — state=present: non-existent image (expect error)"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          system: "{{ device_label }}"
+        body:
+          image: "nonexistent-os-image-abc123.tgz"
+        state: present
+      register: t7
+      ignore_errors: true
+
+    - name: "Test 7 — Verify: non-existent image produces clear error"
+      ansible.builtin.assert:
+        that:
+          - t7.failed | default(false)
+          - >-
+            'image' in (t7.msg | default('')) | lower
+            or 'not found' in (t7.msg | default('')) | lower
+        fail_msg: >-
+          Test 7 FAILED: expected image-not-found error, got:
+          {{ t7.msg | default('no msg') }}
+        success_msg: "Test 7 PASSED: non-existent image → clear not-found error."
+
+    # ── Test 8: state=present — non-existent system (expected error) ─
+    # Confirms that a device label that doesn't exist in the blueprint
+    # produces a clear "not found" error.
+    - name: "Test 8 — state=present: non-existent system (expect error)"
+      juniper.apstra.os_upgrade:
+        auth_token: "{{ auth.token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          system: "nonexistent-device-xyz-000"
+        body:
+          image: "some-image.tgz"
+        state: present
+      register: t8
+      ignore_errors: true
+
+    - name: "Test 8 — Verify: non-existent system produces clear error"
+      ansible.builtin.assert:
+        that:
+          - t8.failed | default(false)
+          - >-
+            'agent' in (t8.msg | default('')) | lower
+            or 'not found' in (t8.msg | default('')) | lower
+            or 'system' in (t8.msg | default('')) | lower
+        fail_msg: >-
+          Test 8 FAILED: expected system-not-found error, got:
+          {{ t8.msg | default('no msg') }}
+        success_msg: "Test 8 PASSED: non-existent system → clear not-found error."
+
+    # ── Summary ───────────────────────────────────────────────────
+    - name: "Summary — os_upgrade test results"
+      ansible.builtin.debug:
+        msg:
+          - "Test 1 (gathered):               {{ 'PASSED' if not t1.failed | default(false) else 'FAILED' }}"
+          - "Test 2 (gathered idempotent):     {{ 'PASSED' if not t2.failed | default(false) else 'FAILED' }}"
+          - "Test 3 (impact_report all):       {{ 'PASSED' if not t3.failed | default(false) else ('SKIPPED (6.1+ required)' if 'HTTP' in (t3.msg | default('')) or 'upgrade' in (t3.msg | default('')) | lower else 'FAILED') }}"
+          - "Test 4 (impact_report single):    {{ 'SKIPPED (6.1+ required)' if t3.failed | default(false) else ('PASSED' if not t4.failed | default(false) else 'FAILED') }}"
+          - "Test 5 (present no system):       {{ 'PASSED' if t5.failed | default(false) else 'FAILED' }}"
+          - "Test 6 (present no image):        {{ 'PASSED' if t6.failed | default(false) else 'FAILED' }}"
+          - "Test 7 (present bad image):       {{ 'PASSED' if t7.failed | default(false) else 'FAILED' }}"
+          - "Test 8 (present bad system):      {{ 'PASSED' if t8.failed | default(false) else 'FAILED' }}"
