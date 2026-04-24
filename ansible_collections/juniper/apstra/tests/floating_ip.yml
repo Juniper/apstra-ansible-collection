@@ -208,6 +208,130 @@
         that:
           - fip_update_by_ip.id.floating_ip == fip_node_id
 
+    # ── Create a security zone + virtual network for VN lookup test ───
+    - name: Create routing policy for security zone
+      juniper.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        body:
+          label: "fip_test_rp"
+          policy_type: "user_defined"
+          import_policy: "all"
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          expect_default_ipv4_route: false
+          expect_default_ipv6_route: false
+        auth_token: "{{ auth.token }}"
+      register: fip_rp
+
+    - name: Create security zone for VN lookup test
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "fip-test-vrf"
+          vrf_name: "fip_test_vrf"
+          sz_type: "evpn"
+          vni_id: 16777200
+          vlan_id: 2040
+          routing_policy_id: "{{ fip_rp.id.routing_policy }}"
+          junos_evpn_irb_mode: "asymmetric"
+        auth_token: "{{ auth.token }}"
+      register: fip_sz
+
+    - name: Create virtual network for VN lookup test
+      juniper.apstra.virtual_network:
+        id: "{{ bp.id }}"
+        body:
+          label: "fip-test-vn"
+          vn_type: "vxlan"
+          vn_id: 16777100
+          vlan_id: 2041
+          security_zone_id: "{{ fip_sz.id.security_zone }}"
+        auth_token: "{{ auth.token }}"
+      register: fip_vn
+
+    - name: Show created virtual network
+      ansible.builtin.debug:
+        var: fip_vn
+
+    # ── Create a floating IP associated with the VN ───────────────────
+    - name: Create floating IP associated with virtual network
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          ipv4_addr: "10.99.3.1/24"
+          virtual_network_id: "{{ fip_vn.id.virtual_network }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_vn_create
+
+    - name: Show VN-associated floating IP
+      ansible.builtin.debug:
+        var: fip_vn_create
+
+    - name: Save VN-associated floating IP node ID
+      ansible.builtin.set_fact:
+        fip_vn_node_id: "{{ fip_vn_create.id.floating_ip }}"
+
+    # ── Update by VN name (virtual_network lookup) ────────────────────
+    - name: Update floating IP using VN name lookup
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          virtual_network: "fip-test-vn"   # VN name — used to FIND the floating IP
+          label: "fip-test-vn-vip"         # new label to set via PATCH
+          description: "Named via VN lookup"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_vn_lookup
+
+    - name: Show VN-lookup update result
+      ansible.builtin.debug:
+        var: fip_vn_lookup
+
+    - name: Verify VN lookup found the correct floating IP
+      ansible.builtin.assert:
+        that:
+          - fip_vn_lookup.changed == true
+          - fip_vn_lookup.id.floating_ip == fip_vn_node_id
+          - fip_vn_lookup.floating_ip.label == "fip-test-vn-vip"
+
+    # ── Idempotent VN lookup (no change) ─────────────────────────────
+    - name: VN lookup update with same values (no change expected)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          virtual_network: "fip-test-vn"
+          label: "fip-test-vn-vip"
+          description: "Named via VN lookup"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_vn_nochange
+
+    - name: Show VN lookup no-change result
+      ansible.builtin.debug:
+        var: fip_vn_nochange
+
+    - name: Verify no change on second VN lookup
+      ansible.builtin.assert:
+        that:
+          - fip_vn_nochange.changed == false
+
+    # ── Delete VN-associated floating IP ─────────────────────────────
+    - name: Delete VN-associated floating IP by node ID
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+          floating_ip: "{{ fip_vn_node_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
     # ── Blueprint name resolution (by name not UUID) ──────────────────
     - name: List floating IPs using blueprint name (not UUID)
       juniper.apstra.floating_ip:

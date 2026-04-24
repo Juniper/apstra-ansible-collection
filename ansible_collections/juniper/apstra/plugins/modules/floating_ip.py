@@ -16,6 +16,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     apstra_client_module_args,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_virtual_network_id,
+)
 
 DOCUMENTATION = """
 ---
@@ -49,6 +52,9 @@ options:
       - C(description) (str) — free-text description.
       - C(ipv4_addr) (str) — IPv4 address in CIDR format (e.g. C(10.2.22.201/24)).
       - C(ipv6_addr) (str) — IPv6 address in CIDR format.
+      - C(virtual_network) (str) — Virtual network name or UUID. Used as a lookup
+        key to find the floating IP that belongs to that VN. Particularly useful for
+        auto-created floating IPs which have no label.
       - C(virtual_network_id) (str) — UUID of the associated virtual network (create only).
       - C(vn_endpoints) (list) — list of VN endpoint IDs (create only).
       - C(generic_system_ids) (list) — list of generic system IDs (create only).
@@ -123,6 +129,18 @@ EXAMPLES = """
     body:
       label: "Tenant5-VIP"          # used to FIND the floating IP
       ipv4_addr: "10.2.22.210/24"   # new address to set via PATCH
+    state: present
+
+# PATCH by VN name — finds the floating IP that belongs to a virtual network.
+# Auto-created floating IPs have no label; use virtual_network to locate them.
+- name: Name an auto-created floating IP by its VN (PATCH)
+  juniper.apstra.floating_ip:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      virtual_network: "Tenant2-VLAN22"   # VN name or UUID — used to FIND the floating IP
+      label: "Tenant2-VIP"                # new label to set via PATCH
+      description: "Auto-created VIP for Tenant2"
     state: present
 
 # PATCH by IPv4 address — useful when label is unknown
@@ -214,6 +232,14 @@ def _find_by_ipv4(all_fips, ipv4_addr):
     return None
 
 
+def _find_by_vn_id(all_fips, vn_id):
+    """Return the first floating IP dict whose virtual_network_id matches."""
+    for fip in all_fips:
+        if fip.get("virtual_network_id") == vn_id:
+            return fip
+    return None
+
+
 def _needs_update(current, desired):
     """Return dict of fields that differ between current and desired."""
     changes = {}
@@ -282,12 +308,18 @@ def main():
             all_fips = _list_all(bp)
             label = body.get("label")
             ipv4_addr = body.get("ipv4_addr")
+            virtual_network = body.pop("virtual_network", None)
 
-            # Try label first, then ipv4_addr as fallback lookup key
+            # Try label first, then ipv4_addr, then virtual_network as lookup keys
             if label:
                 current_fip = _find_by_label(all_fips, label)
             if current_fip is None and ipv4_addr:
                 current_fip = _find_by_ipv4(all_fips, ipv4_addr)
+            if current_fip is None and virtual_network:
+                vn_id = resolve_virtual_network_id(
+                    client_factory, blueprint_id, virtual_network
+                )
+                current_fip = _find_by_vn_id(all_fips, vn_id)
 
             if current_fip is None:
                 if state == "absent":
