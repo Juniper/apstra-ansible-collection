@@ -9,6 +9,7 @@ from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
 import traceback
+import uuid
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
@@ -21,13 +22,13 @@ DOCUMENTATION = """
 module: floating_ip
 short_description: Manage Floating IPs in an Apstra blueprint
 description:
-  - Update, query, or delete Floating IP addresses within an Apstra blueprint.
+  - Create, update, query, or delete Floating IP addresses within an Apstra blueprint.
   - Floating IPs (VIP endpoints) are typically auto-created by Apstra when
-    Connectivity Templates assign them.  This module allows renaming them
-    (C(label)), setting a C(description), and changing the IP address
-    (C(ipv4_addr) / C(ipv6_addr)).
+    Connectivity Templates assign them.  This module also allows creating them
+    manually, renaming them (C(label)), setting a C(description), and changing
+    the IP address (C(ipv4_addr) / C(ipv6_addr)).
   - Use C(state=queried) to list all floating IPs or retrieve a single one.
-  - Use C(state=present) to update an existing floating IP.
+  - Use C(state=present) to create or update a floating IP (idempotent).
   - Use C(state=absent) to delete a floating IP.
 version_added: "0.1.0"
 author: "Juniper Networks"
@@ -38,6 +39,7 @@ options:
       - C(blueprint) (str, required) — blueprint name or UUID.
       - C(floating_ip) (str, optional) — floating IP node UUID.
         If omitted, the module searches by C(body.label) or C(body.ipv4_addr).
+        For creation, a UUID is auto-generated when no existing floating IP is found.
     type: dict
     required: true
   body:
@@ -47,12 +49,15 @@ options:
       - C(description) (str) — free-text description.
       - C(ipv4_addr) (str) — IPv4 address in CIDR format (e.g. C(10.2.22.201/24)).
       - C(ipv6_addr) (str) — IPv6 address in CIDR format.
+      - C(virtual_network_id) (str) — UUID of the associated virtual network (create only).
+      - C(vn_endpoints) (list) — list of VN endpoint IDs (create only).
+      - C(generic_system_ids) (list) — list of generic system IDs (create only).
       - When C(state=present), only supplied fields are changed.
     type: dict
     required: false
   state:
     description:
-      - C(present) — update the floating IP (idempotent).
+      - C(present) — create or update the floating IP (idempotent).
       - C(absent) — delete the floating IP.
       - C(queried) — list all floating IPs or retrieve a single one (read-only).
     type: str
@@ -247,6 +252,7 @@ def main():
 
         # ── Resolve node_id from body if not provided ────────────────────
         current_fip = None
+        create_mode = False
         if not node_id:
             all_fips = _list_all(bp)
             label = body.get("label")
@@ -259,13 +265,17 @@ def main():
                 current_fip = _find_by_ipv4(all_fips, ipv4_addr)
 
             if current_fip is None:
-                lookup = repr(label) if label else repr(ipv4_addr)
-                raise ValueError(
-                    f"No floating IP found matching {lookup} "
-                    f"in blueprint '{blueprint_id}'. "
-                    "Provide id.floating_ip (node UUID) or body.label / body.ipv4_addr."
-                )
-            node_id = current_fip["id"]
+                if state == "absent":
+                    # Nothing to delete
+                    result["changed"] = False
+                    result["msg"] = "floating_ip not found, nothing to delete"
+                    module.exit_json(**result)
+                    return
+                # state=present + not found → create
+                create_mode = True
+                node_id = str(uuid.uuid4())
+            else:
+                node_id = current_fip["id"]
         else:
             # Fetch current state by node_id from experience/web (includes id + immutable)
             all_fips = _list_all(bp)
@@ -274,9 +284,14 @@ def main():
                     current_fip = fip
                     break
             if current_fip is None:
-                raise ValueError(
-                    f"Floating IP node '{node_id}' not found in blueprint '{blueprint_id}'"
-                )
+                if state == "absent":
+                    result["changed"] = False
+                    result["msg"] = (
+                        f"floating_ip '{node_id}' not found, nothing to delete"
+                    )
+                    module.exit_json(**result)
+                    return
+                create_mode = True
 
         result["id"] = {"blueprint": blueprint_id, "floating_ip": node_id}
 
@@ -288,8 +303,32 @@ def main():
             module.exit_json(**result)
             return
 
-        # ── state=present ────────────────────────────────────────────────
-        # Build the patch payload — only fields explicitly in body
+        # ── state=present / create ────────────────────────────────────────
+        if create_mode:
+            create_fields = (
+                "label",
+                "description",
+                "virtual_network_id",
+                "vn_endpoints",
+                "ipv4_addr",
+                "ipv6_addr",
+                "generic_system_ids",
+            )
+            create_payload = {"id": node_id, "immutable": False}
+            for field in create_fields:
+                if field in body:
+                    create_payload[field] = body[field]
+            create_result = bp.floating_ips.create(create_payload)
+            # Fetch the created floating IP
+            created = bp.floating_ips[node_id].get() or {}
+            created["id"] = node_id
+            result["changed"] = True
+            result["floating_ip"] = created
+            result["msg"] = f"floating_ip '{node_id}' created"
+            module.exit_json(**result)
+            return
+
+        # ── state=present / update ────────────────────────────────────────
         patchable = {}
         for field in ("label", "description", "ipv4_addr", "ipv6_addr"):
             if field in body:
@@ -319,9 +358,7 @@ def main():
         # Merge id back in (get() response doesn't include it)
         updated["id"] = node_id
         result["floating_ip"] = updated
-        result["msg"] = (
-            f"floating_ip '{node_id}' updated: {', '.join(changes.keys())}"
-        )
+        result["msg"] = f"floating_ip '{node_id}' updated: {', '.join(changes.keys())}"
 
     except Exception as e:
         tb = traceback.format_exc()

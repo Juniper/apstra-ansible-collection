@@ -152,8 +152,8 @@ install: build
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
-	test-virtual_infra_manager
-
+        test-virtual_infra_manager \
+        test-floating_ip
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -253,6 +253,9 @@ test-cabling_map: install
 test-virtual_infra_manager: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/virtual_infra_manager.yml
 
+test-floating_ip: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/floating_ip.yml
+
 test-interconnect_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml
 
@@ -339,7 +342,7 @@ delete-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager
+test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager test-floating_ip
 
 # Integration Tests
 .PHONY: test-integration-property_set
