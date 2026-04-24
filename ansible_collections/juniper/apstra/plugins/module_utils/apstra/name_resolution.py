@@ -1338,7 +1338,7 @@ def resolve_vim_agent_and_system_id(client_factory, vim_ip):
     for vim in all_vims:
         if vim.get("management_ip") == vim_ip:
             agent_id = vim.get("id")
-            system_id = vim.get("system_id") or vim.get("vcenter_info", {}).get("system_id", "")
+            system_id = vim.get("system_id") or ""
             if not system_id:
                 raise ValueError(
                     f"VIM with management_ip '{vim_ip}' found (id={agent_id}) "
