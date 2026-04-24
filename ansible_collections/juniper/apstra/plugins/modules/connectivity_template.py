@@ -931,7 +931,7 @@ def main():
                 )
             else:
                 ep_client.blueprints[blueprint_id].endpoint_policies[ct_id].patch(
-                    {"label": new_name}
+                    {"label": new_name, "attributes": {}}
                 )
                 result["changed"] = True
                 result["ct_id"] = ct_id
