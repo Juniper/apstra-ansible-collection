@@ -88,36 +88,61 @@ EXAMPLES = """
     state: queried
   register: fip
 
-# Give a name to an auto-created floating IP (found by IP address)
-- name: Name the floating IP 10.2.22.201/24
+# Create a new floating IP (POST)
+- name: Create a floating IP
   juniper.apstra.floating_ip:
     id:
       blueprint: "my-blueprint"
     body:
-      ipv4_addr: "10.2.22.201/24"   # used to find the floating IP
       label: "Tenant5-VIP"
       description: "Primary VIP for Tenant5"
+      ipv4_addr: "10.2.22.201/24"
+    state: present
+  register: fip_create
+
+# --- PATCH (update) examples ---
+# The module detects whether the floating IP already exists.
+# If it does, it issues a PATCH with only the changed fields.
+
+# PATCH by node ID — most explicit; supply id.floating_ip directly
+- name: Update floating IP label by node ID (PATCH)
+  juniper.apstra.floating_ip:
+    id:
+      blueprint: "my-blueprint"
+      floating_ip: "{{ fip_node_id }}"
+    body:
+      label: "Tenant5-VIP-renamed"
+      description: "Updated description"
     state: present
 
-# Change IP address of a named floating IP
-- name: Update floating IP address
+# PATCH by label — module looks up the node ID first, then PATCHes
+- name: Update floating IP address by label lookup (PATCH)
   juniper.apstra.floating_ip:
     id:
       blueprint: "my-blueprint"
     body:
-      label: "Tenant5-VIP"          # used to find the floating IP
-      ipv4_addr: "10.2.22.210/24"   # new address
+      label: "Tenant5-VIP"          # used to FIND the floating IP
+      ipv4_addr: "10.2.22.210/24"   # new address to set via PATCH
     state: present
 
-# Update by node ID directly
-- name: Update floating IP by node ID
+# PATCH by IPv4 address — useful when label is unknown
+- name: Update floating IP description by ipv4_addr lookup (PATCH)
+  juniper.apstra.floating_ip:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      ipv4_addr: "10.2.22.201/24"   # used to FIND the floating IP
+      description: "Found by IP"    # new description to set via PATCH
+    state: present
+
+# Idempotent update — no change if values already match
+- name: Ensure floating IP has expected label (idempotent PATCH)
   juniper.apstra.floating_ip:
     id:
       blueprint: "my-blueprint"
       floating_ip: "{{ fip_node_id }}"
     body:
       label: "Tenant5-VIP"
-      ipv4_addr: "10.2.22.201/24"
     state: present
 
 # Delete a floating IP by label
