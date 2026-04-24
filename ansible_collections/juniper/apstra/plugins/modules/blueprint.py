@@ -120,6 +120,13 @@ options:
     required: false
     type: int
     default: 30
+  commit_description:
+    description:
+      - Optional description for the commit, visible in the Apstra
+        revision history (same as the C(Description) field in the Web UI).
+      - Only used when C(state=committed).
+    required: false
+    type: str
   state:
     description:
       - The desired state of the blueprint.
@@ -305,6 +312,15 @@ EXAMPLES = """
     id:
       blueprint: "{{ bp.id.blueprint }}"
     lock_state: ignore
+    state: committed
+
+# Commit with a description (visible in revision history)
+- name: Deploy blueprint with description
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ bp.id.blueprint }}"
+    lock_state: ignore
+    commit_description: "Push spine/leaf IP addressing changes"
     state: committed
 
 # Delete a blueprint
@@ -816,6 +832,7 @@ def main():
         commit_timeout=dict(
             type="int", required=False, default=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT
         ),
+        commit_description=dict(type="str", required=False),
         unlock=dict(type="bool", required=False, default=False),
         state=dict(
             type="str",
@@ -974,7 +991,10 @@ def main():
 
         if state == "committed":
             # Commit the blueprint
-            committed = client_factory.commit_blueprint(blueprint_id, commit_timeout)
+            commit_description = module.params.get("commit_description")
+            committed = client_factory.commit_blueprint(
+                blueprint_id, commit_timeout, description=commit_description
+            )
             result["changed"] = committed
             result["msg"] = "blueprint committed successfully"
 
