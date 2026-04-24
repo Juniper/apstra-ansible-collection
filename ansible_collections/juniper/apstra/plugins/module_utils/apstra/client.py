@@ -942,7 +942,7 @@ class ApstraClientFactory:
         tag = tags_client.blueprints[id].tags.get(label=_blueprint_lock_tag_name(id))
         return tag is not None
 
-    def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT):
+    def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT, description=None):
         """
         Commit the blueprint with the given ID.
 
@@ -955,6 +955,7 @@ class ApstraClientFactory:
         meaningful indicator of a clean blueprint on every version.
 
         :param id: The ID of the blueprint to commit.
+        :param description: Optional commit description shown in revision history.
         """
         import time
 
@@ -991,8 +992,11 @@ class ApstraClientFactory:
                     raise RuntimeError("Blueprint version is still 0")
 
                 # ---- Phase 2: deploy ----
+                deploy_payload = {"version": bp_version}
+                if description:
+                    deploy_payload["description"] = description
                 deploy_response = blueprint.deploy(
-                    {"version": bp_version}, params={"async": "full"}
+                    deploy_payload, params={"async": "full"}
                 )
                 task_id = deploy_response["task_id"]
 
