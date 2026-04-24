@@ -277,8 +277,8 @@ def main():
             # Pop tags from body and merge with top-level tags parameter
             # Tags must go through update_tags(), not the create/patch API
             body_tags = body.pop("tags", None)
-            if body_tags:
-                if tags:
+            if body_tags is not None:
+                if tags is not None:
                     # Merge: top-level tags take precedence, add any from body
                     tags = list(set(tags) | set(body_tags))
                 else:
@@ -381,8 +381,8 @@ def main():
                 result["response"] = object
                 result["msg"] = f"{leaf_object_type} created successfully"
 
-            # Apply tags if specified
-            if tags:
+            # Apply tags if specified (tags=[] removes all tags)
+            if tags is not None:
                 result["tag_response"] = client_factory.update_tags(
                     id, leaf_object_type, tags
                 )
