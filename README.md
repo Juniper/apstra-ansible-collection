@@ -390,7 +390,7 @@ Here's an example of how the Apstra SDK can be used to perform CRUD operations.
 
 ### Locking the Blueprint
 
-The Terrform plugin implementation provides a model for how we will lock the blueprint during plays. See [Blueprint Mutex Documentation](https://github.com/Juniper/terraform-provider-apstra/blob/main/kb/blueprint_mutex.md)
+The Terraform plugin implementation provides a model for how we will lock the blueprint during plays. See [Blueprint Mutex Documentation](https://github.com/Juniper/terraform-provider-apstra/blob/main/kb/blueprint_mutex.md)
 
 ## License
 
