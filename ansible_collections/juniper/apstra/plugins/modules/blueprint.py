@@ -29,6 +29,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query imp
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
     get_node,
+    list_nodes,
     patch_node,
     node_needs_update,
     assign_nodes_by_label,
@@ -249,6 +250,15 @@ options:
       - Only used when C(state=node_updated).
     type: str
     required: false
+  current_label:
+    description:
+      - Current label (display name) of the node to update.
+      - Used as an alternative to C(node_id) — the module resolves the label
+        to a node UUID automatically.
+      - Mutually exclusive with C(node_id).
+      - Only used when C(state=node_updated).
+    type: str
+    required: false
   node_label:
     description:
       - Label to set on the node.
@@ -389,6 +399,16 @@ EXAMPLES = """
     node_id: "{{ srx_intf_id }}"
     node_properties:
       if_name: ge-0/0/0
+    state: node_updated
+
+# Update device name and hostname by current label (no node_id needed)
+- name: Rename leaf1 and update its hostname
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    current_label: "leaf1"
+    node_label: "leaf1-new"
+    hostname: "leaf1-new.example.com"
     state: node_updated
 """
 
@@ -705,10 +725,25 @@ def _handle_node_updated(module, client_factory, blueprint_id):
         result["msg"] = f"{n} node(s) updated, {u} already up to date"
         return result
 
+    # ── Resolve current_label → node_id ────────────────────────────────────
+    current_label = params.get("current_label")
+    if current_label and not node_id:
+        all_nodes = list_nodes(client_factory, blueprint_id)
+        matched_id = next(
+            (nid for nid, nprops in all_nodes.items()
+             if nprops.get("label") == current_label),
+            None,
+        )
+        if matched_id is None:
+            module.fail_json(
+                msg=f"No node with label '{current_label}' found in blueprint '{blueprint_id}'"
+            )
+        node_id = matched_id
+
     # ── Single-node mode (node_id) ────────────────────────────────────────
     if not node_id:
         module.fail_json(
-            msg="Either node_id or assignment is required when state=node_updated"
+            msg="Either node_id, current_label, or assignment is required when state=node_updated"
         )
 
     # Read current node state
@@ -817,6 +852,7 @@ def main():
             required=False,
             choices=["deploy", "undeploy", "drain", "ready"],
         ),
+        current_label=dict(type="str", required=False),
         hostname=dict(type="str", required=False),
         node_label=dict(type="str", required=False),
         node_properties=dict(type="dict", required=False),
@@ -833,6 +869,7 @@ def main():
         mutually_exclusive=[
             ("query", "query_type"),
             ("node_id", "assignment"),
+            ("node_id", "current_label"),
         ],
     )
 

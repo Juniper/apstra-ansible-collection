@@ -1304,3 +1304,51 @@ def resolve_virtual_infra_manager_id(client_factory, vim_ref):
     raise ValueError(
         f"Virtual Infra Manager '{vim_ref}' not found. Available: {available}"
     )
+
+
+def resolve_vim_agent_and_system_id(client_factory, vim_ip):
+    """Look up a VIM by management IP and return (agent_id, system_id).
+
+    Searches ``GET /virtual-infra-managers`` for a VIM whose
+    ``management_ip`` matches *vim_ip*.  Returns the VIM's ``id``
+    (used as ``agent_id`` in the blueprint assignment) and its
+    ``system_id`` (populated after the VIM connects to vCenter).
+
+    Raises ``ValueError`` when:
+    - No VIM has the given management IP.
+    - The VIM is found but has no ``system_id`` yet (i.e. it has not yet
+      connected to vCenter — retry after the VIM reaches
+      ``connection_state: connected``).
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param vim_ip:         Management IP of the VIM (e.g. ``"10.0.0.100"``).
+    :returns:              Tuple ``(agent_id, system_id)`` — both strings.
+    """
+    base = client_factory.get_base_client()
+    result = base.virtual_infra_managers.list()
+    if result is None:
+        all_vims = []
+    elif isinstance(result, list):
+        all_vims = result
+    elif isinstance(result, dict) and "items" in result:
+        all_vims = result["items"]
+    else:
+        all_vims = []
+
+    for vim in all_vims:
+        if vim.get("management_ip") == vim_ip:
+            agent_id = vim.get("id")
+            system_id = vim.get("system_id") or ""
+            if not system_id:
+                raise ValueError(
+                    f"VIM with management_ip '{vim_ip}' found (id={agent_id}) "
+                    "but has no system_id yet — the VIM may not have connected "
+                    "to vCenter. Check connection_state and retry."
+                )
+            return agent_id, system_id
+
+    available = [vim.get("management_ip", "") for vim in all_vims if vim.get("management_ip")]
+    raise ValueError(
+        f"No VIM found with management_ip '{vim_ip}'. "
+        f"Available management IPs: {available}"
+    )

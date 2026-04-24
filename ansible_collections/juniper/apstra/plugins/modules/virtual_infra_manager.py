@@ -17,6 +17,8 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_virtual_infra_manager_id,
+    resolve_vim_agent_and_system_id,
+    resolve_security_zone_id,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter import (
     list_vim_vcenters,
@@ -131,6 +133,17 @@ options:
         top-level C(system_id) field after the VIM connects to vCenter.
         Both C(agent_id) and C(system_id) are required when creating a
         blueprint virtual_infra entry.
+      - B(Shorthand) — instead of specifying C(agent_id) and C(system_id)
+        manually, provide C(vim_ip) (the VIM's management IP address) and
+        the module will look up the matching VIM automatically, resolving
+        both C(agent_id) and C(system_id) from the global VIM list.
+        Requires the VIM to be already connected to vCenter (so that
+        C(system_id) is populated).
+      - B(VLAN Remediation Policy) — when creating or updating a blueprint
+        virtual_infra node, include C(vlan_remediation_policy) (str) in
+        the body to set the VLAN remediation behaviour.  Accepted values
+        depend on the Apstra version; common values are C(drop) (default)
+        and C(remediate).  This field is passed through to the API as-is.
     type: dict
     required: false
   scope:
@@ -338,7 +351,8 @@ EXAMPLES = """
 
 # ── Blueprint scope: assign VIM node to a blueprint ──────────────
 
-- name: Add virtual infra node to blueprint
+# Option A — explicit agent_id + system_id
+- name: Add virtual infra node to blueprint (explicit IDs)
   # agent_id = VIM UUID (id.virtual_infra_manager from the global VIM create)
   # system_id = VIM's own system_id field (returned after VIM connects to vCenter)
   # Both are REQUIRED by the Apstra API when creating a blueprint virtual_infra entry.
@@ -349,6 +363,30 @@ EXAMPLES = """
       infra_type: "vcenter"
       agent_id: "{{ vim_result.id.virtual_infra_manager }}"
       system_id: "{{ vim_result.virtual_infra_manager.system_id }}"
+    state: present
+  register: bp_vim
+
+# Option B — shorthand via vim_ip (auto-resolves agent_id + system_id)
+- name: Add virtual infra node to blueprint (by VIM IP — simpler)
+  juniper.apstra.virtual_infra_manager:
+    id:
+      blueprint: "prod-dc1"
+    body:
+      infra_type: "vcenter"
+      vim_ip: "10.0.0.100"   # management IP of the VIM — agent_id/system_id resolved automatically
+    state: present
+  register: bp_vim
+
+# ── Blueprint scope: assign VIM with VLAN Remediation Policy ──────
+
+- name: Add VIM to blueprint with VLAN remediation policy
+  juniper.apstra.virtual_infra_manager:
+    id:
+      blueprint: "prod-dc1"
+    body:
+      infra_type: "vcenter"
+      vim_ip: "10.0.0.100"
+      vlan_remediation_policy: "remediate"   # or "drop" (default)
     state: present
   register: bp_vim
 
@@ -475,6 +513,12 @@ msg:
   description: Human-readable status message.
   type: str
   returned: always
+resolved_from_vim_ip:
+  description: >-
+    When C(body.vim_ip) is used, contains the resolved C(vim_ip),
+    C(agent_id), and C(system_id) that were substituted into the request.
+  type: dict
+  returned: when body.vim_ip is provided (blueprint scope)
 """
 
 
@@ -691,6 +735,26 @@ def _handle_blueprint_vim(module, client_factory, id, body, state, result):
     """Handle blueprint-level VIM CRUD at /api/blueprints/{id}/virtual_infra."""
     object_type = "blueprints.virtual_infra"
     leaf_object_type = singular_leaf_object_type(object_type)  # "virtual_infra"
+
+    # ── vim_ip shorthand: resolve management IP → agent_id + system_id ──
+    if body and body.get("vim_ip"):
+        vim_ip = body.pop("vim_ip")
+        agent_id, system_id = resolve_vim_agent_and_system_id(client_factory, vim_ip)
+        body.setdefault("agent_id", agent_id)
+        body.setdefault("system_id", system_id)
+        result["resolved_from_vim_ip"] = {
+            "vim_ip": vim_ip,
+            "agent_id": agent_id,
+            "system_id": system_id,
+        }
+
+    # ── vnet_remediation_policy: resolve security_zone_id name → UUID ──
+    vrp = body.get("vnet_remediation_policy") if body else None
+    if vrp and vrp.get("security_zone_id"):
+        blueprint_id_for_sz = id.get("blueprint")
+        vrp["security_zone_id"] = resolve_security_zone_id(
+            client_factory, blueprint_id_for_sz, vrp["security_zone_id"]
+        )
 
     object_id = id.get(leaf_object_type)
     collection_id = {k: v for k, v in id.items() if k != leaf_object_type}

@@ -173,6 +173,15 @@ options:
             C(dynamic_bgp_peerings), C(routing_zone_constraints)."
         required: false
         type: dict
+      new_name:
+        description:
+          - Rename the Connectivity Template identified by C(body.name)
+            (or C(id.ct_id)) to this new name.
+          - When provided, only the rename is performed — C(primitives)
+            and C(type) are B(not) required.
+          - The CT must already exist.  Raises an error if not found.
+        required: false
+        type: str
   state:
     description:
       - Desired state of the Connectivity Template.
@@ -183,6 +192,30 @@ options:
 """
 
 EXAMPLES = """
+# ── Rename a Connectivity Template ───────────────────────────────────────────
+# Works for auto-created CTs ("Untagged VxLAN '<VN_NAME>'" etc.) and any
+# user-created CT.  Only body.name (current name) and body.new_name are needed.
+# primitives and type are NOT required for a rename-only operation.
+
+- name: Rename auto-created CT to a friendly name
+  juniper.apstra.connectivity_template:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "Untagged VxLAN 'my-vnet'"
+      new_name: "VN-CT"
+    state: present
+
+# Can also use ct_id to find the CT instead of its current name:
+- name: Rename CT by ID
+  juniper.apstra.connectivity_template:
+    id:
+      blueprint: "{{ blueprint_id }}"
+      ct_id: "{{ ct_id }}"
+    body:
+      new_name: "VN-CT"
+    state: present
+
 # ── Interface CT type examples ────────────────────────────────────────
 
 # Interface CT: IP Link + BGP Peering + Routing Policy (full nesting)
@@ -865,6 +898,7 @@ def main():
         id_param["blueprint"] = blueprint_id
         ct_id = id_param.get("ct_id")
         name = body.get("name")
+        new_name = body.get("new_name")
         ct_type = body.get("type")
         description = body.get("description", "") or ""
         tags = body.get("tags") or []
@@ -880,6 +914,33 @@ def main():
                 current_parsed = None
         elif name:
             ct_id, current_parsed = _find_ct_by_name(ep_client, blueprint_id, name)
+
+        # ── RENAME path (new_name present, no primitives needed) ─────
+        if new_name:
+            if not ct_id:
+                raise ValueError(
+                    f"Cannot rename: Connectivity Template "
+                    f"{repr(name) if name else '(ct_id not provided)'} not found."
+                )
+            current_label = (current_parsed or {}).get("name", "")
+            if current_label == new_name:
+                result["changed"] = False
+                result["ct_id"] = ct_id
+                result["msg"] = (
+                    f"connectivity_template already named '{new_name}', no change"
+                )
+            else:
+                ep_client.blueprints[blueprint_id].endpoint_policies[ct_id].patch(
+                    {"label": new_name, "attributes": {}}
+                )
+                result["changed"] = True
+                result["ct_id"] = ct_id
+                result["msg"] = (
+                    f"connectivity_template renamed "
+                    f"from '{current_label}' to '{new_name}'"
+                )
+            module.exit_json(**result)
+            return
 
         # ── STATE: present ────────────────────────────────────────────
         if state == "present":
