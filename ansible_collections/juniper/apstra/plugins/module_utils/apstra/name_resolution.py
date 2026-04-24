@@ -296,22 +296,32 @@ def _run_qe(client_factory, blueprint_id, query_str):
     return run_qe_query(client_factory, blueprint_id, query_str)
 
 
-def resolve_security_zone_id(client_factory, blueprint_id, sz_ref):
-    """Resolve a security-zone reference (UUID or label) to its node ID.
+def resolve_security_zone_id(
+    client_factory, blueprint_id, sz_ref, raise_on_missing=True
+):
+    """Resolve a security-zone reference (UUID, label, or vrf_name) to its node ID.
+
+    Resolution order: exact ID → exact label → case-insensitive label →
+    exact vrf_name → case-insensitive vrf_name.
 
     :param client_factory: An ``ApstraClientFactory`` instance.
     :param blueprint_id: The blueprint UUID.
-    :param sz_ref: The security-zone UUID or label.
-    :return: The resolved security-zone node ID string.
+    :param sz_ref: The security-zone UUID, label, or vrf_name.
+    :param raise_on_missing: If ``True`` (default), raise ``ValueError``
+        when the security zone is not found.  If ``False``, return ``None``.
+    :return: The resolved security-zone node ID string, or ``None`` when
+        *raise_on_missing* is ``False`` and no match is found.
     """
     if not sz_ref or _is_uuid(sz_ref):
         return sz_ref
 
     results = _run_qe(client_factory, blueprint_id, "node('security_zone', name='sz')")
     if not results:
-        raise ValueError(
-            f"Security zone '{sz_ref}' not found — no security zones exist in blueprint."
-        )
+        if raise_on_missing:
+            raise ValueError(
+                f"Security zone '{sz_ref}' not found — no security zones exist in blueprint."
+            )
+        return None
 
     # Exact ID match (Apstra graph node IDs are short strings, not UUIDs)
     for r in results:
@@ -344,10 +354,13 @@ def resolve_security_zone_id(client_factory, blueprint_id, sz_ref):
         if (sz.get("vrf_name") or "").lower() == ref_lower:
             return sz["id"]
 
-    available = [r.get("sz", {}).get("label", "") for r in results]
-    raise ValueError(
-        f"Security zone '{sz_ref}' not found in blueprint. " f"Available: {available}"
-    )
+    if raise_on_missing:
+        available = [r.get("sz", {}).get("label", "") for r in results]
+        raise ValueError(
+            f"Security zone '{sz_ref}' not found in blueprint. "
+            f"Available: {available}"
+        )
+    return None
 
 
 def resolve_resource_group_name(client_factory, blueprint_id, group_name):
@@ -705,6 +718,167 @@ def resolve_application_point_ids(client_factory, blueprint_id, ap_refs):
     return [
         resolve_interface_node_id(client_factory, blueprint_id, ref) for ref in ap_refs
     ]
+
+
+def resolve_graph_node_id(client_factory, blueprint_id, label_node_id):
+    """Resolve a label-based node reference to its graph node UUID.
+
+    Accepts colon-separated shorthand ``"system_label:if_name"`` and
+    resolves it via a QE graph query.
+
+    Supported formats:
+
+    * ``"system_label:if_name"`` — physical interface
+      (e.g. ``"leaf1:xe-0/0/7"``).
+    * ``"system_label:if_name.subid"`` — subinterface
+      (e.g. ``"leaf1:xe-0/0/7.100"``).  Resolved via
+      ``system → hosted_interfaces → interface(if_name=parent) →
+      composed_of → interface(if_type=subinterface, if_name=full)``.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param label_node_id: A ``"system_label:if_name"`` string.
+    :return: The resolved graph node UUID string.
+    :raises ValueError: If the reference cannot be resolved.
+    """
+    if not label_node_id or ":" not in str(label_node_id):
+        raise ValueError(
+            f"Label-based node_id must be 'system_label:if_name', "
+            f"got '{label_node_id}'"
+        )
+
+    system_label, if_name = str(label_node_id).split(":", 1)
+
+    if "." in if_name:
+        # Subinterface: system → hosted_interfaces → phys → composed_of → subif
+        query = (
+            f"node('system', label='{system_label}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', name='phys')"
+            f".out('composed_of')"
+            f".node('interface', if_type='subinterface', "
+            f"if_name='{if_name}', name='subif')"
+        )
+        items = _run_qe(client_factory, blueprint_id, query)
+        if not items:
+            raise ValueError(
+                f"Subinterface '{if_name}' not found on system "
+                f"'{system_label}' in blueprint '{blueprint_id}'"
+            )
+        return items[0]["subif"]["id"]
+    else:
+        # Physical interface
+        query = (
+            f"node('system', label='{system_label}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_name='{if_name}', name='intf')"
+        )
+        items = _run_qe(client_factory, blueprint_id, query)
+        if not items:
+            raise ValueError(
+                f"Interface '{if_name}' not found on system "
+                f"'{system_label}' in blueprint '{blueprint_id}'"
+            )
+        return items[0]["intf"]["id"]
+
+
+# ──────────────────────────────────────────────────────────────────
+#  VRF interface pair resolution
+# ──────────────────────────────────────────────────────────────────
+
+
+def resolve_vrf_interface_pair(client_factory, blueprint_id, sz_id, interface_ref):
+    """Resolve a VRF interface reference to its endpoint pair node IDs.
+
+    Given a physical or subinterface name, finds the matching
+    subinterface within the specified security zone and (optionally)
+    the link partner on the other side.
+
+    Supported ``interface_ref`` formats:
+
+    * ``"xe-0/0/3"`` — physical interface name (must be unique in VRF)
+    * ``"xe-0/0/3.100"`` — subinterface name
+    * ``"leaf1:xe-0/0/3"`` — with system label for disambiguation
+
+    Graph traversal::
+
+        physical(if_name) → composed_of → subinterface(ep1)
+        ← sz_instance ← security_zone(sz_id)
+
+    Link partner::
+
+        ep1 → out('link') → link → in_('link') → ep2
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param sz_id: The security-zone node ID.
+    :param interface_ref: Interface reference string.
+    :return: Tuple ``(ep1_id, ep2_id)`` where *ep2_id* may be ``None``
+             if no link partner is found.
+    :raises ValueError: If the interface is not found or ambiguous.
+    """
+    system_label = None
+    if_name = interface_ref
+    if ":" in interface_ref:
+        system_label, if_name = interface_ref.split(":", 1)
+
+    is_sub = "." in if_name
+    phys_name = if_name.rsplit(".", 1)[0] if is_sub else if_name
+
+    # ── Build query: [system→] physical → composed_of → subif → VRF
+    if system_label:
+        q = (
+            f"node('system', label='{system_label}', name='sys')"
+            f".out('hosted_interfaces')"
+            f".node('interface', if_name='{phys_name}', name='phys')"
+        )
+    else:
+        q = f"node('interface', if_name='{phys_name}', name='phys')"
+
+    if is_sub:
+        q += (
+            f".out('composed_of')"
+            f".node('interface', if_name='{if_name}', name='ep1')"
+        )
+    else:
+        q += f".out('composed_of')" f".node('interface', name='ep1')"
+
+    q += (
+        f".in_().node('sz_instance', name='szi')"
+        f".in_().node('security_zone', id='{sz_id}', name='sz')"
+    )
+
+    ep1_results = _run_qe(client_factory, blueprint_id, q)
+    if not ep1_results:
+        raise ValueError(
+            f"Interface '{interface_ref}' not found in security zone "
+            f"'{sz_id}' in blueprint '{blueprint_id}'"
+        )
+    if len(ep1_results) > 1:
+        raise ValueError(
+            f"Ambiguous: '{if_name}' matches {len(ep1_results)} "
+            f"interfaces in the VRF. Use 'system_label:{if_name}' "
+            f"to disambiguate."
+        )
+
+    ep1_id = ep1_results[0]["ep1"]["id"]
+
+    # ── Find link partner (ep2) ──────────────────────────────────
+    ep2_q = (
+        f"node('interface', id='{ep1_id}', name='ep1')"
+        f".out('link').node('link', name='lnk')"
+        f".in_('link').node('interface', name='ep2')"
+    )
+    ep2_results = _run_qe(client_factory, blueprint_id, ep2_q)
+
+    ep2_id = None
+    if ep2_results:
+        for r in ep2_results:
+            if r["ep2"]["id"] != ep1_id:
+                ep2_id = r["ep2"]["id"]
+                break
+
+    return ep1_id, ep2_id
 
 
 # ──────────────────────────────────────────────────────────────────

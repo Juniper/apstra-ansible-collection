@@ -15,6 +15,15 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     singular_leaf_object_type,
 )
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_security_zone_id,
+    resolve_vrf_interface_pair,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
+    get_node,
+    patch_node,
+    node_needs_update,
+)
 
 DOCUMENTATION = """
 ---
@@ -174,6 +183,61 @@ msg:
 """
 
 
+def _apply_interface_ip_assignments(
+    client_factory, blueprint_id, sz_id, assignments, result
+):
+    """Patch IP addresses on VRF interface endpoints.
+
+    For each entry in *assignments*, resolves the interface within the
+    security zone, then patches endpoint1 and (optionally) endpoint2
+    with the specified IPv4 address / type.
+
+    :param assignments: List of dicts, each with ``interface``,
+        ``endpoint1_ipv4_address``, etc.
+    :param result: Module result dict — ``changed`` and
+        ``ip_assignments`` are updated in-place.
+    """
+    ip_results = []
+    for assignment in assignments:
+        interface_name = assignment["interface"]
+        ep1_id, ep2_id = resolve_vrf_interface_pair(
+            client_factory, blueprint_id, sz_id, interface_name
+        )
+
+        entry = {"interface": interface_name, "endpoint1_id": ep1_id}
+
+        # ── Patch endpoint1 ──────────────────────────────────────
+        if "endpoint1_ipv4_address" in assignment:
+            ep1_props = {"ipv4_addr": assignment["endpoint1_ipv4_address"]}
+            if "endpoint1_ipv4_type" in assignment:
+                ep1_props["ipv4_type"] = assignment["endpoint1_ipv4_type"]
+            current = get_node(client_factory, blueprint_id, ep1_id)
+            changes = node_needs_update(current, ep1_props)
+            if changes:
+                patch_node(client_factory, blueprint_id, ep1_id, changes)
+                result["changed"] = True
+                entry["endpoint1_changed"] = True
+
+        # ── Patch endpoint2 ──────────────────────────────────────
+        if ep2_id and "endpoint2_ipv4_address" in assignment:
+            ep2_props = {"ipv4_addr": assignment["endpoint2_ipv4_address"]}
+            if "endpoint2_ipv4_type" in assignment:
+                ep2_props["ipv4_type"] = assignment["endpoint2_ipv4_type"]
+            current = get_node(client_factory, blueprint_id, ep2_id)
+            changes = node_needs_update(current, ep2_props)
+            if changes:
+                patch_node(client_factory, blueprint_id, ep2_id, changes)
+                result["changed"] = True
+                entry["endpoint2_changed"] = True
+            entry["endpoint2_id"] = ep2_id
+        elif "endpoint2_ipv4_address" in assignment and not ep2_id:
+            entry["endpoint2_warning"] = "No link partner found"
+
+        ip_results.append(entry)
+
+    result["ip_assignments"] = ip_results
+
+
 def main():
     object_module_args = dict(
         id=dict(type="dict", required=True),
@@ -204,6 +268,21 @@ def main():
         state = module.params["state"]
         tags = module.params.get("tags", None)
 
+        # Pop custom fields that the Apstra API does not understand
+        interfaces_ip_assignments = None
+        sz_name = None
+        if body:
+            interfaces_ip_assignments = body.pop("interfaces_ip_assignments", None)
+            sz_name = body.pop("sz_name", None)
+            if sz_name:
+                body.setdefault("label", sz_name)
+                # When sz_name is the only source of "label" and no other
+                # creation/update fields were supplied, mark this as a
+                # lookup-only operation so we don't accidentally try to
+                # create a VRF with incomplete data.
+                if set(body.keys()) == {"label"}:
+                    body = None
+
         # Resolve blueprint name to ID if needed
         if "blueprint" in id:
             id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
@@ -226,16 +305,26 @@ def main():
 
         # See if the object exists
         current_object = None
+        lookup_label = (body or {}).get("label") or sz_name
         if object_id is None:
-            if (body is not None) and ("label" in body):
-                id_found = client_factory.get_id_by_label(
-                    id["blueprint"], leaf_object_type, body["label"]
+            if lookup_label:
+                # All name resolution goes through resolve_security_zone_id
+                # which checks: exact ID → label → case-insensitive label
+                # → vrf_name → case-insensitive vrf_name.
+                # When body is None (lookup-only via sz_name), raise if
+                # not found; otherwise return None so creation can proceed.
+                id_found = resolve_security_zone_id(
+                    client_factory,
+                    id["blueprint"],
+                    lookup_label,
+                    raise_on_missing=(body is None),
                 )
-                if id_found:
-                    id[leaf_object_type] = id_found
-                    current_object = client_factory.object_request(
-                        object_type, "get", id
-                    )
+            else:
+                id_found = None
+
+            if id_found:
+                id[leaf_object_type] = id_found
+                current_object = client_factory.object_request(object_type, "get", id)
         else:
             current_object = client_factory.object_request(object_type, "get", id)
 
@@ -288,6 +377,16 @@ def main():
                     object_type=object_type, op="get", id=id, retry=10, retry_delay=3
                 )
 
+            # Apply interface IP assignments if specified
+            if interfaces_ip_assignments:
+                _apply_interface_ip_assignments(
+                    client_factory,
+                    id["blueprint"],
+                    id[leaf_object_type],
+                    interfaces_ip_assignments,
+                    result,
+                )
+
         # If we still don't have an id, there's a problem
         if id is None:
             raise ValueError(f"Cannot manage a {leaf_object_type} without a object id")
@@ -301,6 +400,7 @@ def main():
     except Exception as e:
         tb = traceback.format_exc()
         module.debug(f"Exception occurred: {str(e)}\n\nStack trace:\n{tb}")
+        result.pop("msg", None)
         module.fail_json(msg=str(e), **result)
 
     module.exit_json(**result)

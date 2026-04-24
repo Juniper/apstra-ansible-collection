@@ -120,6 +120,15 @@ options:
       - "  C(route_target) (string) - Interconnect Route Target in
         C(<asn>:<nn>) format (required for create)."
       - "  C(esi_mac) (string) - Optional per-site ESI MAC address."
+      - "  C(security_zones) (dict) - DCI Layer-3 (Type-5) settings
+        keyed by VRF label or ID (auto-resolved). Each value is a
+        dict with C(routing_policy_id) (label or ID, auto-resolved),
+        C(interconnect_route_target) (string), and C(enabled_for_l3)
+        (bool). Optional."
+      - "  C(virtual_networks) (dict) - VN connection type settings
+        keyed by virtual network label or ID (auto-resolved). Each
+        value is a dict with C(l2) (bool), C(l3) (bool), and
+        C(translation_vni) (integer). Optional."
       - "For C(type=gateway):"
       - "  C(gw_name) (string) - Gateway name (required for create)."
       - "  C(gw_ip) (string) - Gateway IPv4 address (required for
@@ -216,6 +225,44 @@ EXAMPLES = """
     body:
       label: "dci-domain-2"
     state: absent
+
+# ---- DCI Layer-3 (Type-5) via security_zones ----
+
+# Enable L3 DCI on a VRF with a routing policy and route target.
+# VRF labels and routing policy labels are resolved automatically.
+- name: Enable L3 DCI on interconnect domain
+  juniper.apstra.interconnect_gateway:
+    type: domain
+    id:
+      blueprint: "my-datacenter-blueprint"
+    body:
+      label: "dci-domain-1"
+      route_target: "65500:100"
+      security_zones:
+        "my-vrf":
+          routing_policy_id: "dci-l3-policy"
+          interconnect_route_target: "65500:200"
+          enabled_for_l3: true
+    state: present
+
+# ---- VN Connection Type via virtual_networks ----
+
+# Set L2+L3 connection type and translation VNI for a virtual network.
+# VN labels are resolved automatically.
+- name: Set VN connection type with translation VNI
+  juniper.apstra.interconnect_gateway:
+    type: domain
+    id:
+      blueprint: "my-datacenter-blueprint"
+    body:
+      label: "dci-domain-1"
+      route_target: "65500:100"
+      virtual_networks:
+        "my-virtual-network":
+          l2: true
+          l3: true
+          translation_vni: 10100
+    state: present
 
 # ---- Interconnect Domain Gateway (type: gateway) ----
 

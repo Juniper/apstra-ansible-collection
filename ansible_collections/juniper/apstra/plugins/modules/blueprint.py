@@ -480,6 +480,7 @@ node:
 
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_template_id as _resolve_template_id,
+    resolve_graph_node_id,
 )
 
 
@@ -620,10 +621,68 @@ def _handle_queried(module, client_factory, blueprint_id):
 
 
 def _handle_node_updated(module, client_factory, blueprint_id):
-    """Handle state=node_updated -- single-node or bulk-by-label assignment."""
+    """Handle state=node_updated -- single-node or bulk-by-label assignment.
+
+    Supports three modes:
+      1. ``assignment`` dict -- bulk assign by label
+      2. ``node_id`` + ``node_properties`` -- patch by UUID (top-level params)
+      3. ``body.node_id`` + ``body.node_properties`` -- patch by label
+         (e.g. ``body.node_id: "leaf1:xe-0/0/7.100"``)
+    """
     params = module.params
     node_id = params.get("node_id")
     assignment = params.get("assignment")
+    body = params.get("body")
+
+    # ── Body-based mode (body.node_id + body.node_properties) ─────────
+    if body and "node_id" in body:
+        if node_id or assignment:
+            module.fail_json(
+                msg="body.node_id cannot be used with top-level "
+                "node_id or assignment"
+            )
+        body_node_id = body["node_id"]
+        body_props = body.get("node_properties", {})
+        if not body_props:
+            module.fail_json(
+                msg="body.node_properties is required when using body.node_id"
+            )
+
+        # Resolve label-based node_id (e.g. "leaf1:xe-0/0/7.100") to UUID
+        resolved_id = body_node_id
+        if ":" in body_node_id:
+            try:
+                resolved_id = resolve_graph_node_id(
+                    client_factory, blueprint_id, body_node_id
+                )
+            except ValueError as exc:
+                module.fail_json(msg=str(exc))
+
+        # Read current node, compute diff, patch
+        current = get_node(client_factory, blueprint_id, resolved_id)
+        if current is None:
+            module.fail_json(
+                msg=f"Node '{body_node_id}' (resolved: {resolved_id}) "
+                f"not found in blueprint '{blueprint_id}'"
+            )
+
+        changes = node_needs_update(current, body_props)
+        if not changes:
+            return dict(
+                changed=False,
+                node=current,
+                node_id=resolved_id,
+                msg="node already up to date",
+            )
+
+        patch_node(client_factory, blueprint_id, resolved_id, changes)
+        final = get_node(client_factory, blueprint_id, resolved_id)
+        return dict(
+            changed=True,
+            node=final,
+            node_id=resolved_id,
+            msg=f"node updated: {', '.join(changes.keys())}",
+        )
 
     # ── Bulk assignment mode (assignment dict) ────────────────────────────
     if assignment:
