@@ -18,6 +18,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_virtual_infra_manager_id,
     resolve_vim_agent_and_system_id,
+    resolve_security_zone_id,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter import (
     list_vim_vcenters,
@@ -746,6 +747,14 @@ def _handle_blueprint_vim(module, client_factory, id, body, state, result):
             "agent_id": agent_id,
             "system_id": system_id,
         }
+
+    # ── vnet_remediation_policy: resolve security_zone_id name → UUID ──
+    vrp = body.get("vnet_remediation_policy") if body else None
+    if vrp and vrp.get("security_zone_id"):
+        blueprint_id_for_sz = id.get("blueprint")
+        vrp["security_zone_id"] = resolve_security_zone_id(
+            client_factory, blueprint_id_for_sz, vrp["security_zone_id"]
+        )
 
     object_id = id.get(leaf_object_type)
     collection_id = {k: v for k, v in id.items() if k != leaf_object_type}
