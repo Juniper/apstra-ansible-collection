@@ -1,0 +1,474 @@
+---
+- name: Test create/update/query/delete floating_ip
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_fip_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ── List (empty) ──────────────────────────────────────────────────
+    - name: List all floating IPs (should be empty initially)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: fip_list_empty
+
+    - name: Show empty floating IP list
+      ansible.builtin.debug:
+        var: fip_list_empty
+
+    - name: Verify empty list result
+      ansible.builtin.assert:
+        that:
+          - fip_list_empty.changed == false
+          - fip_list_empty.floating_ips is defined
+          - fip_list_empty.floating_ips | length == 0
+
+    # ── Create ────────────────────────────────────────────────────────
+    - name: Create a floating IP
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          label: "test-vip-1"
+          description: "Test VIP created by ansible"
+          ipv4_addr: "10.99.1.1/24"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_create
+
+    - name: Show created floating IP
+      ansible.builtin.debug:
+        var: fip_create
+
+    - name: Verify create result
+      ansible.builtin.assert:
+        that:
+          - fip_create.changed == true
+          - fip_create.floating_ip is defined
+          - fip_create.id.floating_ip is defined
+
+    - name: Save floating IP node ID
+      ansible.builtin.set_fact:
+        fip_node_id: "{{ fip_create.id.floating_ip }}"
+
+    # ── List (non-empty) ──────────────────────────────────────────────
+    - name: List all floating IPs (should have one now)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: fip_list
+
+    - name: Show floating IP list
+      ansible.builtin.debug:
+        var: fip_list
+
+    - name: Verify list has the created floating IP
+      ansible.builtin.assert:
+        that:
+          - fip_list.floating_ips | length >= 1
+          - fip_list.floating_ips | selectattr('id', 'equalto', fip_node_id) | list | length == 1
+
+    # ── Query single ──────────────────────────────────────────────────
+    - name: Query single floating IP by node ID
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+          floating_ip: "{{ fip_node_id }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: fip_single
+
+    - name: Show single floating IP
+      ansible.builtin.debug:
+        var: fip_single
+
+    - name: Verify single query
+      ansible.builtin.assert:
+        that:
+          - fip_single.changed == false
+          - fip_single.floating_ip is defined
+
+    # ── Update by node ID ─────────────────────────────────────────────
+    - name: Update floating IP label and description by node ID
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+          floating_ip: "{{ fip_node_id }}"
+        body:
+          label: "test-vip-renamed"
+          description: "Updated description"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_update
+
+    - name: Show updated floating IP
+      ansible.builtin.debug:
+        var: fip_update
+
+    - name: Verify update result
+      ansible.builtin.assert:
+        that:
+          - fip_update.changed == true
+          - fip_update.floating_ip.label == "test-vip-renamed"
+
+    # ── Idempotent update (no change) ─────────────────────────────────
+    - name: Update floating IP with same values (no change expected)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+          floating_ip: "{{ fip_node_id }}"
+        body:
+          label: "test-vip-renamed"
+          description: "Updated description"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_nochange
+
+    - name: Show no-change result
+      ansible.builtin.debug:
+        var: fip_nochange
+
+    - name: Verify no change
+      ansible.builtin.assert:
+        that:
+          - fip_nochange.changed == false
+
+    # ── Update by label (name lookup) ─────────────────────────────────
+    - name: Update floating IP by label (lookup by label)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          label: "test-vip-renamed"
+          ipv4_addr: "10.99.1.2/24"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_update_by_label
+
+    - name: Show label-lookup update result
+      ansible.builtin.debug:
+        var: fip_update_by_label
+
+    - name: Verify update by label
+      ansible.builtin.assert:
+        that:
+          - fip_update_by_label.changed == true
+          - fip_update_by_label.id.floating_ip == fip_node_id
+
+    # ── Update by IPv4 (ipv4_addr lookup) ─────────────────────────────
+    - name: Update floating IP by ipv4_addr lookup
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          ipv4_addr: "10.99.1.2/24"
+          description: "Found by IP"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_update_by_ip
+
+    - name: Show ipv4-lookup update result
+      ansible.builtin.debug:
+        var: fip_update_by_ip
+
+    - name: Verify update by ipv4_addr
+      ansible.builtin.assert:
+        that:
+          - fip_update_by_ip.id.floating_ip == fip_node_id
+
+    # ── Create a security zone + virtual network for VN lookup test ───
+    - name: Create routing policy for security zone
+      juniper.apstra.routing_policy:
+        id: "{{ bp.id }}"
+        body:
+          label: "fip_test_rp"
+          policy_type: "user_defined"
+          import_policy: "all"
+          export_policy:
+            l2edge_subnets: true
+            loopbacks: true
+            spine_leaf_links: false
+            spine_superspine_links: false
+            static_routes: false
+          expect_default_ipv4_route: false
+          expect_default_ipv6_route: false
+        auth_token: "{{ auth.token }}"
+      register: fip_rp
+
+    - name: Create security zone for VN lookup test
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "fip-test-vrf"
+          vrf_name: "fip_test_vrf"
+          sz_type: "evpn"
+          vni_id: 16777200
+          vlan_id: 2040
+          routing_policy_id: "{{ fip_rp.id.routing_policy }}"
+          junos_evpn_irb_mode: "asymmetric"
+        auth_token: "{{ auth.token }}"
+      register: fip_sz
+
+    - name: Create virtual network for VN lookup test
+      juniper.apstra.virtual_network:
+        id: "{{ bp.id }}"
+        body:
+          label: "fip-test-vn"
+          vn_type: "vxlan"
+          vn_id: 16777100
+          vlan_id: 2041
+          security_zone_id: "{{ fip_sz.id.security_zone }}"
+        auth_token: "{{ auth.token }}"
+      register: fip_vn
+
+    - name: Show created virtual network
+      ansible.builtin.debug:
+        var: fip_vn
+
+    # ── Create a floating IP associated with the VN ───────────────────
+    - name: Create floating IP associated with virtual network
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          ipv4_addr: "10.99.3.1/24"
+          virtual_network_id: "{{ fip_vn.id.virtual_network }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_vn_create
+
+    - name: Show VN-associated floating IP
+      ansible.builtin.debug:
+        var: fip_vn_create
+
+    - name: Save VN-associated floating IP node ID
+      ansible.builtin.set_fact:
+        fip_vn_node_id: "{{ fip_vn_create.id.floating_ip }}"
+
+    # ── Update by VN name (virtual_network lookup) ────────────────────
+    - name: Update floating IP using VN name lookup
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          virtual_network: "fip-test-vn"   # VN name — used to FIND the floating IP
+          label: "fip-test-vn-vip"         # new label to set via PATCH
+          description: "Named via VN lookup"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_vn_lookup
+
+    - name: Show VN-lookup update result
+      ansible.builtin.debug:
+        var: fip_vn_lookup
+
+    - name: Verify VN lookup found the correct floating IP
+      ansible.builtin.assert:
+        that:
+          - fip_vn_lookup.changed == true
+          - fip_vn_lookup.id.floating_ip == fip_vn_node_id
+          - fip_vn_lookup.floating_ip.label == "fip-test-vn-vip"
+
+    # ── Idempotent VN lookup (no change) ─────────────────────────────
+    - name: VN lookup update with same values (no change expected)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          virtual_network: "fip-test-vn"
+          label: "fip-test-vn-vip"
+          description: "Named via VN lookup"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_vn_nochange
+
+    - name: Show VN lookup no-change result
+      ansible.builtin.debug:
+        var: fip_vn_nochange
+
+    - name: Verify no change on second VN lookup
+      ansible.builtin.assert:
+        that:
+          - fip_vn_nochange.changed == false
+
+    # ── Delete VN-associated floating IP ─────────────────────────────
+    - name: Delete VN-associated floating IP by node ID
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+          floating_ip: "{{ fip_vn_node_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    # ── Blueprint name resolution (by name not UUID) ──────────────────
+    - name: List floating IPs using blueprint name (not UUID)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: fip_by_name
+
+    - name: Show result from blueprint name lookup
+      ansible.builtin.debug:
+        var: fip_by_name
+
+    - name: Verify blueprint name lookup works
+      ansible.builtin.assert:
+        that:
+          - fip_by_name.floating_ips | length >= 1
+
+    # ── Create second floating IP ─────────────────────────────────────
+    - name: Create second floating IP
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          label: "test-vip-2"
+          ipv4_addr: "10.99.2.1/24"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: fip_create2
+
+    - name: Show second floating IP
+      ansible.builtin.debug:
+        var: fip_create2
+
+    - name: Save second floating IP node ID
+      ansible.builtin.set_fact:
+        fip_node_id2: "{{ fip_create2.id.floating_ip }}"
+
+    # ── List (two floating IPs) ───────────────────────────────────────
+    - name: List all floating IPs (should have two now)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: fip_list2
+
+    - name: Show final floating IP list
+      ansible.builtin.debug:
+        var: fip_list2
+
+    - name: Verify two floating IPs exist
+      ansible.builtin.assert:
+        that:
+          - fip_list2.floating_ips | length >= 2
+
+    # ── Delete first floating IP ──────────────────────────────────────
+    - name: Delete first floating IP by node ID
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+          floating_ip: "{{ fip_node_id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: fip_delete1
+
+    - name: Show delete result
+      ansible.builtin.debug:
+        var: fip_delete1
+
+    - name: Verify delete changed
+      ansible.builtin.assert:
+        that:
+          - fip_delete1.changed == true
+
+    # ── Delete second floating IP by label ────────────────────────────
+    - name: Delete second floating IP by label
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        body:
+          label: "test-vip-2"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: fip_delete2
+
+    - name: Show second delete result
+      ansible.builtin.debug:
+        var: fip_delete2
+
+    - name: Verify second delete changed
+      ansible.builtin.assert:
+        that:
+          - fip_delete2.changed == true
+
+    # ── List (empty again) ────────────────────────────────────────────
+    - name: List all floating IPs (should be empty again)
+      juniper.apstra.floating_ip:
+        id:
+          blueprint: "{{ bp.id }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: fip_list_final
+
+    - name: Show final list
+      ansible.builtin.debug:
+        var: fip_list_final
+
+    - name: Verify all floating IPs deleted
+      ansible.builtin.assert:
+        that:
+          - fip_list_final.floating_ips | length == 0
+
+    # ── Cleanup ───────────────────────────────────────────────────────
+    - name: Unlock the blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth.token }}"
+      register: blueprint_unlock
+
+    - name: Show unlocked blueprint
+      ansible.builtin.debug:
+        var: blueprint_unlock
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show deleted blueprint
+      ansible.builtin.debug:
+        var: blueprint_delete
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
