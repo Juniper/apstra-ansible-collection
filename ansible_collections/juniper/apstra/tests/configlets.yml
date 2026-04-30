@@ -312,7 +312,7 @@
           generators:
             - config_style: "junos"
               section: "system"
-              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"  # noqa: yaml[line-length]
               negation_template_text: ""
               filename: ""
         auth_token: "{{ auth.token }}"
@@ -332,7 +332,7 @@
           generators:
             - config_style: "junos"
               section: "system"
-              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"
+              template_text: "system {\n  ntp {\n    server {% raw %}{{ ntp_server }}{% endraw %};\n    boot-server {% raw %}{{ ntp_server }}{% endraw %};\n  }\n}"  # noqa: yaml[line-length]
               negation_template_text: ""
               filename: ""
         auth_token: "{{ auth.token }}"

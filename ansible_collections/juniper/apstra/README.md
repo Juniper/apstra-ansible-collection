@@ -37,7 +37,9 @@ The following matrix shows which collection version to use with each Juniper Aps
 
 Collection Version | Supported Apstra Versions | Notes
 --- | --- | ---
-**v1.0.6** | 6.0, 6.1 | Current release. Includes new modules: `rollback`, `ztp_device`, `connectivity_template`, `connectivity_template_assignment`, `external_gateway`, `generic_systems`, `configlets`, `property_set`, `resource_pools`.
+**v1.0.8** | 6.0, 6.1 | Current release. Includes new modules: `floating_ip`, `upgrade_management`, `interconnect_gateway`, `iba_probes`, `cabling_map`, `virtual_infra_manager`. Adds tag support, commit descriptions, rack renaming, and many bug fixes.
+**v1.0.7** | 6.0, 6.1 | Added `interconnect_gateway`, `iba_probes`, `cabling_map`, `virtual_infra_manager` modules. Name-to-ID resolution across all modules.
+**v1.0.6** | 6.0, 6.1 | Added `rollback`, `ztp_device`, `connectivity_template`, `connectivity_template_assignment`, `external_gateway`, `generic_systems`, `configlets`, `property_set`, `resource_pools`.
 **v1.0.5** | 5.1 | Use this version for Apstra 5.x deployments.
 
 > **Note:** Collection versions prior to v1.0.5 are not recommended for production use.
@@ -145,7 +147,7 @@ We welcome community contributions to this collection. If you find problems, ple
 You can also join us on:
 
 - IRC - the `#ansible-network` [irc.libera.chat](https://libera.chat/) channel
-- Slack - https://ansiblenetwork.slack.com
+- Slack - [ansiblenetwork.slack.com](https://ansiblenetwork.slack.com)
 
 See the [Ansible Community Guide](https://docs.ansible.com/ansible/latest/community/index.html) for details on contributing to Ansible.
 

@@ -98,7 +98,7 @@
              | list
              | first
              | default(None) }}
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 2 — Extract blueprint ID"
       ansible.builtin.set_fact:
@@ -160,7 +160,7 @@
              | map(attribute='id')
              | list }}
 
-    - name: "Phase 3.5 — Uninstall agents ({{ _agent_ids | length }} found)"
+    - name: "Phase 3.5 — Uninstall agents"
       ansible.builtin.uri:
         url: "{{ api_url }}/system-agents/{{ item }}/uninstall-agent"
         method: POST
@@ -171,7 +171,7 @@
       loop: "{{ _agent_ids }}"
       loop_control:
         label: "agent {{ item }}"
-      ignore_errors: true
+      failed_when: false
       when: _agent_ids | length > 0
 
     - name: "Phase 3.5 — Wait for agents to fully stop"
@@ -216,7 +216,7 @@
       loop_control:
         label: "{{ item.management_ip | default(item.agent_id) }}"
       register: agent_delete_results
-      ignore_errors: true
+      failed_when: false
       when: all_agents.agents | default([]) | length > 0
 
     - name: "Phase 4 — Agent deletion summary"
@@ -238,7 +238,7 @@
           display_name: "{{ blueprint_label }}_asn_pool"
         state: absent
       register: asn_delete
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 5b — Delete IP pool"
       juniper.apstra.resource_pools:
@@ -251,7 +251,7 @@
           display_name: "{{ blueprint_label }}_ip_pool"
         state: absent
       register: ip_delete
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 5 — Resource pool deletion summary"
       ansible.builtin.debug:
@@ -276,7 +276,7 @@
       loop_control:
         label: "{{ item.key }}"
       register: template_delete
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 6b — Delete rack types"
       juniper.apstra.design:
@@ -291,7 +291,7 @@
       loop_control:
         label: "{{ item.key }}"
       register: rack_delete
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 6c — Delete interface maps"
       ansible.builtin.uri:
@@ -302,7 +302,7 @@
         validate_certs: "{{ verify_certs }}"
         status_code: [200, 202, 204, 404]
       register: ifmap_delete
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 6d — Delete logical devices"
       juniper.apstra.design:
@@ -317,7 +317,7 @@
       loop_control:
         label: "{{ item.key }}"
       register: ld_delete
-      ignore_errors: true
+      failed_when: false
 
     - name: "Phase 6 — Design element deletion summary"
       ansible.builtin.debug:
@@ -338,7 +338,7 @@
         auth_token: "{{ token }}"
         logout: true
       register: logout_result
-      ignore_errors: true
+      failed_when: false
 
     - name: "Teardown Complete"
       ansible.builtin.debug:

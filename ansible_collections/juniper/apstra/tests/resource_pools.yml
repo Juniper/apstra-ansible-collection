@@ -100,7 +100,7 @@
             | selectattr('type', 'equalto', 'asn')
             | first
           }}
-      ignore_errors: true
+      failed_when: false
 
     - name: Display ASN resource group
       ansible.builtin.debug:
@@ -832,7 +832,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_asn_subnets
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert ASN pool with subnets failed with proper message
       ansible.builtin.assert:
@@ -856,7 +856,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_ip_ranges
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert IP pool with ranges failed with proper message
       ansible.builtin.assert:
@@ -879,7 +879,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_ipv6_with_ipv4
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert IPv6 pool with IPv4 subnet failed with proper message
       ansible.builtin.assert:
@@ -902,7 +902,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_ip_with_ipv6
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert IP pool with IPv6 subnet failed with proper message
       ansible.builtin.assert:
@@ -925,7 +925,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_vlan_subnets
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert VLAN pool with subnets failed with proper message
       ansible.builtin.assert:
@@ -949,7 +949,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_vlan_out_of_range
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert VLAN pool with out-of-range values failed with proper message
       ansible.builtin.assert:
@@ -973,7 +973,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_asn_inverted
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert ASN pool with inverted range failed with proper message
       ansible.builtin.assert:
@@ -997,7 +997,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_ipv6_ranges
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert IPv6 pool with ranges failed with proper message
       ansible.builtin.assert:
@@ -1020,7 +1020,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_ip_bad_cidr
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert IP pool with invalid CIDR failed with proper message
       ansible.builtin.assert:
@@ -1042,7 +1042,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_vni_subnets
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert VNI pool with subnets failed with proper message
       ansible.builtin.assert:
@@ -1065,7 +1065,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_integer_subnets
-      ignore_errors: true
+      failed_when: false
 
     - name: Assert Integer pool with subnets failed with proper message
       ansible.builtin.assert:
@@ -1094,7 +1094,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_assign_by_name
-      ignore_errors: true
+      failed_when: false
       when: asn_resource_group is defined and asn_resource_group
 
     - name: Assert non-existent pool by name was rejected
@@ -1120,7 +1120,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_assign_by_uuid
-      ignore_errors: true
+      failed_when: false
       when: asn_resource_group is defined and asn_resource_group
 
     - name: Assert non-existent pool by UUID was rejected
@@ -1146,7 +1146,7 @@
         state: present
         auth_token: "{{ auth_result.token }}"
       register: neg_assign_ip_uuid
-      ignore_errors: true
+      failed_when: false
       when: ip_resource_group is defined and ip_resource_group
 
     - name: Assert non-existent IP pool by UUID was rejected

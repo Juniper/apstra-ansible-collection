@@ -240,7 +240,7 @@
               property_set: "{{ revert_ps.id.property_set }}"
             state: absent
             auth_token: "{{ auth.token }}"
-          ignore_errors: true
+          failed_when: false
           when: revert_ps.id.property_set is defined
 
     ################################################################################
@@ -256,7 +256,7 @@
             state: rolledback
             auth_token: "{{ auth.token }}"
           register: no_revision_result
-          ignore_errors: true
+          failed_when: false
 
         - name: Verify missing revision_id error
           ansible.builtin.assert:
@@ -273,7 +273,7 @@
             state: rolledback
             auth_token: "{{ auth.token }}"
           register: invalid_revision_result
-          ignore_errors: true
+          failed_when: false
 
         - name: Verify invalid revision_id error
           ansible.builtin.assert:
@@ -287,7 +287,7 @@
             state: listed
             auth_token: "{{ auth.token }}"
           register: bad_bp_result
-          ignore_errors: true
+          failed_when: false
 
         - name: Verify non-existent blueprint error
           ansible.builtin.assert:

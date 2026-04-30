@@ -407,10 +407,8 @@
         msg: >-
           {% if link_ip_pool_id | trim | length > 0 -%}
           Using IP pool '{{ link_ip_pool_name_found | trim }}' ({{ link_ip_pool_id | trim }})
-          for generic link IPs
-          {%- else -%}
-          No IP pools available on server - skipping IP pool assignment
-          {%- endif %}
+          for generic link IPs{%- else -%}
+          No IP pools available on server - skipping IP pool assignment{%- endif %}
 
     - name: Assign IP pool to generic links resource group
       juniper.apstra.resource_group:

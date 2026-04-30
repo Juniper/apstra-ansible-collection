@@ -917,7 +917,7 @@
         auth_token: "{{ token }}"
         id:
           blueprint: "{{ blueprint_label }}"
-        query: 'node(type="system", label="{{ item.key }}", name="srx").out(type="hosted_interfaces").node(type="interface", if_type="ethernet", name="intf").out(type="link").node(type="link", name="lnk")'
+        query: 'node(type="system", label="{{ item.key }}", name="srx").out(type="hosted_interfaces").node(type="interface", if_type="ethernet", name="intf").out(type="link").node(type="link", name="lnk")'  # noqa: yaml[line-length]
         state: queried
       loop: "{{ srx_nodes | dict2items }}"
       loop_control:

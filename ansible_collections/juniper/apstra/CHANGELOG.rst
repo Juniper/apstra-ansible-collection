@@ -4,6 +4,75 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.8
+======
+
+Major Changes
+-------------
+- Added ``floating_ip`` module: Create, update, and delete floating IP addresses in an Apstra blueprint.
+- Added ``upgrade_management`` module: Manage device OS upgrades in Apstra, including upgrade group creation, OS image assignment, and upgrade execution.
+
+Minor Changes
+-------------
+- ``blueprint``: Added ``commit_description`` parameter to supply a description when committing a blueprint.
+- ``blueprint``: Added rack renaming feature to rename racks within a blueprint.
+- ``virtual_network``: Added ``vim_ip`` shorthand and ``vlan_remediation_policy`` support.
+- ``security_zone``: Added tag support for security zones.
+- ``cabling_map``: Added create-or-update support and LLDP nodes-and-links retrieval.
+- ``generic_systems``: Added ``node_id`` and ``node_label`` aliases for easier node identification.
+- ``design``: Improved logical device lookup with ``display_name`` fallback and clear error messaging.
+- ``design``: Improved idempotency logic for design templates.
+- Added default ``ref_archs`` for ``two_stage_l3clos`` blueprint design.
+- Added IPv4 on physical interface support.
+- VRF name and label shorthand support.
+- Updated EE builder SDK wheel.
+
+Bug Fixes
+---------
+- ``cabling_map``: Fixed ``state=lldp`` to return both LLDP nodes and links.
+- ``design``: Fixed logical device lookup to fall back to listing all devices and matching by ``display_name``.
+- Fixed port ID resolution issue.
+- Fixed ``KeyError`` in exception handlers by removing duplicate ``msg`` key.
+- Removed hardcoded blueprint name from test utilities.
+- Resolved non-existent VRF bug.
+- Fixed ``validate-modules`` invalid-documentation errors for Author field.
+- Fixed documentation typos (``connectivity_template_assignment``, README).
+
+v1.0.7
+======
+
+Major Changes
+-------------
+- Added ``interconnect_gateway`` module: Create, update, and delete interconnect (DCI) gateways in an Apstra blueprint with name-to-ID resolution for domain labels and node labels.
+- Added ``iba_probes`` module: Create, update, and delete Intent-Based Analytics (IBA) probes with full CRUD and name/label resolution.
+- Added ``cabling_map`` module: View and manage the cabling map (cable-state) of an Apstra blueprint.
+- Added ``virtual_infra_manager`` module: Manage virtual infrastructure managers (e.g., VMware vCenter) in Apstra.
+- Added name-to-ID resolution across all modules for improved usability.
+
+Minor Changes
+-------------
+- ``connectivity_template_assignment``: Resolve interface names to application point IDs; support ``system_label:if_name`` shorthand strings.
+- ``virtual_network``: Added support for global ``vlan_id`` and ESI Pair Auto-Expansion.
+- ``fabric_settings``: Module updates for additional fabric-wide settings.
+- ``blueprint``: Added template name support and single device acknowledgment functionality.
+- Device assignment optimization for faster blueprint operations.
+- Added IBA probes RST documentation and updated docs index.
+- Added DCI end-to-end test configurations.
+- Upgraded EE builder to aos-sdk 6.1.0.
+- Added integration tests for ``configlets``, ``property_set``, and ``resource_pools`` modules.
+- Fixed installation guide and example playbook documentation.
+
+Bug Fixes
+---------
+- ``system_agents``: Require ``platform`` on create and carry over ``username`` on update.
+- ``interface_map``: Replaced non-existent SDK methods with ``raw_request``.
+- ``resource_group``: Resolve VRF-scoped group names and handle non-existent resource groups gracefully.
+- ``resource_pools``: Validate resource pool existence before blueprint assignment.
+- ``configlets``/``property_set``: Fixed nested dict key handling and YAML semantic comparison.
+- ``generic_systems``: Fixed test playbook issues.
+- Fixed pylint errors blocking Galaxy upload.
+- Fixed two customer-reported bugs in endpoint policy and virtual network modules.
+
 v1.0.6
 ======
 

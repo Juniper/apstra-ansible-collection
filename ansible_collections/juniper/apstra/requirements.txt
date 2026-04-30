@@ -1,5 +1,4 @@
 -i https://pypi.org/simple
-ansible-core>=2.16.14
 jmespath>=1.1.0
 jsonpatch>=1.33
 kubernetes>=35.0.0
