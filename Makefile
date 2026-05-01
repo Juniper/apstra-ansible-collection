@@ -117,6 +117,7 @@ docs: pipenv install
 
 $(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirements.txt $(APSTRA_COLLECTION_ROOT)/galaxy.yml  $(PY_FILES)
 	rm -f juniper-apstra-*.tar.gz
+	rm -f $(APSTRA_COLLECTION_ROOT)/MANIFEST.json $(APSTRA_COLLECTION_ROOT)/FILES.json
 	pipenv run ansible-galaxy collection build $(APSTRA_COLLECTION_ROOT)
 	touch "$@"
 
