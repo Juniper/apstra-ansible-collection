@@ -102,7 +102,9 @@ CHILD_PRIMITIVES = {
         "routing_policy",
         "custom_static_route",
     ],
-    "virtual_network_single": [],
+    "virtual_network_single": [
+        "bgp_peering_generic_system",
+    ],
     "virtual_network_multiple": [],
     "bgp_peering_generic_system": [
         "routing_policy",

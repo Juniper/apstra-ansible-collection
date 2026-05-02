@@ -280,6 +280,41 @@ EXAMPLES = """
         virtual_network_singles:
           vn1:
             vn_node_id: "my-virtual-network"
+            interface_type: tagged   # or: untagged
+    state: present
+
+# Interface CT: Virtual Network (Single) with BGP Peering (Generic System) child
+# This is the "BGP-to-HOST" pattern seen in the Apstra UI:
+#   Application Point → Virtual Network (Single) → BGP Peering (Generic System) → Routing Policy
+- name: Create BGP-to-HOST CT
+  juniper.apstra.connectivity_template:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      name: "BGP-to-HOST"
+      type: interface
+      description: "BGP peering to hosts via VN"
+      primitives:
+        virtual_network_singles:
+          vn:
+            vn_node_id: "Tenant2-VLAN22"         # VN name or UUID
+            interface_type: tagged               # or: untagged
+            bgp_peering_generic_systems:
+              bgp_test:
+                bfd: false
+                session_addressing_ipv4: addressed
+                session_addressing_ipv6: none
+                ipv4_safi: true
+                ipv6_safi: false
+                ttl: 2
+                holdtime_timer: 90
+                keepalive_timer: 30
+                peer_from: interface
+                peer_to: interface_or_shared_ip_endpoint
+                neighbor_asn_type: static
+                routing_policies:
+                  default_rp:
+                    rp_to_attach: "my-routing-policy"
     state: present
 
 # Interface CT: IP Link with Static Route child
