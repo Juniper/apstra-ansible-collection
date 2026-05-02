@@ -111,7 +111,9 @@ def _primitives_dict_to_sdk(primitives):
         policy_type_name = PRIMITIVE_TYPES[singular]
 
         for inst_name, inst_config in instances.items():
-            attributes, children = _separate_attrs_and_children(inst_config)
+            attributes, children = _separate_attrs_and_children(
+                inst_config, singular=singular
+            )
             sdk_list.append(
                 {
                     "policy_type_name": policy_type_name,
@@ -123,12 +125,17 @@ def _primitives_dict_to_sdk(primitives):
     return sdk_list
 
 
-def _separate_attrs_and_children(config):
+def _separate_attrs_and_children(config, singular=None):
     """
     Split a primitive config dict into (attributes, children).
 
     Keys that match a known plural primitive type name are treated as
     child primitive groups; everything else is an attribute.
+
+    For ``virtual_network_single`` primitives, translates the convenience
+    alias ``interface_type`` into the API field ``tag_type``:
+      - ``interface_type: tagged``   → ``tag_type: vlan_tagged``
+      - ``interface_type: untagged`` → ``tag_type: untagged``
 
     Returns
     -------
@@ -142,4 +149,13 @@ def _separate_attrs_and_children(config):
             children[key] = value
         else:
             attributes[key] = value
+
+    # Translate interface_type alias for virtual_network_single
+    if singular == "virtual_network_single" and "interface_type" in attributes:
+        it = attributes.pop("interface_type")
+        if it == "tagged":
+            attributes.setdefault("tag_type", "vlan_tagged")
+        else:
+            attributes.setdefault("tag_type", it)
+
     return attributes, children

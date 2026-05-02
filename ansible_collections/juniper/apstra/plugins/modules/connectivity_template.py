@@ -280,7 +280,7 @@ EXAMPLES = """
         virtual_network_singles:
           vn1:
             vn_node_id: "my-virtual-network"
-            interface_type: tagged   # or: untagged
+            tag_type: vlan_tagged   # or: untagged
     state: present
 
 # Interface CT: Virtual Network (Single) with BGP Peering (Generic System) child
@@ -298,7 +298,7 @@ EXAMPLES = """
         virtual_network_singles:
           vn:
             vn_node_id: "Tenant2-VLAN22"         # VN name or UUID
-            interface_type: tagged               # or: untagged
+            tag_type: vlan_tagged               # or: untagged
             bgp_peering_generic_systems:
               bgp_test:
                 bfd: false
