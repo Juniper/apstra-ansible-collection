@@ -186,6 +186,20 @@
         label: "{{ item.key }}"
         index_var: loop_idx
 
+    - name: "Build reset assignment dict (set all spines to unique RESET_SERIAL_N)"
+      ansible.builtin.set_fact:
+        reset_assignment: "{{ reset_assignment | default({}) | combine({item: 'RESET_SERIAL_' ~ reset_idx}) }}"
+      loop: "{{ spine_nodes.nodes.keys() | list }}"
+      loop_control:
+        index_var: reset_idx
+
+    - name: "Pre-reset spine serials so assignment test always triggers a change"
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        assignment: "{{ reset_assignment }}"
+        state: node_updated
+        auth_token: "{{ auth.token }}"
+
     - name: "Test assignment — bulk assign serials to all spine nodes"
       juniper.apstra.blueprint:
         id: "{{ bp_assign.id }}"
@@ -274,6 +288,18 @@
         rack_original_label: "{{ rack_query.results[0].rack.label }}"
         rack_node_id: "{{ rack_query.results[0].rack.id }}"
         rack_new_label: "renamed-rack-1"
+
+    - name: "Pre-test: reset rack to baseline so rename tests are always idempotent-safe"
+      juniper.apstra.blueprint:
+        id: "{{ bp_assign.id }}"
+        rack_id: "{{ rack_node_id }}"
+        rack_label: "rack-test-baseline"
+        state: node_updated
+        auth_token: "{{ auth.token }}"
+
+    - name: "Set rack_original_label to pre-test baseline"
+      ansible.builtin.set_fact:
+        rack_original_label: "rack-test-baseline"
 
     - name: "TEST RACK-1 — Rename rack by current_label with node_type=rack"
       juniper.apstra.blueprint:

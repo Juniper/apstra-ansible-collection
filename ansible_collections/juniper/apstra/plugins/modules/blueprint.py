@@ -736,7 +736,7 @@ def _handle_node_updated(module, client_factory, blueprint_id):
             )
 
         patch_node(client_factory, blueprint_id, resolved_id, changes)
-        final = get_node(client_factory, blueprint_id, resolved_id)
+        final = {**current, **changes}
         return dict(
             changed=True,
             node=final,
@@ -841,7 +841,7 @@ def _handle_node_updated(module, client_factory, blueprint_id):
         )
 
     patch_node(client_factory, blueprint_id, node_id, changes)
-    final = get_node(client_factory, blueprint_id, node_id)
+    final = {**current, **changes}
     return dict(
         changed=True,
         node=final,
