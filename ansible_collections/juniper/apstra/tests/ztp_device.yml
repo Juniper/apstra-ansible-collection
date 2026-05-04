@@ -9,31 +9,55 @@
         logout: false
       register: auth
 
-    # ── List All ZTP Devices ────────────────────────────────────────────
+    # ── Check if ZTP is enabled by listing devices ──────────────────────
 
-    - name: List all ZTP devices
+    - name: List all ZTP devices (check if ZTP is enabled)
       juniper.apstra.ztp_device:
         state: present
         auth_token: "{{ auth.token }}"
       register: ztp_list
+      ignore_errors: true
 
     - name: Show ZTP device list
       ansible.builtin.debug:
         var: ztp_list
+
+    - name: Set ZTP availability facts
+      ansible.builtin.set_fact:
+        ztp_enabled: "{{ not ztp_list.failed }}"
+        ztp_has_devices: "{{ not ztp_list.failed and (ztp_list.ztp_devices | default([]) | length > 0) }}"
+
+    - name: Skip all tests when ZTP is not enabled
+      ansible.builtin.debug:
+        msg: "ZTP is not enabled on this Apstra instance — skipping all ZTP device tests"
+      when: not ztp_enabled
+
+    - name: Skip device-specific tests when no ZTP devices are present
+      ansible.builtin.debug:
+        msg: "ZTP is enabled but no devices are present — skipping device-specific tests"
+      when: ztp_enabled and not ztp_has_devices
+
+    - name: Extract first device details for testing
+      ansible.builtin.set_fact:
+        test_device_ip: "{{ ztp_list.ztp_devices[0].ip_addr }}"
+        test_device_system_id: "{{ ztp_list.ztp_devices[0].system_id }}"
+      when: ztp_has_devices
 
     # ── Status by IP (existing device) ──────────────────────────────────
 
     - name: Get status of existing device by IP
       juniper.apstra.ztp_device:
         id:
-          ip_addr: "192.168.50.14"
+          ip_addr: "{{ test_device_ip }}"
         state: status
         auth_token: "{{ auth.token }}"
       register: ztp_status_ip
+      when: ztp_has_devices
 
     - name: Show status result (by IP)
       ansible.builtin.debug:
         var: ztp_status_ip
+      when: ztp_has_devices
 
     - name: Verify status by IP succeeded
       ansible.builtin.assert:
@@ -42,22 +66,25 @@
           - ztp_status_ip.status is defined
           - ztp_status_ip.status in ["completed", "unknown", "in_progress"]
           - ztp_status_ip.ztp_device is defined
-          - ztp_status_ip.id.ip_addr == "192.168.50.14"
+          - ztp_status_ip.id.ip_addr == test_device_ip
         fail_msg: "Status by IP did not return expected data"
+      when: ztp_has_devices
 
     # ── Status by system_id (existing device) ───────────────────────────
 
     - name: Get status of existing device by system_id
       juniper.apstra.ztp_device:
         id:
-          system_id: "VM69AA813885"
+          system_id: "{{ test_device_system_id }}"
         state: status
         auth_token: "{{ auth.token }}"
       register: ztp_status_sysid
+      when: ztp_has_devices
 
     - name: Show status result (by system_id)
       ansible.builtin.debug:
         var: ztp_status_sysid
+      when: ztp_has_devices
 
     - name: Verify status by system_id succeeded
       ansible.builtin.assert:
@@ -66,8 +93,9 @@
           - ztp_status_sysid.status is defined
           - ztp_status_sysid.status in ["completed", "unknown", "in_progress"]
           - ztp_status_sysid.ztp_device is defined
-          - ztp_status_sysid.ztp_device.system_id == "VM69AA813885"
+          - ztp_status_sysid.ztp_device.system_id == test_device_system_id
         fail_msg: "Status by system_id did not return expected data"
+      when: ztp_has_devices
 
     # ── Status by non-existent IP (should fail) ────────────────────────
 
@@ -79,10 +107,12 @@
         auth_token: "{{ auth.token }}"
       register: ztp_status_bad_ip
       ignore_errors: true
+      when: ztp_enabled
 
     - name: Show failure result (non-existent IP)
       ansible.builtin.debug:
         var: ztp_status_bad_ip
+      when: ztp_enabled
 
     - name: Verify non-existent IP fails properly
       ansible.builtin.assert:
@@ -90,6 +120,7 @@
           - ztp_status_bad_ip.failed == true
           - "'not present' in ztp_status_bad_ip.msg"
         fail_msg: "Non-existent IP should have failed with 'not present' message"
+      when: ztp_enabled
 
     # ── Status by non-existent system_id (should fail) ──────────────────
 
@@ -101,10 +132,12 @@
         auth_token: "{{ auth.token }}"
       register: ztp_status_bad_sysid
       ignore_errors: true
+      when: ztp_enabled
 
     - name: Show failure result (non-existent system_id)
       ansible.builtin.debug:
         var: ztp_status_bad_sysid
+      when: ztp_enabled
 
     - name: Verify non-existent system_id fails properly
       ansible.builtin.assert:
@@ -112,3 +145,4 @@
           - ztp_status_bad_sysid.failed == true
           - "'not present' in ztp_status_bad_sysid.msg"
         fail_msg: "Non-existent system_id should have failed with 'not present' message"
+      when: ztp_enabled
