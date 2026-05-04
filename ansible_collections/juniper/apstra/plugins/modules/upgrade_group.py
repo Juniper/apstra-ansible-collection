@@ -21,7 +21,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.upgrade impo
     set_upgrade_group,
     get_upgrade_impact,
     _build_system_id_to_agent_map,
-    list_blueprint_system_info,
 )
 
 DOCUMENTATION = """
@@ -480,7 +479,7 @@ def _handle_present(module, client_factory, group_name, blueprint_id):
     device_keys = _resolve_members(client_factory, member_refs, blueprint_id)
 
     # Build a current user_config cache to avoid repeated GETs
-    items, _ = list_all_systems(client_factory)
+    items, _groups = list_all_systems(client_factory)
     uc_cache = {s["device_key"]: s.get("user_config", {}) for s in items}
 
     changed_keys = []
@@ -531,7 +530,7 @@ def _handle_absent(module, client_factory, group_name, blueprint_id=None):
         )
 
     # Build user_config cache
-    items, _ = list_all_systems(client_factory)
+    items, _groups = list_all_systems(client_factory)
     uc_cache = {s["device_key"]: s.get("user_config", {}) for s in items}
 
     changed_keys = []

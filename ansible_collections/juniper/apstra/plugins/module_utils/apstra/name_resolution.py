@@ -883,7 +883,7 @@ def resolve_vrf_interface_pair(client_factory, blueprint_id, sz_id, interface_re
             f".node('interface', if_name='{if_name}', name='ep1')"
         )
     else:
-        q += f".out('composed_of')" f".node('interface', name='ep1')"
+        q += ".out('composed_of')" f".node('interface', name='ep1')"
 
     q += (
         f".in_().node('sz_instance', name='szi')"

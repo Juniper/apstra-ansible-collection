@@ -15,7 +15,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.iba_probes import (
-    list_probes,
     get_probe,
     create_probe,
     create_predefined_probe,
@@ -24,7 +23,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.iba_probes i
     find_probe_by_label,
     list_predefined_probes,
     get_predefined_probe,
-    list_dashboards,
     get_dashboard,
     create_dashboard,
     update_dashboard,
@@ -558,7 +556,7 @@ def _manage_predefined_probe(module, client_factory):
         # Fetch the full probe
         import time
 
-        for _ in range(10):
+        for _attempt in range(10):
             probe = get_probe(client_factory, blueprint_id, probe_id)
             if probe is not None:
                 break
@@ -656,7 +654,7 @@ def _manage_custom_probe(module, client_factory):
             if result["changed"]:
                 import time
 
-                for _ in range(10):
+                for _attempt in range(10):
                     probe = get_probe(client_factory, blueprint_id, probe_id)
                     if probe is not None:
                         break
@@ -679,7 +677,7 @@ def _manage_custom_probe(module, client_factory):
 
             import time
 
-            for _ in range(10):
+            for _attempt in range(10):
                 probe = get_probe(client_factory, blueprint_id, probe_id)
                 if probe is not None:
                     break
@@ -779,7 +777,7 @@ def _manage_dashboard(module, client_factory):
 
             import time
 
-            for _ in range(10):
+            for _attempt in range(10):
                 dash = get_dashboard(client_factory, blueprint_id, dashboard_id)
                 if dash is not None:
                     break

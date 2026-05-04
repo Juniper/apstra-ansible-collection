@@ -27,9 +27,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter 
     update_vim_vcenter,
     patch_vim_vcenter,
     delete_vim_vcenter,
-    find_vim_vcenter_by_hostname,
-    get_vim_connection_state,
-    wait_for_vim_connection,
 )
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_blueprint_utils import (
     resolve_blueprint_virtual_infra_anomalies,

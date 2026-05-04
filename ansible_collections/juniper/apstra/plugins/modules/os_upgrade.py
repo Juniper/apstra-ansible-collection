@@ -22,8 +22,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.upgrade impo
     trigger_upgrade,
     get_upgrade_impact,
     wait_for_upgrade_job,
-    get_global_agent,
-    list_blueprint_system_info,
 )
 
 DOCUMENTATION = """

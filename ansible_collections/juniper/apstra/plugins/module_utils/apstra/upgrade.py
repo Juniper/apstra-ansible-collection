@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
@@ -423,7 +422,7 @@ def resolve_device_key(client_factory, system_ref, blueprint_id=None):
 
     Raises ``ValueError`` if not found.
     """
-    items, _ = list_all_systems(client_factory)
+    items, _groups = list_all_systems(client_factory)
 
     # Steps 1–3: direct match in /systems
     for system in items:
@@ -431,8 +430,10 @@ def resolve_device_key(client_factory, system_ref, blueprint_id=None):
         facts = system.get("facts", {})
         hostname = facts.get("hostname", "") or ""
         mgmt_ip = facts.get("mgmt_ipaddr", "") or ""
-        if device_key == system_ref or mgmt_ip == system_ref or (
-            hostname and hostname == system_ref
+        if (
+            device_key == system_ref
+            or mgmt_ip == system_ref
+            or (hostname and hostname == system_ref)
         ):
             return device_key
 
@@ -459,7 +460,7 @@ def get_group_members(client_factory, group_name):
     ``device_key``, ``facts``, ``user_config``, etc.).
     Returns an empty list when the group does not exist.
     """
-    items, _ = list_all_systems(client_factory)
+    items, _groups = list_all_systems(client_factory)
     return [
         s for s in items if s.get("user_config", {}).get("upgrade_group") == group_name
     ]
