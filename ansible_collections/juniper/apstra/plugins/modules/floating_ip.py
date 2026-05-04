@@ -376,6 +376,9 @@ def main():
                 if field in body:
                     create_payload[field] = body[field]
             create_result = bp.floating_ips.create(create_payload)
+            # Use the ID returned by Apstra (it may differ from the one we proposed)
+            node_id = (create_result or {}).get("id") or node_id
+            result["id"] = {"blueprint": blueprint_id, "floating_ip": node_id}
             # Fetch the created floating IP
             created = bp.floating_ips[node_id].get() or {}
             created["id"] = node_id
@@ -406,14 +409,19 @@ def main():
             module.exit_json(**result)
             return
 
-        bp.floating_ips[node_id].patch(changes)
+        # Use the graph-nodes endpoint to patch — the facade endpoint
+        # rejects patches on FIPs it considers immutable, but graph-node
+        # update works for all patchable fields (label, description, etc.).
+        l3clos = client_factory.get_l3clos_client()
+        l3clos.blueprints[blueprint_id].nodes[node_id].update(
+            changes, allow_unsafe=True
+        )
         result["changed"] = True
         result["changes"] = changes
 
-        # Return updated state
-        updated = bp.floating_ips[node_id].get() or {}
-        # Merge id back in (get() response doesn't include it)
-        updated["id"] = node_id
+        # Merge changes into current state — re-fetching via experience/web
+        # returns stale data immediately after a graph-node update.
+        updated = {**(current_fip or {}), **changes}
         result["floating_ip"] = updated
         result["msg"] = f"floating_ip '{node_id}' updated: {', '.join(changes.keys())}"
 

@@ -18,6 +18,14 @@
         logout: false
       register: auth
 
+    - name: Delete blueprint if leftover from a previous run
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
     - name: Create blueprint
       juniper.apstra.blueprint:
         body:
@@ -37,7 +45,7 @@
     - name: List all floating IPs (should be empty initially)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         state: queried
         auth_token: "{{ auth.token }}"
       register: fip_list_empty
@@ -57,7 +65,7 @@
     - name: Create a floating IP
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           label: "test-vip-1"
           description: "Test VIP created by ansible"
@@ -85,7 +93,7 @@
     - name: List all floating IPs (should have one now)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         state: queried
         auth_token: "{{ auth.token }}"
       register: fip_list
@@ -104,7 +112,7 @@
     - name: Query single floating IP by node ID
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
           floating_ip: "{{ fip_node_id }}"
         state: queried
         auth_token: "{{ auth.token }}"
@@ -124,7 +132,7 @@
     - name: Update floating IP label and description by node ID
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
           floating_ip: "{{ fip_node_id }}"
         body:
           label: "test-vip-renamed"
@@ -147,7 +155,7 @@
     - name: Update floating IP with same values (no change expected)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
           floating_ip: "{{ fip_node_id }}"
         body:
           label: "test-vip-renamed"
@@ -169,7 +177,7 @@
     - name: Update floating IP by label (lookup by label)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           label: "test-vip-renamed"
           ipv4_addr: "10.99.1.2/24"
@@ -191,7 +199,7 @@
     - name: Update floating IP by ipv4_addr lookup
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           ipv4_addr: "10.99.1.2/24"
           description: "Found by IP"
@@ -261,7 +269,7 @@
     - name: Create floating IP associated with virtual network
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           ipv4_addr: "10.99.3.1/24"
           virtual_network_id: "{{ fip_vn.id.virtual_network }}"
@@ -281,7 +289,7 @@
     - name: Update floating IP using VN name lookup
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           virtual_network: "fip-test-vn"   # VN name — used to FIND the floating IP
           label: "fip-test-vn-vip"         # new label to set via PATCH
@@ -305,7 +313,7 @@
     - name: VN lookup update with same values (no change expected)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           virtual_network: "fip-test-vn"
           label: "fip-test-vn-vip"
@@ -327,7 +335,7 @@
     - name: Delete VN-associated floating IP by node ID
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
           floating_ip: "{{ fip_vn_node_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
@@ -354,7 +362,7 @@
     - name: Create second floating IP
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           label: "test-vip-2"
           ipv4_addr: "10.99.2.1/24"
@@ -374,7 +382,7 @@
     - name: List all floating IPs (should have two now)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         state: queried
         auth_token: "{{ auth.token }}"
       register: fip_list2
@@ -392,7 +400,7 @@
     - name: Delete first floating IP by node ID
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
           floating_ip: "{{ fip_node_id }}"
         state: absent
         auth_token: "{{ auth.token }}"
@@ -411,7 +419,7 @@
     - name: Delete second floating IP by label
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         body:
           label: "test-vip-2"
         state: absent
@@ -431,7 +439,7 @@
     - name: List all floating IPs (should be empty again)
       juniper.apstra.floating_ip:
         id:
-          blueprint: "{{ bp.id }}"
+          blueprint: "{{ bp.id.blueprint }}"
         state: queried
         auth_token: "{{ auth.token }}"
       register: fip_list_final
