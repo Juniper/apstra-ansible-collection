@@ -2,38 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# MIT License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-
-from time import sleep
-
-from ansible.module_utils.basic import AnsibleModule
-import traceback
-
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
-    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
-    run_qe_query,
-    find_nodes_by_role,
-    find_nodes_by_type,
-    find_interfaces_by_neighbor,
-    find_host_bond_interfaces,
-    find_host_evpn_interfaces,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
-    get_node,
-    list_nodes,
-    patch_node,
-    node_needs_update,
-    assign_nodes_by_label,
-)
 
 DOCUMENTATION = """
 ---
@@ -58,7 +31,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -70,19 +42,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - The ID of the blueprint.
@@ -127,6 +96,12 @@ options:
       - Only used when C(state=committed).
     required: false
     type: str
+  unlock:
+    description:
+      - When set to C(true), unlocks the blueprint after the operation completes.
+    required: false
+    type: bool
+    default: false
   state:
     description:
       - The desired state of the blueprint.
@@ -536,6 +511,34 @@ node:
     returned: when using node_updated
     type: dict
 """
+
+from time import sleep
+
+from ansible.module_utils.basic import AnsibleModule
+import traceback
+
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    DEFAULT_BLUEPRINT_LOCK_TIMEOUT,
+    DEFAULT_BLUEPRINT_COMMIT_TIMEOUT,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+    run_qe_query,
+    find_nodes_by_role,
+    find_nodes_by_type,
+    find_interfaces_by_neighbor,
+    find_host_bond_interfaces,
+    find_host_evpn_interfaces,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
+    get_node,
+    list_nodes,
+    patch_node,
+    node_needs_update,
+    assign_nodes_by_label,
+)
+
 
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_template_id as _resolve_template_id,

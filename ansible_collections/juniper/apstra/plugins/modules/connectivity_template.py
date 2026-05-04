@@ -2,36 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import time
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_validator import (
-    validate_primitives,
-    CTValidationError,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_builder import (
-    build_ct_payload,
-    get_ct_id_from_hierarchy,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_parser import (
-    parse_ct_export,
-    normalize_for_compare,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_ct_primitives,
-)
-
 
 DOCUMENTATION = """
 ---
@@ -72,7 +47,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -84,19 +58,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - A dict identifying the target blueprint and optionally an
@@ -747,6 +718,31 @@ msg:
   type: str
   returned: always
 """
+
+import time
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_validator import (
+    validate_primitives,
+    CTValidationError,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_builder import (
+    build_ct_payload,
+    get_ct_id_from_hierarchy,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ct_parser import (
+    parse_ct_export,
+    normalize_for_compare,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_ct_primitives,
+)
 
 
 # ── Helper functions ──────────────────────────────────────────────────────────

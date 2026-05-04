@@ -2,37 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_virtual_infra_manager_id,
-    resolve_vim_agent_and_system_id,
-    resolve_security_zone_id,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter import (
-    list_vim_vcenters,
-    create_vim_vcenter,
-    get_vim_vcenter,
-    update_vim_vcenter,
-    patch_vim_vcenter,
-    delete_vim_vcenter,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_blueprint_utils import (
-    resolve_blueprint_virtual_infra_anomalies,
-    query_blueprint_vms,
-    get_blueprint_vnet,
-)
 
 DOCUMENTATION = """
 ---
@@ -65,7 +39,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -77,19 +50,16 @@ options:
       - The Apstra username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The Apstra password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - Dictionary containing identifiers.
@@ -517,6 +487,33 @@ resolved_from_vim_ip:
   type: dict
   returned: when body.vim_ip is provided (blueprint scope)
 """
+
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_virtual_infra_manager_id,
+    resolve_vim_agent_and_system_id,
+    resolve_security_zone_id,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_vcenter import (
+    list_vim_vcenters,
+    create_vim_vcenter,
+    get_vim_vcenter,
+    update_vim_vcenter,
+    patch_vim_vcenter,
+    delete_vim_vcenter,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.vim_blueprint_utils import (
+    resolve_blueprint_virtual_infra_anomalies,
+    query_blueprint_vms,
+    get_blueprint_vnet,
+)
 
 
 # ──────────────────────────────────────────────────────────────────

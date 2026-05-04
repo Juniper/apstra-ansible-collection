@@ -2,24 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_system_node_id,
-    resolve_security_zone_id,
-    resolve_esi_member_ids,
-)
 
 DOCUMENTATION = """
 ---
@@ -41,7 +28,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -53,19 +39,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - Dictionary containing the blueprint and virtual network IDs.
@@ -79,6 +62,8 @@ options:
   tags:
     description:
       - List of tags to apply to the virtual network.
+    type: list
+    elements: str
   state:
     description:
       - Desired state of the virtual network.
@@ -229,6 +214,20 @@ msg:
   returned: always
 """
 
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+    resolve_security_zone_id,
+    resolve_esi_member_ids,
+)
+
 
 def main():
     object_module_args = dict(
@@ -237,7 +236,7 @@ def main():
         state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
         ),
-        tags=dict(type="list", required=False),
+        tags=dict(type="list", elements="str", required=False),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | object_module_args

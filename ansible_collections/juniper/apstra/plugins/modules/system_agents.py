@@ -2,19 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-import time
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
 
 DOCUMENTATION = """
 ---
@@ -43,7 +35,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -55,19 +46,16 @@ options:
       - The Apstra username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The Apstra password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - A dict identifying an existing system agent.
@@ -127,7 +115,6 @@ options:
           - The password for authenticating to the managed device.
         type: str
         required: false
-        no_log: true
       platform:
         description:
           - The device platform/OS family.
@@ -378,6 +365,15 @@ acknowledged_systems:
   elements: str
   returned: when state=acknowledged
 """
+
+import traceback
+import time
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
 
 
 # ──────────────────────────────────────────────────────────────────

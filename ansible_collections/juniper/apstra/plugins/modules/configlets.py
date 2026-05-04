@@ -2,29 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    singular_leaf_object_type,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_configlets import (
-    get_blueprint_configlet,
-    create_blueprint_configlet,
-    update_blueprint_configlet,
-    delete_blueprint_configlet,
-    find_blueprint_configlet_by_label,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_configlet_id,
-)
 
 DOCUMENTATION = """
 ---
@@ -52,7 +34,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -64,19 +45,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   type:
     description:
       - The type of configlet to manage.
@@ -355,6 +333,26 @@ msg:
   type: str
   returned: always
 """
+
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    singular_leaf_object_type,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_configlets import (
+    get_blueprint_configlet,
+    create_blueprint_configlet,
+    update_blueprint_configlet,
+    delete_blueprint_configlet,
+    find_blueprint_configlet_by_label,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_configlet_id,
+)
+
 
 # Read-only top-level fields returned by the API for catalog configlets
 CATALOG_READ_ONLY_FIELDS = ("id", "created_at", "last_modified_at")

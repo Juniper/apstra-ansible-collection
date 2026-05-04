@@ -2,37 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.iba_probes import (
-    get_probe,
-    create_probe,
-    create_predefined_probe,
-    update_probe,
-    delete_probe,
-    find_probe_by_label,
-    list_predefined_probes,
-    get_predefined_probe,
-    get_dashboard,
-    create_dashboard,
-    update_dashboard,
-    delete_dashboard,
-    find_dashboard_by_label,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_probe_id,
-    resolve_dashboard_id,
-)
 
 DOCUMENTATION = """
 ---
@@ -60,7 +34,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -72,19 +45,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   type:
     description:
       - The type of IBA resource to manage.
@@ -442,6 +412,34 @@ predefined_probes:
   type: list
   returned: when state is present and type is predefined with no body
 """
+
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.iba_probes import (
+    get_probe,
+    create_probe,
+    create_predefined_probe,
+    update_probe,
+    delete_probe,
+    find_probe_by_label,
+    list_predefined_probes,
+    get_predefined_probe,
+    get_dashboard,
+    create_dashboard,
+    update_dashboard,
+    delete_dashboard,
+    find_dashboard_by_label,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_probe_id,
+    resolve_dashboard_id,
+)
+
 
 # Read-only fields returned by the API but not part of the create/update body
 PROBE_READ_ONLY_FIELDS = (

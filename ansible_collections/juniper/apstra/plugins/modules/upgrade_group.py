@@ -2,26 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.upgrade import (
-    list_all_systems,
-    get_group_members,
-    resolve_device_key,
-    set_upgrade_group,
-    get_upgrade_impact,
-    _build_system_id_to_agent_map,
-)
 
 DOCUMENTATION = """
 ---
@@ -50,7 +35,6 @@ options:
     description: The URL used to access the Apstra API.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description: If false, SSL certificates are not verified.
     type: bool
@@ -60,17 +44,14 @@ options:
     description: Apstra username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description: Apstra password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description: Authentication token (if already authenticated).
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - Identifies the upgrade group to operate on.
@@ -389,6 +370,23 @@ msg:
   type: str
   returned: always
 """
+
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.upgrade import (
+    list_all_systems,
+    get_group_members,
+    resolve_device_key,
+    set_upgrade_group,
+    get_upgrade_impact,
+    _build_system_id_to_agent_map,
+)
+
 
 _DEFAULT_GROUP = "default"
 

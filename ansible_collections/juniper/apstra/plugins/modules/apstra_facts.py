@@ -2,23 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# MIT License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
-    get_ct_application_point_ids,
-    run_qe_query,
-)
 
 DOCUMENTATION = """
 ---
@@ -63,7 +51,7 @@ options:
       - Use 'all' to gather facts about all supported network objects.
     type: list
     elements: str
-    required: true
+    required: false
     default: ['blueprints']
   id:
     description:
@@ -77,7 +65,7 @@ options:
       - Key is a type, value is a filter string.
     type: dict
     required: false
-    default: "{'blueprints.nodes': 'node_type=system'}"
+    default: {'blueprints.nodes': 'node_type=system'}
   available_network_facts:
     description:
       - If set to true, the module will return a list of available network objects.
@@ -172,6 +160,19 @@ ansible_facts:
     }
   }
 """
+
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+    get_ct_application_point_ids,
+    run_qe_query,
+)
 
 
 def main():

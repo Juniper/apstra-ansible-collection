@@ -2,28 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import re
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-    AOS_IMPORT_ERROR,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_application_point_ids,
-)
-
-if not AOS_IMPORT_ERROR:
-    from aos.sdk.reference_design.extension.endpoint_policy import (
-        generator as ct_gen,
-    )
 
 DOCUMENTATION = """
 ---
@@ -54,7 +37,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -66,19 +48,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - Identifies the blueprint and connectivity template.
@@ -226,6 +205,24 @@ msg:
   type: str
   returned: always
 """
+
+import re
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+    AOS_IMPORT_ERROR,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_application_point_ids,
+)
+
+if not AOS_IMPORT_ERROR:
+    from aos.sdk.reference_design.extension.endpoint_policy import (
+        generator as ct_gen,
+    )
 
 
 # ── Helper functions ──────────────────────────────────────────────────────────

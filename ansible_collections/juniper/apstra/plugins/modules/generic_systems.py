@@ -2,49 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024, Juniper Networks
-# BSD 3-Clause License
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
-import traceback
-import time
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
-    apstra_client_module_args,
-    ApstraClientFactory,
-)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
-    resolve_system_node_id,
-)
-
-# SDK-based helpers (node read/write)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
-    get_node as get_blueprint_node,
-    patch_node,
-    set_node_tags as set_blueprint_node_tags,
-    set_node_property as set_blueprint_node_property,
-)
-
-# SDK-based helpers (QE graph queries)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
-    run_qe_query,
-)
-
-# API-based helpers (raw_request — no SDK coverage)
-from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_generic_systems import (
-    create_switch_system_links,
-    add_links_to_system,
-    delete_switch_system_links,
-    create_external_generic_system,
-    delete_external_generic_system,
-    get_system_asn,
-    set_system_asn,
-    get_system_loopback,
-    create_or_update_loopback,
-)
-
 
 DOCUMENTATION = """
 ---
@@ -83,7 +45,6 @@ options:
       - The URL used to access the Apstra api.
     type: str
     required: false
-    default: APSTRA_API_URL environment variable
   verify_certificates:
     description:
       - If set to false, SSL certificates will not be verified.
@@ -95,19 +56,16 @@ options:
       - The username for authentication.
     type: str
     required: false
-    default: APSTRA_USERNAME environment variable
   password:
     description:
       - The password for authentication.
     type: str
     required: false
-    default: APSTRA_PASSWORD environment variable
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    default: APSTRA_AUTH_TOKEN environment variable
   id:
     description:
       - Dictionary identifying the generic system within a blueprint.
@@ -469,6 +427,45 @@ msg:
   type: str
   returned: always
 """
+
+import traceback
+import time
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
+    apstra_client_module_args,
+    ApstraClientFactory,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+    resolve_system_node_id,
+)
+
+# SDK-based helpers (node read/write)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (
+    get_node as get_blueprint_node,
+    patch_node,
+    set_node_tags as set_blueprint_node_tags,
+    set_node_property as set_blueprint_node_property,
+)
+
+# SDK-based helpers (QE graph queries)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+    run_qe_query,
+)
+
+# API-based helpers (raw_request — no SDK coverage)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_generic_systems import (
+    create_switch_system_links,
+    add_links_to_system,
+    delete_switch_system_links,
+    create_external_generic_system,
+    delete_external_generic_system,
+    get_system_asn,
+    set_system_asn,
+    get_system_loopback,
+    create_or_update_loopback,
+)
+
 
 # ──────────────────────────────────────────────────────────────────
 #  SDK-based system discovery helpers  (QE queries + node reads)
