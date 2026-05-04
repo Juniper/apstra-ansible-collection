@@ -1,0 +1,33 @@
+# The repo is licensed under Apache-2.0 (see LICENSE).
+# ansible-test mandates a GPLv3 header for the missing-gplv3-license check,
+# but Ansible Galaxy/Automation Hub certification does not require it and the
+# project intentionally keeps the Apache-2.0 header to match the repo license.
+plugins/modules/apstra_facts.py validate-modules:missing-gplv3-license
+plugins/modules/authenticate.py validate-modules:missing-gplv3-license
+plugins/modules/blueprint.py validate-modules:missing-gplv3-license
+plugins/modules/cabling_map.py validate-modules:missing-gplv3-license
+plugins/modules/configlets.py validate-modules:missing-gplv3-license
+plugins/modules/connectivity_template.py validate-modules:missing-gplv3-license
+plugins/modules/connectivity_template_assignment.py validate-modules:missing-gplv3-license
+plugins/modules/design.py validate-modules:missing-gplv3-license
+plugins/modules/endpoint_policy.py validate-modules:missing-gplv3-license
+plugins/modules/external_gateway.py validate-modules:missing-gplv3-license
+plugins/modules/fabric_settings.py validate-modules:missing-gplv3-license
+plugins/modules/floating_ip.py validate-modules:missing-gplv3-license
+plugins/modules/generic_systems.py validate-modules:missing-gplv3-license
+plugins/modules/iba_probes.py validate-modules:missing-gplv3-license
+plugins/modules/interconnect_gateway.py validate-modules:missing-gplv3-license
+plugins/modules/interface_map.py validate-modules:missing-gplv3-license
+plugins/modules/os_upgrade.py validate-modules:missing-gplv3-license
+plugins/modules/property_set.py validate-modules:missing-gplv3-license
+plugins/modules/resource_group.py validate-modules:missing-gplv3-license
+plugins/modules/resource_pools.py validate-modules:missing-gplv3-license
+plugins/modules/rollback.py validate-modules:missing-gplv3-license
+plugins/modules/routing_policy.py validate-modules:missing-gplv3-license
+plugins/modules/security_zone.py validate-modules:missing-gplv3-license
+plugins/modules/system_agents.py validate-modules:missing-gplv3-license
+plugins/modules/tag.py validate-modules:missing-gplv3-license
+plugins/modules/upgrade_group.py validate-modules:missing-gplv3-license
+plugins/modules/virtual_infra_manager.py validate-modules:missing-gplv3-license
+plugins/modules/virtual_network.py validate-modules:missing-gplv3-license
+plugins/modules/ztp_device.py validate-modules:missing-gplv3-license

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Copyright (c) 2024 Juniper Networks, Inc.
-# GNU General Public License v3.0+ (see LICENSES/GPL-3.0-or-later.txt)
+# Apache License, Version 2.0 (see https://www.apache.org/licenses/LICENSE-2.0)
 
 from __future__ import absolute_import, division, print_function
 
