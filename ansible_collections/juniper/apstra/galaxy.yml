@@ -27,3 +27,4 @@ build_ignore:
     - conf.py
     - _build
     - .gitignore
+    - .ansible-lint

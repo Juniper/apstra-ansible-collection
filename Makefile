@@ -122,7 +122,7 @@ $(APSTRA_COLLECTION_ROOT)/.apstra-collection: $(APSTRA_COLLECTION_ROOT)/requirem
 	touch "$@"
 
 $(APSTRA_COLLECTION_ROOT)/requirements.txt: Pipfile Makefile pipenv
-	pipenv clean && pipenv requirements --from-pipfile --exclude-markers | sed -e 's:==:>=:' | sed -e '\:build/wheels/aos_sdk:d' > "$@"
+	pipenv clean && pipenv requirements --from-pipfile --exclude-markers | sed -e 's:==:>=:' | sed -e '\:build/wheels/aos_sdk:d' | sed -e '\:ansible-core:d' > "$@"
 
 install: build
 	pipenv run ansible-galaxy collection install --ignore-certs --force $(APSTRA_COLLECTION)
