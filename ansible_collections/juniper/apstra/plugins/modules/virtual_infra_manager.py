@@ -425,7 +425,8 @@ EXAMPLES = """
 
 - name: Show vnet
   ansible.builtin.debug:
-    var: vnet_info.vnet"""
+    var: vnet_info.vnet
+"""
 
 RETURN = """
 changed:

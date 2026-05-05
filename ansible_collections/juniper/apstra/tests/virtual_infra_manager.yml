@@ -148,7 +148,7 @@
           retries: 12
           delay: 5
           when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
-          ignore_errors: true
+          failed_when: false
           tags: [phase1]
 
         - name: "Test 1b: Display VIM connection state after create"
@@ -331,7 +331,7 @@
           retries: 12
           delay: 5
           when: vcenter_hostname is defined and vcenter_hostname not in ['192.0.2.1', '']
-          ignore_errors: true
+          failed_when: false
           tags: [phase2]
 
         - name: "Phase 2 setup: display VIM connection status"
@@ -401,7 +401,7 @@
             state: present
             auth_token: "{{ auth.token }}"
           register: vc_created
-          ignore_errors: true
+          failed_when: false
           tags: [phase2]
 
         - name: "Test 4c result"
@@ -431,7 +431,7 @@
             auth_token: "{{ auth.token }}"
           register: vc_get
           when: vcenter_id is defined and vcenter_id != ''
-          ignore_errors: true
+          failed_when: false
           tags: [phase2]
 
         - name: "Test 4d result"
@@ -455,7 +455,7 @@
             auth_token: "{{ auth.token }}"
           register: vc_patch
           when: vcenter_id is defined and vcenter_id != ''
-          ignore_errors: true
+          failed_when: false
           tags: [phase2]
 
         - name: "Test 4e result"
@@ -477,7 +477,7 @@
             auth_token: "{{ auth.token }}"
           register: vc_delete
           when: vcenter_id is defined and vcenter_id != ''
-          ignore_errors: true
+          failed_when: false
           tags: [phase2]
 
         - name: "Test 4f result"
@@ -567,7 +567,7 @@
             auth_token: "{{ auth.token }}"
           register: bp_vim_assign
           when: vim_id is defined and vim_system_id is defined
-          ignore_errors: true
+          failed_when: false
           tags: [phase3]
 
         - name: Verify blueprint VIM assignment
@@ -594,7 +594,7 @@
             state: present
             auth_token: "{{ auth.token }}"
           register: anomaly_result
-          ignore_errors: true
+          failed_when: false
           tags: [phase3]
 
         - name: Verify anomaly resolver result
@@ -620,7 +620,7 @@
             state: present
             auth_token: "{{ auth.token }}"
           register: vm_query_result
-          ignore_errors: true
+          failed_when: false
           tags: [phase3]
 
         - name: Verify query_vm result
@@ -646,7 +646,7 @@
             state: present
             auth_token: "{{ auth.token }}"
           register: vnet_result
-          ignore_errors: true
+          failed_when: false
           tags: [phase3]
 
         - name: Verify vnet result
@@ -723,7 +723,7 @@
             state: absent
             auth_token: "{{ auth.token }}"
           when: vim_id is defined
-          ignore_errors: true
+          failed_when: false
           tags: [phase1, phase2, teardown]
 
         - name: Delete test blueprint if it was created
@@ -734,7 +734,7 @@
             auth_token: "{{ auth.token }}"
             state: absent
           when: blueprint_id is defined
-          ignore_errors: true
+          failed_when: false
           tags: [phase3, teardown]
 
     # ── Summary ───────────────────────────────────────────────────

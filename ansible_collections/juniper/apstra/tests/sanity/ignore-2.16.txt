@@ -1,7 +1,3 @@
-# The repo is licensed under Apache-2.0 (see LICENSE).
-# ansible-test mandates a GPLv3 header for the missing-gplv3-license check,
-# but Ansible Galaxy/Automation Hub certification does not require it and the
-# project intentionally keeps the Apache-2.0 header to match the repo license.
 plugins/modules/apstra_facts.py validate-modules:missing-gplv3-license
 plugins/modules/authenticate.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint.py validate-modules:missing-gplv3-license

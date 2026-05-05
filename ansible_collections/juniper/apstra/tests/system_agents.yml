@@ -41,7 +41,7 @@
           management_ip: "{{ test_management_ip }}"
         auth_token: "{{ auth.token }}"
         state: absent
-      ignore_errors: true
+      failed_when: false
 
     # ── Test 1: Create agent ──────────────────────────────────────
     - name: "Test 1: Create system agent"

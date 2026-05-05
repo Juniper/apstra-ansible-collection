@@ -281,8 +281,8 @@ EXAMPLES = """
 
 - name: Build per-OS agent lists
   ansible.builtin.set_fact:
-    junos_keys:     "{{ grp.groups['mixed-spines'] | selectattr('os_variant', 'ne', 'qfx-ms-fixed') | map(attribute='device_key') | list }}"
-    evo_keys:       "{{ grp.groups['mixed-spines'] | selectattr('os_variant', 'equalto', 'qfx-ms-fixed') | map(attribute='device_key') | list }}"
+    junos_keys: "{{ grp.groups['mixed-spines'] | selectattr('os_variant', 'ne', 'qfx-ms-fixed') | map(attribute='device_key') | list }}"
+    evo_keys: "{{ grp.groups['mixed-spines'] | selectattr('os_variant', 'equalto', 'qfx-ms-fixed') | map(attribute='device_key') | list }}"
 
 - name: Upgrade JunOS devices
   juniper.apstra.os_upgrade:

@@ -393,7 +393,7 @@ def main():
             ep_client, blueprint_id, ct_id
         )
 
-        # ── Validate resolved IDs against the CT’s application-points tree ──
+        # -- Validate resolved IDs against the CT's application-points tree --
         invalid_ids = [i for i in application_point_ids if i not in valid_ap_ids]
         if invalid_ids:
             # Build a human-readable representation for each invalid ID.

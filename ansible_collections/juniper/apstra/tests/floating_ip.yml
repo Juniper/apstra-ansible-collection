@@ -24,7 +24,7 @@
           blueprint: "{{ blueprint_name }}"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: Create blueprint
       juniper.apstra.blueprint:

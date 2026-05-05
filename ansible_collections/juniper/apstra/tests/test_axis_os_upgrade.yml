@@ -125,7 +125,7 @@
     ########################################################################
     # Phase 4 — state=present: ACTUAL UPGRADE (disabled by default)
     ########################################################################
-    - name: "Phase 4 — ⚠️ UPGRADE {{ upgrade_device }} to {{ upgrade_image }}"
+    - name: "Phase 4 — Upgrade device to image: {{ upgrade_device }} => {{ upgrade_image }}"
       juniper.apstra.os_upgrade:
         id:
           blueprint: "{{ blueprint_label }}"
@@ -166,4 +166,4 @@
           - "Phase 1 (gathered):           PASSED — {{ p1.images | length }} image(s)"
           - "Phase 2 (impact all):         {{ 'PASSED — ' ~ (p2.agent_ids | default([]) | length) ~ ' agents' if not p2.failed | default(false) else 'FAILED' }}"
           - "Phase 3 (impact single):      {{ 'PASSED' if single_agent is defined and not p3.failed | default(false) else 'SKIPPED' }}"
-          - "Phase 4 (upgrade):            {{ 'PASSED' if p4 is defined and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}"
+          - "Phase 4 (upgrade):            {{ 'PASSED' if p4 is defined and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}" # noqa: yaml[line-length]

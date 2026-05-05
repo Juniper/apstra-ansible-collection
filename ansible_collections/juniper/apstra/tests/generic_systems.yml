@@ -293,7 +293,7 @@
           name: "test-gs-tf-001-updated"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: "Cleanup stale GS (test-gs-tf-001) if present"
       juniper.apstra.generic_systems:
@@ -303,7 +303,7 @@
           name: "test-gs-tf-001"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     # ══════════════════════════════════════════════════════════════════
     #  TEST 1: Create generic system with a single link
@@ -565,7 +565,7 @@
           name: "test-gs-name-res"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
       when: not use_existing_blueprint | bool
 
     - name: "TEST 8b - Create GS using leaf label (name resolution)"
@@ -614,7 +614,7 @@
           name: "test-lag-server-tf"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     # ══════════════════════════════════════════════════════════════════
     #  TEST 9: Create generic system with dual LAG links
@@ -738,7 +738,7 @@
           name: "test-pc-id-gs-tf"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: "TEST 11b - Create LAG GS with port_channel_id_min=30 port_channel_id_max=30"
       juniper.apstra.generic_systems:
@@ -874,7 +874,7 @@
           name: "test-ext-gs-tf-updated"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     - name: "Cleanup stale external GS (test-ext-gs-tf) if present"
       juniper.apstra.generic_systems:
@@ -884,7 +884,7 @@
           name: "test-ext-gs-tf"
         state: absent
         auth_token: "{{ auth.token }}"
-      ignore_errors: true
+      failed_when: false
 
     # ══════════════════════════════════════════════════════════════════
     #  TEST 12: Create external generic system
@@ -1114,7 +1114,7 @@
         state: present
         auth_token: "{{ auth.token }}"
       register: no_links_result
-      ignore_errors: true
+      failed_when: false
 
     - name: Verify missing links error
       ansible.builtin.assert:
@@ -1140,7 +1140,7 @@
         state: present
         auth_token: "{{ auth.token }}"
       register: dup_links_result
-      ignore_errors: true
+      failed_when: false
 
     - name: Verify duplicate link error
       ansible.builtin.assert:

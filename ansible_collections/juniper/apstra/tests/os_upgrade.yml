@@ -323,8 +323,8 @@
         msg:
           - "Test 1 (gathered):               {{ 'PASSED' if not t1.failed | default(false) else 'FAILED' }}"
           - "Test 2 (gathered idempotent):     {{ 'PASSED' if not t2.failed | default(false) else 'FAILED' }}"
-          - "Test 3 (impact_report all):       {{ 'PASSED' if not t3.failed | default(false) else ('SKIPPED (6.1+ required)' if 'HTTP' in (t3.msg | default('')) or 'upgrade' in (t3.msg | default('')) | lower else 'FAILED') }}"
-          - "Test 4 (impact_report single):    {{ 'SKIPPED (6.1+ required)' if t3.failed | default(false) else ('PASSED' if not t4.failed | default(false) else 'FAILED') }}"
+          - "Test 3 (impact_report all):       {{ 'PASSED' if not t3.failed | default(false) else ('SKIPPED (6.1+ required)' if 'HTTP' in (t3.msg | default('')) or 'upgrade' in (t3.msg | default('')) | lower else 'FAILED') }}" # noqa: yaml[line-length]
+          - "Test 4 (impact_report single):    {{ 'SKIPPED (6.1+ required)' if t3.failed | default(false) else ('PASSED' if not t4.failed | default(false) else 'FAILED') }}" # noqa: yaml[line-length]
           - "Test 5 (present no system):       {{ 'PASSED' if t5.failed | default(false) else 'FAILED' }}"
           - "Test 6 (present no image):        {{ 'PASSED' if t6.failed | default(false) else 'FAILED' }}"
           - "Test 7 (present bad image):       {{ 'PASSED' if t7.failed | default(false) else 'FAILED' }}"

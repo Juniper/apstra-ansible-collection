@@ -371,8 +371,8 @@ EXAMPLES = """
     assignment:
       spine1: "SERIAL001"
       spine2: "SERIAL002"
-      leaf1:  "SERIAL003"
-      leaf2:  "SERIAL004"
+      leaf1: "SERIAL003"
+      leaf2: "SERIAL004"
     deploy_mode: deploy
     state: node_updated
   register: assigned

@@ -75,7 +75,7 @@
         ######################################################################
         # Test 1 — state=present: create test group with 2 devices
         ######################################################################
-        - name: "Test 1 — Create '{{ test_group_name }}' with 2 devices"
+        - name: "Test 1 — Create upgrade group: {{ test_group_name }}"
           juniper.apstra.upgrade_group:
             id:
               name: "{{ test_group_name }}"
