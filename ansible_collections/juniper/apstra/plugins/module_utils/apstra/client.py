@@ -286,6 +286,50 @@ def _blueprint_lock_tag_name(blueprint_id):
     return "blueprint {} locked".format(blueprint_id)
 
 
+def _dict_subset_equal(current, desired):
+    """Return True if all keys in *desired* exist in *current* with equal values.
+
+    API responses often include extra computed/read-only fields (e.g.
+    ``access_switch_node_ids``, ``tagged_ct_id``) that the user never
+    specifies.  This function compares only the keys the user provided,
+    so those extra fields do not trigger spurious changes.
+    """
+    for key, desired_value in desired.items():
+        current_value = current.get(key)
+        if isinstance(desired_value, dict) and isinstance(current_value, dict):
+            if not _dict_subset_equal(current_value, desired_value):
+                return False
+        elif isinstance(desired_value, list) and current_value is None:
+            if desired_value:
+                return False
+        elif isinstance(desired_value, list) and isinstance(current_value, list):
+            if not _lists_match(current_value, desired_value):
+                return False
+        elif current_value != desired_value:
+            return False
+    return True
+
+
+def _lists_match(current, desired):
+    """Return True when *current* and *desired* lists are semantically equal.
+
+    For lists of dicts, compare using subset matching per position: each
+    desired entry is checked against the corresponding current entry using
+    only the keys the user specified (see :func:`_dict_subset_equal`).
+
+    For lists of scalars (strings, ints, bools), fall back to exact equality.
+    """
+    if len(current) != len(desired):
+        return False
+    for cur_item, des_item in zip(current, desired):
+        if isinstance(des_item, dict) and isinstance(cur_item, dict):
+            if not _dict_subset_equal(cur_item, des_item):
+                return False
+        elif cur_item != des_item:
+            return False
+    return True
+
+
 class ApstraClientFactory:
     """
     Factory class to create and manage Apstra clients.
@@ -942,7 +986,9 @@ class ApstraClientFactory:
         tag = tags_client.blueprints[id].tags.get(label=_blueprint_lock_tag_name(id))
         return tag is not None
 
-    def commit_blueprint(self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT, description=None):
+    def commit_blueprint(
+        self, id, timeout=DEFAULT_BLUEPRINT_COMMIT_TIMEOUT, description=None
+    ):
         """
         Commit the blueprint with the given ID.
 
@@ -1138,8 +1184,21 @@ class ApstraClientFactory:
                     changes[key] = nested_changes
                     changed = True
             elif isinstance(desired_value, list) and isinstance(current_value, list):
-                # Compare lists
-                if current_value != desired_value:
+                # Compare lists.  For lists of dicts, use subset matching:
+                # each desired entry is compared against the corresponding
+                # current entry using only the keys the user specified.
+                # This prevents API-injected fields (e.g. 'access_switch_node_ids'
+                # in bound_to entries) from causing spurious changes.
+                # For lists of scalars, fall back to exact equality.
+                if not _lists_match(current_value, desired_value):
+                    current[key] = desired_value
+                    changes[key] = desired_value
+                    changed = True
+            elif isinstance(desired_value, list) and current_value is None:
+                # Treat None (API-returned) as equivalent to an empty list.
+                # If the user provides [] and the API returns null/None, that
+                # is semantically identical — no update needed.
+                if desired_value:
                     current[key] = desired_value
                     changes[key] = desired_value
                     changed = True

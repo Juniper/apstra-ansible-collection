@@ -111,6 +111,23 @@ EXAMPLES = """
           vlan_id: 100
     state: present
 
+- name: Create virtual network with static IPv4
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "Test-VN-static-IPv4"
+      vn_type: "vxlan"
+      security_zone_id: "my-routing-zone"
+      vlan_id: 23
+      ipv4_enabled: true
+      ipv4_subnet: 192.0.2.0/24
+      virtual_gateway_ipv4_enabled: true
+      virtual_gateway_ipv4: 192.0.2.254/24
+      bound_to:
+        - system_id: "spine1"
+    state: present
+
 # Global vlan_id — applies to every bound_to entry that has no per-device override
 - name: Create virtual network with global VLAN ID
   juniper.apstra.virtual_network:
