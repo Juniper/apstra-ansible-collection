@@ -158,6 +158,55 @@ EXAMPLES = """
         - system_id: "apstra_esi_001_leaf_pair1"   # ESI redundancy group
     state: present
 
+# Keyword expansion — bind a VN to all nodes of a role or with a tag in one entry
+- name: Bind virtual network to all leaf switches
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLAN100"
+      vn_type: "vxlan"
+      vlan_id: 100
+      bound_to:
+        - system_id: leafs    # expands to all role='leaf' systems
+    state: present
+
+- name: Bind virtual network to all spines
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLAN200"
+      vn_type: "vxlan"
+      vlan_id: 200
+      bound_to:
+        - system_id: spines   # expands to all role='spine' systems
+    state: present
+
+- name: Bind virtual network to every system (all)
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLAN300"
+      vn_type: "vxlan"
+      vlan_id: 300
+      bound_to:
+        - system_id: all      # expands to every system node
+    state: present
+
+- name: Bind virtual network to tagged compute nodes
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLANXX"
+      vn_type: "vxlan"
+      vlan_id: 400
+      bound_to:
+        - system_id: compute  # expands to all systems tagged 'compute'
+    state: present
+
 # create_policy_tagged — use when you want ONLY a tagged CT and no auto-untagged CT.
 # Without this, Apstra normally expects an untagged CT; by default the module sets
 # create_policy_untagged=True automatically for vxlan VNs.  Setting
@@ -243,6 +292,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_system_node_id,
     resolve_security_zone_id,
     resolve_esi_member_ids,
+    resolve_bound_to_keyword,
 )
 
 
@@ -324,22 +374,31 @@ def main():
 
                     if "system_id" in entry and bp_id:
                         sys_ref = entry["system_id"]
-                        # Check if this is an ESI/MLAG redundancy group:
-                        # if so, expand into one entry per member device.
-                        member_ids = resolve_esi_member_ids(
+                        # Step 0: keyword expansion (all, leafs, spines, <tag>)
+                        keyword_ids = resolve_bound_to_keyword(
                             client_factory, bp_id, sys_ref
                         )
-                        if member_ids is not None:
-                            for mbr_id in member_ids:
-                                mbr_entry = dict(entry)
-                                mbr_entry["system_id"] = mbr_id
-                                expanded.append(mbr_entry)
+                        if keyword_ids is not None:
+                            for node_id in keyword_ids:
+                                kw_entry = dict(entry)
+                                kw_entry["system_id"] = node_id
+                                expanded.append(kw_entry)
                         else:
-                            # Regular system node — resolve label to graph ID
-                            entry["system_id"] = resolve_system_node_id(
+                            # Step 1: ESI/MLAG redundancy group expansion
+                            member_ids = resolve_esi_member_ids(
                                 client_factory, bp_id, sys_ref
                             )
-                            expanded.append(entry)
+                            if member_ids is not None:
+                                for mbr_id in member_ids:
+                                    mbr_entry = dict(entry)
+                                    mbr_entry["system_id"] = mbr_id
+                                    expanded.append(mbr_entry)
+                            else:
+                                # Step 2: regular system node — resolve label
+                                entry["system_id"] = resolve_system_node_id(
+                                    client_factory, bp_id, sys_ref
+                                )
+                                expanded.append(entry)
                     else:
                         expanded.append(entry)
 

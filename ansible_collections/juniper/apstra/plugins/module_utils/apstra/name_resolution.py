@@ -577,6 +577,83 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  bound_to keyword expansion  (virtual_network / VN binding)
+# ──────────────────────────────────────────────────────────────────
+
+# Map lower-case keyword → Apstra role list (None = no filter → all systems)
+_BOUND_TO_ROLE_KEYWORDS = {
+    "all": None,
+    "spine": ["spine"],
+    "spines": ["spine"],
+    "leaf": ["leaf"],
+    "leafs": ["leaf"],
+    "leaves": ["leaf"],
+    "access": ["access"],
+    "accesses": ["access"],
+    "superspine": ["superspine"],
+    "superspines": ["superspine"],
+}
+
+
+def resolve_bound_to_keyword(client_factory, blueprint_id, keyword):
+    """Expand a ``bound_to`` ``system_id`` keyword to a list of system node IDs.
+
+    Supports the following built-in keywords (case-insensitive):
+
+    * ``"all"`` — every system node in the blueprint.
+    * ``"spine"`` / ``"spines"`` — systems with role ``spine``.
+    * ``"leaf"`` / ``"leafs"`` / ``"leaves"`` — systems with role ``leaf``.
+    * ``"access"`` / ``"accesses"`` — systems with role ``access``.
+    * ``"superspine"`` / ``"superspines"`` — systems with role ``superspine``.
+    * ``<tag_label>`` — all systems that carry a blueprint tag whose label
+      exactly matches *keyword* (case-sensitive).
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param keyword: The keyword to expand.
+    :return: A (possibly empty) list of system graph-node ID strings when
+        *keyword* is a recognised built-in keyword **or** an existing tag
+        label.  Returns ``None`` when *keyword* matches neither, so the
+        caller can fall back to :func:`resolve_system_node_id`.
+    """
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_nodes_by_role,
+    )
+
+    kw_lower = keyword.lower()
+
+    # ── Built-in role keywords ────────────────────────────────────
+    if kw_lower in _BOUND_TO_ROLE_KEYWORDS:
+        roles = _BOUND_TO_ROLE_KEYWORDS[kw_lower]
+        nodes = find_nodes_by_role(client_factory, blueprint_id, roles)
+        return [n["id"] for n in nodes.values()]
+
+    # ── Tag-based expansion ───────────────────────────────────────
+    # Query all (system, tag) pairs via the blueprint graph; filter by tag
+    # label in Python.  *keyword* is intentionally NOT interpolated into the
+    # QE string to avoid graph-query injection — matching is done here.
+    results = _run_qe(
+        client_factory,
+        blueprint_id,
+        "node('system', name='sys').out('tag').node('tag', name='t')",
+    )
+    if results:
+        matching = list(
+            {
+                r["sys"]["id"]
+                for r in results
+                if (r.get("t") or {}).get("label") == keyword
+            }
+        )
+        if matching:
+            return matching
+
+    # Not a built-in keyword and no matching tag — caller should treat as a
+    # regular system label / UUID.
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Interface / application-point resolution
 # ──────────────────────────────────────────────────────────────────
 
