@@ -634,15 +634,22 @@ def _handle_global_vim(module, client_factory, id, body, state, result):
             current_object = items[0] if items else None
         else:
             current_object = raw
-    elif body and body.get("display_name"):
-        # Search by display_name in the list
+    elif body and (body.get("display_name") or body.get("management_ip")):
+        # Search by display_name or management_ip in the list
         all_vims = client_factory.object_request(object_type, "get", {})
         # Handle both bare list and {"items": [...]} wrapper
         if isinstance(all_vims, dict) and "items" in all_vims:
             all_vims = all_vims.get("items", [])
         if isinstance(all_vims, list):
             for vim in all_vims:
-                if vim.get("display_name") == body["display_name"]:
+                match = (
+                    body.get("display_name")
+                    and vim.get("display_name") == body["display_name"]
+                ) or (
+                    body.get("management_ip")
+                    and vim.get("management_ip") == body["management_ip"]
+                )
+                if match:
                     current_object = vim
                     if id is None:
                         id = {}
