@@ -128,20 +128,21 @@ EXAMPLES = """
         - system_id: "spine1"
     state: present
 
-# vlan_id at the VN level applies globally; per-device overrides go inside bound_to entries
-- name: Create virtual network with VLAN ID
+# Global vlan_id — injected as a default into every bound_to entry that has
+# no per-device override, then also kept at the VN level for idempotency.
+- name: Create virtual network with global VLAN ID
   juniper.apstra.virtual_network:
     id:
       blueprint: "my-blueprint"
     body:
       label: "prod-vn"
       vn_type: "vxlan"
-      vlan_id: 100          # VN-level VLAN; Apstra stores and returns it here
+      vlan_id: 100
       bound_to:
         - system_id: "leaf1"
         - system_id: "leaf2"
         - system_id: "leaf3"
-          vlan_id: 200    # per-device override — overrides the VN-level vlan_id on leaf3 only
+          vlan_id: 200    # per-device override wins; leaf1/leaf2 get vlan_id 100
     state: present
 
 # ESI pair expansion — specify the redundancy-group name; the module expands
@@ -339,15 +340,19 @@ def main():
             # Ensure vn_id is a string
             if "vn_id" in body and body["vn_id"] is not None:
                 body["vn_id"] = str(body["vn_id"])
-            # Keep vlan_id at the VN level — Apstra stores it there and
-            # returns it in GET responses.  Injecting it into per-device
-            # bound_to entries caused permanent idempotency failures because
-            # Apstra returns vlan_id=null in each bound_to entry while the
-            # desired state had the numeric value.
-            # Per-device vlan_id overrides are still supported by specifying
-            # vlan_id directly inside a bound_to entry in the playbook.
+            # Keep vlan_id at the VN level (Apstra stores/returns it here).
+            # Also propagate it as a global default into bound_to entries
+            # that carry no per-device override — a convenience so the user
+            # does not have to repeat the same vlan_id in every entry.
+            # Note: Apstra normalises vlan_id to the VN level and returns
+            # null per bound_to entry in GET responses.  Per-entry vlan_id
+            # values are stripped from the desired state before the
+            # idempotency comparison (see compare_and_update call below).
+            global_vlan_id = None
             if "vlan_id" in body and body["vlan_id"] is not None:
                 body["vlan_id"] = int(body["vlan_id"])
+                if "bound_to" in body:
+                    global_vlan_id = body["vlan_id"]
 
             # Process bound_to: normalise, expand keywords/ESI groups,
             # and resolve system names to IDs.
@@ -365,6 +370,10 @@ def main():
                     # override; VN-level vlan_id is handled above)
                     if "vlan_id" in entry and entry["vlan_id"] is not None:
                         entry["vlan_id"] = int(entry["vlan_id"])
+
+                    # Apply global vlan_id when the entry has no per-device override
+                    if global_vlan_id is not None and "vlan_id" not in entry:
+                        entry["vlan_id"] = global_vlan_id
 
                     if "system_id" in entry and bp_id:
                         sys_ref = entry["system_id"]
@@ -456,9 +465,30 @@ def main():
             if current_object:
                 result["id"] = id
                 if body:
+                    # Apstra stores vlan_id at the VN level and returns null for
+                    # each bound_to entry.  Strip per-entry vlan_id from the
+                    # desired bound_to before comparison so injected global
+                    # defaults and explicit per-device overrides do not cause
+                    # permanent changed=True.  The full bound_to (with per-entry
+                    # vlan_id) is kept in body and used for the actual patch call.
+                    comparison_body = body
+                    if "bound_to" in body and any(
+                        "vlan_id" in e for e in body["bound_to"]
+                    ):
+                        comparison_body = dict(body)
+                        comparison_body["bound_to"] = [
+                            {k: v for k, v in e.items() if k != "vlan_id"}
+                            for e in body["bound_to"]
+                        ]
                     # Update the object
                     changes = {}
-                    if client_factory.compare_and_update(current_object, body, changes):
+                    if client_factory.compare_and_update(
+                        current_object, comparison_body, changes
+                    ):
+                        # Restore full bound_to (with per-entry vlan_id) if it
+                        # changed, so the patch carries the correct per-device values
+                        if "bound_to" in changes:
+                            changes["bound_to"] = body["bound_to"]
                         updated_object = client_factory.object_request(
                             object_type, "patch", id, changes
                         )
