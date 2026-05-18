@@ -465,25 +465,60 @@ def main():
             if current_object:
                 result["id"] = id
                 if body:
-                    # Apstra stores vlan_id at the VN level and returns null for
-                    # each bound_to entry.  Strip per-entry vlan_id from the
-                    # desired bound_to before comparison so injected global
-                    # defaults and explicit per-device overrides do not cause
-                    # permanent changed=True.  The full bound_to (with per-entry
-                    # vlan_id) is kept in body and used for the actual patch call.
-                    comparison_body = body
-                    if "bound_to" in body and any(
-                        "vlan_id" in e for e in body["bound_to"]
-                    ):
-                        comparison_body = dict(body)
-                        comparison_body["bound_to"] = [
-                            {k: v for k, v in e.items() if k != "vlan_id"}
+                    # Normalise current_object's bound_to entries so the
+                    # comparison uses real-time data without needing to strip
+                    # vlan_id from the desired state.
+                    #
+                    # Apstra stores vlan_id on each vn_instance node and
+                    # returns it in GET responses (compact_dict keeps non-null
+                    # values).  Some deployments normalise it to the VN level
+                    # and return null per bound_to entry.  To handle both:
+                    #
+                    # - Fill current entries that are missing vlan_id with
+                    #   global_vlan_id, BUT ONLY when the matching desired
+                    #   entry also carries the global default (not an explicit
+                    #   per-device override).  This makes the comparison
+                    #   apples-to-apples for the common "one VLAN for all"
+                    #   case without masking override changes.
+                    #
+                    # - Entries with an EXPLICIT per-device override
+                    #   (desired vlan_id != global_vlan_id) are left as
+                    #   returned by GET.  If Apstra stored the value it will
+                    #   be present and the comparison is exact; if it returned
+                    #   null the comparison detects the pending change.
+                    #
+                    # comparison_body is always body (unmodified desired).
+                    comparison_current = current_object
+                    if global_vlan_id is not None and "bound_to" in body:
+                        # System IDs that carry an explicit per-device override
+                        explicit_override_ids = {
+                            e["system_id"]
                             for e in body["bound_to"]
-                        ]
+                            if "system_id" in e
+                            and e.get("vlan_id") not in (None, global_vlan_id)
+                        }
+                        current_bound_to = current_object.get("bound_to", [])
+                        if any(
+                            "vlan_id" not in e or e.get("vlan_id") is None
+                            for e in current_bound_to
+                        ):
+                            normalized = []
+                            for entry in current_bound_to:
+                                if (
+                                    "vlan_id" not in entry
+                                    or entry.get("vlan_id") is None
+                                ) and entry.get(
+                                    "system_id"
+                                ) not in explicit_override_ids:
+                                    entry = dict(entry)
+                                    entry["vlan_id"] = global_vlan_id
+                                normalized.append(entry)
+                            comparison_current = dict(current_object)
+                            comparison_current["bound_to"] = normalized
                     # Update the object
                     changes = {}
                     if client_factory.compare_and_update(
-                        current_object, comparison_body, changes
+                        comparison_current, body, changes
                     ):
                         # Restore full bound_to (with per-entry vlan_id) if it
                         # changed, so the patch carries the correct per-device values
