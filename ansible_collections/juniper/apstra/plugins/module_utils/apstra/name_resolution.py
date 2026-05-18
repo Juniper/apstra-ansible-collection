@@ -580,9 +580,11 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
 #  bound_to keyword expansion  (virtual_network / VN binding)
 # ──────────────────────────────────────────────────────────────────
 
-# Map lower-case keyword → Apstra role list (None = no filter → all systems)
+# Map lower-case keyword → Apstra role list.
+# "all" expands to roles valid as bound_to targets (leaf + access).
+# Spines and superspines are not valid bound_to endpoints for virtual networks.
 _BOUND_TO_ROLE_KEYWORDS = {
-    "all": None,
+    "all": ["leaf", "access"],
     "spine": ["spine"],
     "spines": ["spine"],
     "leaf": ["leaf"],
@@ -629,13 +631,31 @@ def resolve_bound_to_keyword(client_factory, blueprint_id, keyword):
         return [n["id"] for n in nodes.values()]
 
     # ── Tag-based expansion ───────────────────────────────────────
-    # Query all (system, tag) pairs via the blueprint graph; filter by tag
-    # label in Python.  *keyword* is intentionally NOT interpolated into the
-    # QE string to avoid graph-query injection — matching is done here.
+    # *keyword* is never interpolated into any QE string to prevent
+    # graph-query injection; all tag-label matching is done in Python.
+    #
+    # Strategy 1 — system node 'tags' property.
+    # Some Apstra versions store applied tag labels as a list property
+    # directly on the system graph node.
+    sys_results = _run_qe(client_factory, blueprint_id, "node('system', name='sys')")
+    if sys_results:
+        matching = [
+            r["sys"]["id"]
+            for r in sys_results
+            if keyword in ((r.get("sys") or {}).get("tags") or [])
+        ]
+        if matching:
+            return matching
+
+    # Strategy 2 — QE graph traversal.
+    # Other Apstra versions store tags as separate 'tag' graph nodes
+    # connected to system nodes via outgoing edges.  Use .out() without
+    # an edge-type argument (same pattern as find_redundancy_groups) so
+    # the traversal is not sensitive to the internal edge-type name.
     results = _run_qe(
         client_factory,
         blueprint_id,
-        "node('system', name='sys').out('tag').node('tag', name='t')",
+        "node('system', name='sys').out().node('tag', name='t')",
     )
     if results:
         matching = list(

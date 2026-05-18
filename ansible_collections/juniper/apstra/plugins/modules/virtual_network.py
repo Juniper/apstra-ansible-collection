@@ -128,20 +128,20 @@ EXAMPLES = """
         - system_id: "spine1"
     state: present
 
-# Global vlan_id — applies to every bound_to entry that has no per-device override
-- name: Create virtual network with global VLAN ID
+# vlan_id at the VN level applies globally; per-device overrides go inside bound_to entries
+- name: Create virtual network with VLAN ID
   juniper.apstra.virtual_network:
     id:
       blueprint: "my-blueprint"
     body:
       label: "prod-vn"
       vn_type: "vxlan"
-      vlan_id: 100
+      vlan_id: 100          # VN-level VLAN; Apstra stores and returns it here
       bound_to:
         - system_id: "leaf1"
         - system_id: "leaf2"
         - system_id: "leaf3"
-          vlan_id: 200    # per-device override wins
+          vlan_id: 200    # per-device override — overrides the VN-level vlan_id on leaf3 only
     state: present
 
 # ESI pair expansion — specify the redundancy-group name; the module expands
@@ -339,21 +339,18 @@ def main():
             # Ensure vn_id is a string
             if "vn_id" in body and body["vn_id"] is not None:
                 body["vn_id"] = str(body["vn_id"])
-            # Feature: consume top-level vlan_id as global default for bound_to
-            # entries.  The value is stripped from body before the API call so it
-            # is never forwarded to Apstra as a VN-level field.
-            # When bound_to is absent, vlan_id is kept in body and passed through
-            # to the API as a VN-level field (existing behaviour).
-            global_vlan_id = None
-            if "vlan_id" in body and "bound_to" in body:
-                global_vlan_id = body.pop("vlan_id")
-                if global_vlan_id is not None:
-                    global_vlan_id = int(global_vlan_id)
-            elif "vlan_id" in body and body["vlan_id"] is not None:
+            # Keep vlan_id at the VN level — Apstra stores it there and
+            # returns it in GET responses.  Injecting it into per-device
+            # bound_to entries caused permanent idempotency failures because
+            # Apstra returns vlan_id=null in each bound_to entry while the
+            # desired state had the numeric value.
+            # Per-device vlan_id overrides are still supported by specifying
+            # vlan_id directly inside a bound_to entry in the playbook.
+            if "vlan_id" in body and body["vlan_id"] is not None:
                 body["vlan_id"] = int(body["vlan_id"])
 
-            # Process bound_to: normalise, apply global vlan_id default,
-            # expand ESI redundancy groups, and resolve system names to IDs.
+            # Process bound_to: normalise, expand keywords/ESI groups,
+            # and resolve system names to IDs.
             if "bound_to" in body and isinstance(body["bound_to"], list):
                 bp_id = id.get("blueprint")
                 expanded = []
@@ -364,13 +361,10 @@ def main():
                     else:
                         entry = dict(entry)  # shallow copy — avoid mutating params
 
-                    # Coerce per-entry vlan_id to int
+                    # Coerce per-entry vlan_id to int (explicit per-device
+                    # override; VN-level vlan_id is handled above)
                     if "vlan_id" in entry and entry["vlan_id"] is not None:
                         entry["vlan_id"] = int(entry["vlan_id"])
-
-                    # Apply global vlan_id when the entry carries no override
-                    if global_vlan_id is not None and "vlan_id" not in entry:
-                        entry["vlan_id"] = global_vlan_id
 
                     if "system_id" in entry and bp_id:
                         sys_ref = entry["system_id"]

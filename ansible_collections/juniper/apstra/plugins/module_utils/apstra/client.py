@@ -313,21 +313,39 @@ def _dict_subset_equal(current, desired):
 def _lists_match(current, desired):
     """Return True when *current* and *desired* lists are semantically equal.
 
-    For lists of dicts, compare using subset matching per position: each
-    desired entry is checked against the corresponding current entry using
-    only the keys the user specified (see :func:`_dict_subset_equal`).
+    For lists of dicts, use **order-independent** subset matching: each
+    desired entry must find exactly one unmatched current entry whose
+    user-specified keys all match (see :func:`_dict_subset_equal`).  This
+    means lists like ``bound_to`` compare correctly even when the Apstra
+    API returns entries in a different order than the playbook.
 
-    For lists of scalars (strings, ints, bools), fall back to exact equality.
+    For lists of scalars (strings, ints, bools), fall back to exact
+    positional equality.
     """
     if len(current) != len(desired):
         return False
-    for cur_item, des_item in zip(current, desired):
-        if isinstance(des_item, dict) and isinstance(cur_item, dict):
-            if not _dict_subset_equal(cur_item, des_item):
+    # Determine whether this is a list of dicts
+    if any(isinstance(item, dict) for item in desired):
+        # Order-independent matching: each desired item must consume exactly
+        # one unmatched current item via subset equality.
+        available = list(current)
+        for des_item in desired:
+            matched = False
+            for i, cur_item in enumerate(available):
+                if isinstance(cur_item, dict) and isinstance(des_item, dict):
+                    if _dict_subset_equal(cur_item, des_item):
+                        available.pop(i)
+                        matched = True
+                        break
+                elif cur_item == des_item:
+                    available.pop(i)
+                    matched = True
+                    break
+            if not matched:
                 return False
-        elif cur_item != des_item:
-            return False
-    return True
+        return True
+    # Scalar list: exact positional match
+    return current == desired
 
 
 class ApstraClientFactory:
