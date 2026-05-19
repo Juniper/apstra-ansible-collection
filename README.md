@@ -58,8 +58,8 @@ Ansible is an agentless automation tool. You write **playbooks** — plain YAML 
 ### Step 1 — Install Ansible and This Collection
 
 ```bash
-# Install Ansible (Python 3.11 recommended)
-pip install ansible-core>=2.16.14
+# Install Ansible (Python 3.12 recommended)
+pip install ansible-core>=2.16.16
 
 # Install the collection from Ansible Galaxy
 ansible-galaxy collection install juniper.apstra

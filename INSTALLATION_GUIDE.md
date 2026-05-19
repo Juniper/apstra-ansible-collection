@@ -30,28 +30,28 @@ This guide provides step-by-step instructions for **customers and partners** to 
 
 | Requirement | Minimum Version |
 |---|---|
-| **Python** | 3.11+ |
-| **Ansible Core** | 2.16.14+ (collection requires >= 2.15.0) |
+| **Python** | 3.12+ |
+| **Ansible Core** | 2.16.16+ (collection requires >= 2.15.0) |
 | **pip** | Latest recommended |
 | **Apstra Server** | 5.0+ |
 
-### Install Python 3.11+ and Ansible
+### Install Python 3.12+ and Ansible
 
 ```bash
 # Ubuntu / Debian
-sudo apt update && sudo apt install -y python3.11 python3.11-venv python3-pip
+sudo apt update && sudo apt install -y python3.12 python3.12-venv python3-pip
 
 # RHEL / CentOS / Rocky
-sudo dnf install -y python3.11 python3.11-pip
+sudo dnf install -y python3.12 python3.12-pip
 
 # macOS (via Homebrew)
-brew install python@3.11
+brew install python@3.12
 ```
 
 Set up a virtual environment (recommended):
 
 ```bash
-python3.11 -m venv ~/apstra-ansible-env
+python3.12 -m venv ~/apstra-ansible-env
 source ~/apstra-ansible-env/bin/activate
 pip install --upgrade pip
 ```
@@ -59,7 +59,7 @@ pip install --upgrade pip
 Install Ansible:
 
 ```bash
-pip install "ansible-core>=2.16.14"
+pip install "ansible-core>=2.16.16"
 ```
 
 ---
@@ -202,7 +202,7 @@ pip install "jmespath>=1.1.0" "jsonpatch>=1.33" "kubernetes>=35.0.0" "requests-o
 | Package | Minimum Version | Purpose |
 |---|---|---|
 | `aos_sdk` | 6.1.0 | Core Apstra API SDK (Juniper-provided) |
-| `ansible-core` | 2.16.14 | Ansible automation engine |
+| `ansible-core` | 2.16.16 | Ansible automation engine |
 | `jmespath` | 1.1.0 | JSON query expressions for filtering |
 | `jsonpatch` | 1.33 | JSON Patch (RFC 6902) for config diffs |
 | `kubernetes` | 35.0.0 | Kubernetes API client (for K8s-based Apstra deployments) |
@@ -532,10 +532,10 @@ For a quick setup on a fresh machine:
 
 ```bash
 # 1. Create virtual environment and install Ansible + collection
-python3.11 -m venv ~/apstra-ansible-env && \
+python3.12 -m venv ~/apstra-ansible-env && \
 source ~/apstra-ansible-env/bin/activate && \
 pip install --upgrade pip && \
-pip install "ansible-core>=2.16.14" && \
+pip install "ansible-core>=2.16.16" && \
 ansible-galaxy collection install juniper.apstra --ignore-certs
 
 # 2. Download the SDK from Juniper Support Downloads:
