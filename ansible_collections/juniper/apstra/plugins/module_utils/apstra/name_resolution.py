@@ -621,6 +621,42 @@ def resolve_rg_node_id(client_factory, blueprint_id, node_ref):
     return None
 
 
+def collapse_to_rg_if_applicable(client_factory, blueprint_id, system_ids):
+    """If *system_ids* exactly match the full membership of one RG, return
+    that RG's node ID.  Otherwise return ``None`` (use individual IDs).
+
+    When a tag or role keyword expands to individual system IDs that
+    together form an ESI/MLAG redundancy group, Apstra collapses them to
+    the RG node ID in GET responses.  Sending the individual IDs in
+    POST/PATCH always triggers a mismatch on the next run.  This helper
+    detects the pattern and returns the canonical RG node ID so the
+    desired state matches what GET returns.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param system_ids: A list of system node IDs returned by keyword expansion.
+    :return: RG node ID string if all *system_ids* form exactly one RG,
+             otherwise ``None``.
+    """
+    if not system_ids or len(system_ids) < 2:
+        return None
+
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_redundancy_groups,
+    )
+
+    rg_map = find_redundancy_groups(client_factory, blueprint_id)
+    if not rg_map:
+        return None
+
+    target = set(system_ids)
+    for rg_id, info in rg_map.items():
+        if set(info.get("members", [])) == target:
+            return rg_id
+
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────
 #  bound_to keyword expansion  (virtual_network / VN binding)
 # ──────────────────────────────────────────────────────────────────

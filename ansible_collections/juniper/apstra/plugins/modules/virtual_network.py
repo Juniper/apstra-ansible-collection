@@ -295,6 +295,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_esi_member_ids,
     resolve_rg_node_id,
     resolve_bound_to_keyword,
+    collapse_to_rg_if_applicable,
 )
 
 
@@ -398,10 +399,20 @@ def main():
                                 client_factory, bp_id, sys_ref
                             )
                             if keyword_ids is not None:
-                                for node_id in keyword_ids:
-                                    kw_entry = dict(entry)
-                                    kw_entry["system_id"] = node_id
-                                    expanded.append(kw_entry)
+                                # If the expanded IDs are the complete membership
+                                # of one RG, Apstra will store the RG node ID in
+                                # GET — use it directly to stay idempotent.
+                                rg_node = collapse_to_rg_if_applicable(
+                                    client_factory, bp_id, keyword_ids
+                                )
+                                if rg_node is not None:
+                                    entry["system_id"] = rg_node
+                                    expanded.append(entry)
+                                else:
+                                    for node_id in keyword_ids:
+                                        kw_entry = dict(entry)
+                                        kw_entry["system_id"] = node_id
+                                        expanded.append(kw_entry)
                             else:
                                 # Step 2: ESI/MLAG redundancy group expansion
                                 member_ids = resolve_esi_member_ids(
