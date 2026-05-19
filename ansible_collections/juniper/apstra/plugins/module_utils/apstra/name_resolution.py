@@ -694,13 +694,13 @@ def resolve_bound_to_keyword(client_factory, blueprint_id, keyword):
 
     # Strategy 2 — QE graph traversal.
     # Other Apstra versions store tags as separate 'tag' graph nodes
-    # connected to system nodes via outgoing edges.  Use .out() without
-    # an edge-type argument (same pattern as find_redundancy_groups) so
-    # the traversal is not sensitive to the internal edge-type name.
+    # with outgoing edges pointing TO system nodes (tag → system).
+    # Use .out() without an edge-type argument so the traversal is not
+    # sensitive to the internal edge-type name.
     results = _run_qe(
         client_factory,
         blueprint_id,
-        "node('system', name='sys').out().node('tag', name='t')",
+        "node('tag', name='t').out().node('system', name='sys')",
     )
     if results:
         matching = list(
