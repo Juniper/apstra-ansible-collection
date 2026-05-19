@@ -208,11 +208,15 @@ options:
     required: false
   node_id:
     description:
-      - The blueprint node ID to patch (single-node mode).
+      - The blueprint node(s) to patch in C(state=node_updated).
+      - Accepts a single value or a list of values.
+      - Each value may be a node UUID, a graph-node short ID, or a
+        device label (e.g. C(leaf1)).  Labels are resolved to their
+        graph-node UUID automatically.
       - Mutually exclusive with C(assignment).
       - Only used when C(state=node_updated).
       - Alias C(rack_id) can be used for rack operations.
-    type: str
+    type: raw
     required: false
     aliases: [rack_id]
   system_id:
@@ -386,7 +390,27 @@ EXAMPLES = """
     system_id: "SERIAL12345"
     state: node_updated
 
-# Set deploy mode on a node
+# Set deploy mode on a node by label (no UUID lookup needed)
+- name: Set leaf1 to drain mode by label
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    node_id: "leaf1"
+    deploy_mode: drain
+    state: node_updated
+
+# Set deploy mode on multiple nodes by label (list form)
+- name: Set leaf1 and leaf2 to drain mode
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    node_id:
+      - "leaf1"
+      - "leaf2"
+    deploy_mode: drain
+    state: node_updated
+
+# Set deploy mode on a node (legacy UUID form still works)
 - name: Set leaf1 to deploy mode
   juniper.apstra.blueprint:
     id:
@@ -544,6 +568,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_template_id as _resolve_template_id,
     resolve_graph_node_id,
     resolve_rack_node_id,
+    resolve_system_node_id,
 )
 
 
@@ -803,12 +828,20 @@ def _handle_node_updated(module, client_factory, blueprint_id):
             msg="Either node_id, current_label, or assignment is required when state=node_updated"
         )
 
-    # Read current node state
-    current = get_node(client_factory, blueprint_id, node_id)
-    if current is None:
-        module.fail_json(
-            msg=f"Node '{node_id}' not found in blueprint '{blueprint_id}'"
-        )
+    # Normalise: node_id may be a str or a list of str
+    if isinstance(node_id, str):
+        node_ids = [node_id]
+    else:
+        node_ids = list(node_id)
+
+    # Resolve each entry: label → graph-node UUID via system node resolution
+    resolved_ids = []
+    for nid in node_ids:
+        try:
+            resolved = resolve_system_node_id(client_factory, blueprint_id, nid)
+        except ValueError as exc:
+            module.fail_json(msg=str(exc))
+        resolved_ids.append((nid, resolved))
 
     # Build desired fields from params
     desired = {}
@@ -830,25 +863,54 @@ def _handle_node_updated(module, client_factory, blueprint_id):
     if not desired:
         return dict(
             changed=False,
-            node=current,
             msg="no node fields to update",
         )
 
-    # Only patch what actually changed
-    changes = node_needs_update(current, desired)
-    if not changes:
-        return dict(
-            changed=False,
-            node=current,
-            msg="node already up to date",
-        )
+    # Apply to each resolved node
+    nodes_updated = []
+    nodes_unchanged = []
+    for orig_ref, resolved_id in resolved_ids:
+        current = get_node(client_factory, blueprint_id, resolved_id)
+        if current is None:
+            module.fail_json(
+                msg=f"Node '{orig_ref}' (resolved: {resolved_id}) not found in blueprint '{blueprint_id}'"
+            )
 
-    patch_node(client_factory, blueprint_id, node_id, changes)
-    final = {**current, **changes}
+        changes = node_needs_update(current, desired)
+        if not changes:
+            nodes_unchanged.append(resolved_id)
+            continue
+
+        patch_node(client_factory, blueprint_id, resolved_id, changes)
+        nodes_updated.append({**current, **changes, "node_id": resolved_id})
+
+    # Return single-node result format when only one node was targeted
+    if len(resolved_ids) == 1:
+        orig_ref, resolved_id = resolved_ids[0]
+        if nodes_updated:
+            node_state = nodes_updated[0]
+            return dict(
+                changed=True,
+                node=node_state,
+                node_id=resolved_id,
+                msg=f"node updated: {', '.join(k for k in desired if k in node_state)}",
+            )
+        else:
+            return dict(
+                changed=False,
+                node=get_node(client_factory, blueprint_id, resolved_id),
+                node_id=resolved_id,
+                msg="node already up to date",
+            )
+
+    # Multi-node result format
+    n = len(nodes_updated)
+    u = len(nodes_unchanged)
     return dict(
-        changed=True,
-        node=final,
-        msg=f"node updated: {', '.join(changes.keys())}",
+        changed=bool(nodes_updated),
+        nodes_updated=nodes_updated,
+        nodes_unchanged=nodes_unchanged,
+        msg=f"{n} node(s) updated, {u} already up to date",
     )
 
 
@@ -903,7 +965,7 @@ def main():
         if_type=dict(type="str", required=False, default="ethernet"),
         # Node params (state=node_updated)
         assignment=dict(type="dict", required=False),
-        node_id=dict(type="str", required=False, aliases=["rack_id"]),
+        node_id=dict(type="raw", required=False, aliases=["rack_id"]),
         system_id=dict(type="str", required=False),
         deploy_mode=dict(
             type="str",

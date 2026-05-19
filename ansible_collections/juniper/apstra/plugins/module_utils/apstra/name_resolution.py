@@ -576,6 +576,184 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
     return None
 
 
+def resolve_rg_node_id(client_factory, blueprint_id, node_ref):
+    """Return the redundancy-group graph-node ID if *node_ref* is an RG
+    label or ID, otherwise return ``None``.
+
+    Apstra stores bound_to entries using the **RG node ID** (not the
+    individual member system IDs) whenever the bound systems form an
+    ESI or MLAG redundancy group.  Using the RG node ID in POST/PATCH
+    requests produces a GET response that is identical to the desired
+    state, which is required for idempotency.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param node_ref: A candidate RG label or graph-node ID string.
+    :return: The RG graph-node ID string if *node_ref* matches an RG,
+             otherwise ``None``.
+    """
+    if not node_ref:
+        return None
+
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_redundancy_groups,
+    )
+
+    rg_map = find_redundancy_groups(client_factory, blueprint_id)
+    if not rg_map:
+        return None
+
+    # Exact ID match
+    if node_ref in rg_map:
+        return node_ref
+
+    # Exact label match
+    for rg_id, info in rg_map.items():
+        if info["label"] == node_ref:
+            return rg_id
+
+    # Case-insensitive label fallback
+    ref_lower = node_ref.lower()
+    for rg_id, info in rg_map.items():
+        if info["label"].lower() == ref_lower:
+            return rg_id
+
+    return None
+
+
+def collapse_to_rg_if_applicable(client_factory, blueprint_id, system_ids):
+    """If *system_ids* exactly match the full membership of one RG, return
+    that RG's node ID.  Otherwise return ``None`` (use individual IDs).
+
+    When a tag or role keyword expands to individual system IDs that
+    together form an ESI/MLAG redundancy group, Apstra collapses them to
+    the RG node ID in GET responses.  Sending the individual IDs in
+    POST/PATCH always triggers a mismatch on the next run.  This helper
+    detects the pattern and returns the canonical RG node ID so the
+    desired state matches what GET returns.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param system_ids: A list of system node IDs returned by keyword expansion.
+    :return: RG node ID string if all *system_ids* form exactly one RG,
+             otherwise ``None``.
+    """
+    if not system_ids or len(system_ids) < 2:
+        return None
+
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_redundancy_groups,
+    )
+
+    rg_map = find_redundancy_groups(client_factory, blueprint_id)
+    if not rg_map:
+        return None
+
+    target = set(system_ids)
+    for rg_id, info in rg_map.items():
+        if set(info.get("members", [])) == target:
+            return rg_id
+
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────
+#  bound_to keyword expansion  (virtual_network / VN binding)
+# ──────────────────────────────────────────────────────────────────
+
+# Map lower-case keyword → Apstra role list.
+# "all" expands to roles valid as bound_to targets (leaf + access).
+# Spines and superspines are not valid bound_to endpoints for virtual networks.
+_BOUND_TO_ROLE_KEYWORDS = {
+    "all": ["leaf", "access"],
+    "spine": ["spine"],
+    "spines": ["spine"],
+    "leaf": ["leaf"],
+    "leafs": ["leaf"],
+    "leaves": ["leaf"],
+    "access": ["access"],
+    "accesses": ["access"],
+    "superspine": ["superspine"],
+    "superspines": ["superspine"],
+}
+
+
+def resolve_bound_to_keyword(client_factory, blueprint_id, keyword):
+    """Expand a ``bound_to`` ``system_id`` keyword to a list of system node IDs.
+
+    Supports the following built-in keywords (case-insensitive):
+
+    * ``"all"`` — every system node in the blueprint.
+    * ``"spine"`` / ``"spines"`` — systems with role ``spine``.
+    * ``"leaf"`` / ``"leafs"`` / ``"leaves"`` — systems with role ``leaf``.
+    * ``"access"`` / ``"accesses"`` — systems with role ``access``.
+    * ``"superspine"`` / ``"superspines"`` — systems with role ``superspine``.
+    * ``<tag_label>`` — all systems that carry a blueprint tag whose label
+      exactly matches *keyword* (case-sensitive).
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param keyword: The keyword to expand.
+    :return: A (possibly empty) list of system graph-node ID strings when
+        *keyword* is a recognised built-in keyword **or** an existing tag
+        label.  Returns ``None`` when *keyword* matches neither, so the
+        caller can fall back to :func:`resolve_system_node_id`.
+    """
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_nodes_by_role,
+    )
+
+    kw_lower = keyword.lower()
+
+    # ── Built-in role keywords ────────────────────────────────────
+    if kw_lower in _BOUND_TO_ROLE_KEYWORDS:
+        roles = _BOUND_TO_ROLE_KEYWORDS[kw_lower]
+        nodes = find_nodes_by_role(client_factory, blueprint_id, roles)
+        return [n["id"] for n in nodes.values()]
+
+    # ── Tag-based expansion ───────────────────────────────────────
+    # *keyword* is never interpolated into any QE string to prevent
+    # graph-query injection; all tag-label matching is done in Python.
+    #
+    # Strategy 1 — system node 'tags' property.
+    # Some Apstra versions store applied tag labels as a list property
+    # directly on the system graph node.
+    sys_results = _run_qe(client_factory, blueprint_id, "node('system', name='sys')")
+    if sys_results:
+        matching = [
+            r["sys"]["id"]
+            for r in sys_results
+            if keyword in ((r.get("sys") or {}).get("tags") or [])
+        ]
+        if matching:
+            return matching
+
+    # Strategy 2 — QE graph traversal.
+    # Other Apstra versions store tags as separate 'tag' graph nodes
+    # with outgoing edges pointing TO system nodes (tag → system).
+    # Use .out() without an edge-type argument so the traversal is not
+    # sensitive to the internal edge-type name.
+    results = _run_qe(
+        client_factory,
+        blueprint_id,
+        "node('tag', name='t').out().node('system', name='sys')",
+    )
+    if results:
+        matching = list(
+            {
+                r["sys"]["id"]
+                for r in results
+                if (r.get("t") or {}).get("label") == keyword
+            }
+        )
+        if matching:
+            return matching
+
+    # Not a built-in keyword and no matching tag — caller should treat as a
+    # regular system label / UUID.
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────
 #  Interface / application-point resolution
 # ──────────────────────────────────────────────────────────────────

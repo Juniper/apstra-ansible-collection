@@ -128,7 +128,8 @@ EXAMPLES = """
         - system_id: "spine1"
     state: present
 
-# Global vlan_id — applies to every bound_to entry that has no per-device override
+# Global vlan_id — injected as a default into every bound_to entry that has
+# no per-device override, then also kept at the VN level for idempotency.
 - name: Create virtual network with global VLAN ID
   juniper.apstra.virtual_network:
     id:
@@ -141,7 +142,7 @@ EXAMPLES = """
         - system_id: "leaf1"
         - system_id: "leaf2"
         - system_id: "leaf3"
-          vlan_id: 200    # per-device override wins
+          vlan_id: 200    # per-device override wins; leaf1/leaf2 get vlan_id 100
     state: present
 
 # ESI pair expansion — specify the redundancy-group name; the module expands
@@ -156,6 +157,55 @@ EXAMPLES = """
       vlan_id: 300
       bound_to:
         - system_id: "apstra_esi_001_leaf_pair1"   # ESI redundancy group
+    state: present
+
+# Keyword expansion — bind a VN to all nodes of a role or with a tag in one entry
+- name: Bind virtual network to all leaf switches
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLAN100"
+      vn_type: "vxlan"
+      vlan_id: 100
+      bound_to:
+        - system_id: leafs    # expands to all role='leaf' systems
+    state: present
+
+- name: Bind virtual network to all spines
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLAN200"
+      vn_type: "vxlan"
+      vlan_id: 200
+      bound_to:
+        - system_id: spines   # expands to all role='spine' systems
+    state: present
+
+- name: Bind virtual network to every system (all)
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLAN300"
+      vn_type: "vxlan"
+      vlan_id: 300
+      bound_to:
+        - system_id: all      # expands to every system node
+    state: present
+
+- name: Bind virtual network to tagged compute nodes
+  juniper.apstra.virtual_network:
+    id:
+      blueprint: "my-blueprint"
+    body:
+      label: "VLANXX"
+      vn_type: "vxlan"
+      vlan_id: 400
+      bound_to:
+        - system_id: compute  # expands to all systems tagged 'compute'
     state: present
 
 # create_policy_tagged — use when you want ONLY a tagged CT and no auto-untagged CT.
@@ -243,6 +293,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_system_node_id,
     resolve_security_zone_id,
     resolve_esi_member_ids,
+    resolve_rg_node_id,
+    resolve_bound_to_keyword,
+    collapse_to_rg_if_applicable,
 )
 
 
@@ -289,21 +342,22 @@ def main():
             # Ensure vn_id is a string
             if "vn_id" in body and body["vn_id"] is not None:
                 body["vn_id"] = str(body["vn_id"])
-            # Feature: consume top-level vlan_id as global default for bound_to
-            # entries.  The value is stripped from body before the API call so it
-            # is never forwarded to Apstra as a VN-level field.
-            # When bound_to is absent, vlan_id is kept in body and passed through
-            # to the API as a VN-level field (existing behaviour).
+            # Keep vlan_id at the VN level (Apstra stores/returns it here).
+            # Also propagate it as a global default into bound_to entries
+            # that carry no per-device override — a convenience so the user
+            # does not have to repeat the same vlan_id in every entry.
+            # Note: Apstra normalises vlan_id to the VN level and returns
+            # null per bound_to entry in GET responses.  Per-entry vlan_id
+            # values are stripped from the desired state before the
+            # idempotency comparison (see compare_and_update call below).
             global_vlan_id = None
-            if "vlan_id" in body and "bound_to" in body:
-                global_vlan_id = body.pop("vlan_id")
-                if global_vlan_id is not None:
-                    global_vlan_id = int(global_vlan_id)
-            elif "vlan_id" in body and body["vlan_id"] is not None:
+            if "vlan_id" in body and body["vlan_id"] is not None:
                 body["vlan_id"] = int(body["vlan_id"])
+                if "bound_to" in body:
+                    global_vlan_id = body["vlan_id"]
 
-            # Process bound_to: normalise, apply global vlan_id default,
-            # expand ESI redundancy groups, and resolve system names to IDs.
+            # Process bound_to: normalise, expand keywords/ESI groups,
+            # and resolve system names to IDs.
             if "bound_to" in body and isinstance(body["bound_to"], list):
                 bp_id = id.get("blueprint")
                 expanded = []
@@ -314,32 +368,67 @@ def main():
                     else:
                         entry = dict(entry)  # shallow copy — avoid mutating params
 
-                    # Coerce per-entry vlan_id to int
+                    # Coerce per-entry vlan_id to int (explicit per-device
+                    # override; VN-level vlan_id is handled above)
                     if "vlan_id" in entry and entry["vlan_id"] is not None:
                         entry["vlan_id"] = int(entry["vlan_id"])
 
-                    # Apply global vlan_id when the entry carries no override
+                    # Apply global vlan_id when the entry has no per-device override
                     if global_vlan_id is not None and "vlan_id" not in entry:
                         entry["vlan_id"] = global_vlan_id
 
                     if "system_id" in entry and bp_id:
                         sys_ref = entry["system_id"]
-                        # Check if this is an ESI/MLAG redundancy group:
-                        # if so, expand into one entry per member device.
-                        member_ids = resolve_esi_member_ids(
-                            client_factory, bp_id, sys_ref
-                        )
-                        if member_ids is not None:
-                            for mbr_id in member_ids:
-                                mbr_entry = dict(entry)
-                                mbr_entry["system_id"] = mbr_id
-                                expanded.append(mbr_entry)
+                        # Step 0: RG label/ID → use RG node ID directly.
+                        # Apstra stores bound_to entries as RG node IDs (not
+                        # individual member IDs) when the systems form an ESI
+                        # or MLAG redundancy group.  By resolving the RG label
+                        # to its node ID *before* tag expansion we ensure that
+                        # the desired state matches what GET returns, which is
+                        # required for idempotency.  An RG label that also
+                        # happens to be a blueprint tag (a common naming
+                        # convention) would otherwise be expanded into the
+                        # individual member system IDs, causing a mismatch.
+                        rg_id = resolve_rg_node_id(client_factory, bp_id, sys_ref)
+                        if rg_id is not None:
+                            entry["system_id"] = rg_id
+                            expanded.append(entry)
                         else:
-                            # Regular system node — resolve label to graph ID
-                            entry["system_id"] = resolve_system_node_id(
+                            # Step 1: keyword expansion (all, leafs, spines, <tag>)
+                            keyword_ids = resolve_bound_to_keyword(
                                 client_factory, bp_id, sys_ref
                             )
-                            expanded.append(entry)
+                            if keyword_ids is not None:
+                                # If the expanded IDs are the complete membership
+                                # of one RG, Apstra will store the RG node ID in
+                                # GET — use it directly to stay idempotent.
+                                rg_node = collapse_to_rg_if_applicable(
+                                    client_factory, bp_id, keyword_ids
+                                )
+                                if rg_node is not None:
+                                    entry["system_id"] = rg_node
+                                    expanded.append(entry)
+                                else:
+                                    for node_id in keyword_ids:
+                                        kw_entry = dict(entry)
+                                        kw_entry["system_id"] = node_id
+                                        expanded.append(kw_entry)
+                            else:
+                                # Step 2: ESI/MLAG redundancy group expansion
+                                member_ids = resolve_esi_member_ids(
+                                    client_factory, bp_id, sys_ref
+                                )
+                                if member_ids is not None:
+                                    for mbr_id in member_ids:
+                                        mbr_entry = dict(entry)
+                                        mbr_entry["system_id"] = mbr_id
+                                        expanded.append(mbr_entry)
+                                else:
+                                    # Step 3: regular system node — resolve label
+                                    entry["system_id"] = resolve_system_node_id(
+                                        client_factory, bp_id, sys_ref
+                                    )
+                                    expanded.append(entry)
                     else:
                         expanded.append(entry)
 
@@ -403,9 +492,47 @@ def main():
             if current_object:
                 result["id"] = id
                 if body:
+                    # Strip vlan_id from bound_to on BOTH sides before
+                    # comparison.
+                    #
+                    # Live testing confirmed that Apstra auto-assigns per-
+                    # vn_instance VLANs independently of the user-supplied
+                    # value (EVPN blueprints assign their own VLAN; non-EVPN
+                    # may also normalise the value).  Sending a specific
+                    # vlan_id per bound_to entry is still useful for
+                    # deployments that honour it (the value is kept in body
+                    # and sent in create/patch API calls), but comparing it
+                    # against the GET response always produces a spurious
+                    # mismatch because Apstra stores a different value.
+                    #
+                    # VN-level vlan_id (body["vlan_id"]) is NOT stripped and
+                    # is still compared normally by compare_and_update.
+                    def _strip_vlan_id(entries):
+                        return [
+                            {k: v for k, v in e.items() if k != "vlan_id"}
+                            for e in entries
+                        ]
+
+                    comparison_body = body
+                    comparison_current = current_object
+                    desired_bt = body.get("bound_to", [])
+                    current_bt = (current_object or {}).get("bound_to", [])
+                    if any("vlan_id" in e for e in desired_bt) or any(
+                        "vlan_id" in e for e in current_bt
+                    ):
+                        comparison_body = dict(body)
+                        comparison_body["bound_to"] = _strip_vlan_id(desired_bt)
+                        comparison_current = dict(current_object)
+                        comparison_current["bound_to"] = _strip_vlan_id(current_bt)
                     # Update the object
                     changes = {}
-                    if client_factory.compare_and_update(current_object, body, changes):
+                    if client_factory.compare_and_update(
+                        comparison_current, comparison_body, changes
+                    ):
+                        # Restore full bound_to (with per-entry vlan_id) if it
+                        # changed, so the patch carries the correct per-device values
+                        if "bound_to" in changes:
+                            changes["bound_to"] = body["bound_to"]
                         updated_object = client_factory.object_request(
                             object_type, "patch", id, changes
                         )
