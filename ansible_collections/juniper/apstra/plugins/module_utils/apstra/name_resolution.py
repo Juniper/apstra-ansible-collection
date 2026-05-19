@@ -576,6 +576,51 @@ def resolve_esi_member_ids(client_factory, blueprint_id, node_ref):
     return None
 
 
+def resolve_rg_node_id(client_factory, blueprint_id, node_ref):
+    """Return the redundancy-group graph-node ID if *node_ref* is an RG
+    label or ID, otherwise return ``None``.
+
+    Apstra stores bound_to entries using the **RG node ID** (not the
+    individual member system IDs) whenever the bound systems form an
+    ESI or MLAG redundancy group.  Using the RG node ID in POST/PATCH
+    requests produces a GET response that is identical to the desired
+    state, which is required for idempotency.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param blueprint_id: The blueprint UUID.
+    :param node_ref: A candidate RG label or graph-node ID string.
+    :return: The RG graph-node ID string if *node_ref* matches an RG,
+             otherwise ``None``.
+    """
+    if not node_ref:
+        return None
+
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        find_redundancy_groups,
+    )
+
+    rg_map = find_redundancy_groups(client_factory, blueprint_id)
+    if not rg_map:
+        return None
+
+    # Exact ID match
+    if node_ref in rg_map:
+        return node_ref
+
+    # Exact label match
+    for rg_id, info in rg_map.items():
+        if info["label"] == node_ref:
+            return rg_id
+
+    # Case-insensitive label fallback
+    ref_lower = node_ref.lower()
+    for rg_id, info in rg_map.items():
+        if info["label"].lower() == ref_lower:
+            return rg_id
+
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────
 #  bound_to keyword expansion  (virtual_network / VN binding)
 # ──────────────────────────────────────────────────────────────────

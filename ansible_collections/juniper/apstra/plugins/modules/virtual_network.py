@@ -293,6 +293,7 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_system_node_id,
     resolve_security_zone_id,
     resolve_esi_member_ids,
+    resolve_rg_node_id,
     resolve_bound_to_keyword,
 )
 
@@ -377,31 +378,46 @@ def main():
 
                     if "system_id" in entry and bp_id:
                         sys_ref = entry["system_id"]
-                        # Step 0: keyword expansion (all, leafs, spines, <tag>)
-                        keyword_ids = resolve_bound_to_keyword(
-                            client_factory, bp_id, sys_ref
-                        )
-                        if keyword_ids is not None:
-                            for node_id in keyword_ids:
-                                kw_entry = dict(entry)
-                                kw_entry["system_id"] = node_id
-                                expanded.append(kw_entry)
+                        # Step 0: RG label/ID → use RG node ID directly.
+                        # Apstra stores bound_to entries as RG node IDs (not
+                        # individual member IDs) when the systems form an ESI
+                        # or MLAG redundancy group.  By resolving the RG label
+                        # to its node ID *before* tag expansion we ensure that
+                        # the desired state matches what GET returns, which is
+                        # required for idempotency.  An RG label that also
+                        # happens to be a blueprint tag (a common naming
+                        # convention) would otherwise be expanded into the
+                        # individual member system IDs, causing a mismatch.
+                        rg_id = resolve_rg_node_id(client_factory, bp_id, sys_ref)
+                        if rg_id is not None:
+                            entry["system_id"] = rg_id
+                            expanded.append(entry)
                         else:
-                            # Step 1: ESI/MLAG redundancy group expansion
-                            member_ids = resolve_esi_member_ids(
+                            # Step 1: keyword expansion (all, leafs, spines, <tag>)
+                            keyword_ids = resolve_bound_to_keyword(
                                 client_factory, bp_id, sys_ref
                             )
-                            if member_ids is not None:
-                                for mbr_id in member_ids:
-                                    mbr_entry = dict(entry)
-                                    mbr_entry["system_id"] = mbr_id
-                                    expanded.append(mbr_entry)
+                            if keyword_ids is not None:
+                                for node_id in keyword_ids:
+                                    kw_entry = dict(entry)
+                                    kw_entry["system_id"] = node_id
+                                    expanded.append(kw_entry)
                             else:
-                                # Step 2: regular system node — resolve label
-                                entry["system_id"] = resolve_system_node_id(
+                                # Step 2: ESI/MLAG redundancy group expansion
+                                member_ids = resolve_esi_member_ids(
                                     client_factory, bp_id, sys_ref
                                 )
-                                expanded.append(entry)
+                                if member_ids is not None:
+                                    for mbr_id in member_ids:
+                                        mbr_entry = dict(entry)
+                                        mbr_entry["system_id"] = mbr_id
+                                        expanded.append(mbr_entry)
+                                else:
+                                    # Step 3: regular system node — resolve label
+                                    entry["system_id"] = resolve_system_node_id(
+                                        client_factory, bp_id, sys_ref
+                                    )
+                                    expanded.append(entry)
                     else:
                         expanded.append(entry)
 
