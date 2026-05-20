@@ -4,6 +4,15 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
+v1.0.9
+======
+
+Breaking Changes / Porting Guide
+---------------------------------
+- **Python 3.12 required** — The minimum Python version has been raised from 3.11 to 3.12. Update your virtual environments and Execution Environments accordingly.
+- **ansible-core 2.16.16** — The recommended ansible-core version is now 2.16.16+.
+- **Execution Environment base image** — Switched from ``ee-minimal-rhel8`` to ``ee-minimal-rhel9`` (ships Python 3.12 natively).
+
 v1.0.8
 ======
 

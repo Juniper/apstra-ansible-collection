@@ -3,7 +3,7 @@ version: 3
 
 images:
   base_image:
-    name: "registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel8:1.0"
+    name: "registry.redhat.io/ansible-automation-platform-25/ee-minimal-rhel9:1.0"
 
 additional_build_files:
   - src: collections/juniper-apstra.tar.gz
@@ -20,13 +20,13 @@ dependencies:
       - community.general
 
   python_interpreter:
-    package_system: "python3.11"
+    package_system: "python3.12"
 
   system:
     - pkgconf-pkg-config [platform:rpm]
     - systemd-devel [platform:rpm]
     - gcc [platform:rpm]
-    - python3.11-devel [platform:rpm]
+    - python3.12-devel [platform:rpm]
 
 options:
   package_manager_path: /usr/bin/microdnf
@@ -38,7 +38,7 @@ additional_build_steps:
     - ARG RH_PASSWORD
     - RUN microdnf install -y subscription-manager
     - RUN subscription-manager register --username "$RH_USERNAME" --password "$RH_PASSWORD" || (cat /var/log/rhsm/rhsm.log && exit 1)
-    - RUN subscription-manager repos --enable=rhocp-4.17-for-rhel-8-`uname -m`-rpms
+    - RUN subscription-manager repos --enable=rhocp-4.17-for-rhel-9-`uname -m`-rpms
   prepend_builder:
     # Copy whl file to the path pip expects based on apstra collection requirements.txt
     - COPY _build/aos-sdk/aos_sdk-6.1.0-py3-none-any.whl /tmp/src/build/wheels/aos_sdk-6.1.0-py3-none-any.whl
@@ -48,5 +48,5 @@ additional_build_steps:
     - RUN python3 -m pip install /runner/build/wheels/aos_sdk-6.1.0-py3-none-any.whl
   append_final:
     # Python requirements may be installed into /usr/local/lib
-    - RUN echo "import sys" >> /usr/lib/python3.11/site-packages/sitecustomize.py
-    - RUN echo "sys.path.append(\"/usr/local/lib/python3.11/site-packages\")" >> /usr/lib/python3.11/site-packages/sitecustomize.py
+    - RUN echo "import sys" >> /usr/lib/python3.12/site-packages/sitecustomize.py
+    - RUN echo "sys.path.append(\"/usr/local/lib/python3.12/site-packages\")" >> /usr/lib/python3.12/site-packages/sitecustomize.py

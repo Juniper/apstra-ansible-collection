@@ -9,7 +9,7 @@ requests-oauthlib = "*"
 jsonpatch = "*"
 jmespath = "*"
 kubernetes = "*"
-ansible-core = "==2.16.14"
+ansible-core = "==2.16.16"
 
 [dev-packages]
 ansible-lint = "*"
@@ -22,4 +22,4 @@ ansible-builder = "*"
 black = "*"
 
 [requires]
-python_version = "3.11"
+python_version = "3.12"
