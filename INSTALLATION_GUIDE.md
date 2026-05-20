@@ -443,6 +443,117 @@ collections_path = /opt/ansible/collections:~/.ansible/collections
 
 ## 9. Upgrading
 
+### Upgrading from Python 3.11 to Python 3.12 (Developer Environment)
+
+Starting with collection version 1.0.9, Python 3.12 is required. Follow these steps to migrate your development environment.
+
+#### Step 1 — Pull the latest branch
+
+```bash
+cd apstra-ansible-collection
+git pull origin main
+```
+
+Confirm the repo now targets Python 3.12:
+
+```bash
+cat .python-version   # should show 3.12
+```
+
+#### Step 2 — Install Python 3.12 via pyenv
+
+pyenv may only have Python 3.11 installed — you must install 3.12 explicitly:
+
+```bash
+pyenv install 3.12.7
+```
+
+> **Note:** The warning `ModuleNotFoundError: No module named 'readline'` is harmless and can be ignored. To suppress it, install `libreadline-dev` and `libncurses-dev` before running `pyenv install`:
+> ```bash
+> # Ubuntu / Debian
+> sudo apt install -y libreadline-dev libncurses-dev
+> # RHEL / CentOS / Rocky
+> sudo dnf install -y readline-devel ncurses-devel
+> ```
+
+Verify the installation:
+
+```bash
+pyenv versions        # should show 3.12.7 (active, set by .python-version)
+python3.12 --version  # Python 3.12.7
+```
+
+#### Step 3 — Remove the old Python 3.11 venv
+
+If a `.venv/` directory or global pipenv venv exists from the previous Python 3.11 environment, remove it:
+
+```bash
+# Remove in-project venv
+rm -rf .venv
+
+# Also remove any leftover global pipenv venv (safe to ignore if not found)
+PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true
+
+# Remove stale lockfile so it regenerates for Python 3.12
+rm -f Pipfile.lock
+```
+
+#### Step 4 — Create the .venv manually before pipenv populates it
+
+> **Why:** Some versions of pipenv have a bug where `pipenv install --dev` crashes with `FileNotFoundError: .venv/bin/python` when `.venv` doesn't exist yet. Creating the venv first avoids this.
+
+```bash
+~/.pyenv/versions/3.12.7/bin/python3.12 -m venv .venv
+```
+
+Verify:
+
+```bash
+.venv/bin/python --version   # Python 3.12.7
+```
+
+#### Step 5 — Install dependencies into the new venv
+
+```bash
+PIPENV_VENV_IN_PROJECT=1 pipenv install --dev
+```
+
+Expected output (no errors):
+
+```
+Installing dependencies from Pipfile.lock (xxxxxx)...
+```
+
+Verify the environment:
+
+```bash
+.venv/bin/ansible-playbook --version
+# ansible-playbook [core 2.16.16]
+#   python version = 3.12.7 ...
+```
+
+#### Step 6 — Verify the Apstra SDK loads on Python 3.12
+
+```bash
+pipenv run python -c "from aos.sdk.client import Client; print('aos_sdk OK on Python 3.12')"
+```
+
+#### Quick Reference (copy-paste)
+
+```bash
+# Full upgrade in one block
+git pull origin main
+pyenv install 3.12.7
+rm -rf .venv Pipfile.lock
+PIPENV_VENV_IN_PROJECT= pipenv --rm 2>/dev/null || true
+~/.pyenv/versions/3.12.7/bin/python3.12 -m venv .venv
+PIPENV_VENV_IN_PROJECT=1 pipenv install --dev
+pipenv run python -c "from aos.sdk.client import Client; print('OK')"
+.venv/bin/ansible-playbook --version
+```
+
+---
+
 ### Upgrade the Collection
 
 ```bash
@@ -515,7 +626,7 @@ ansible-galaxy collection install juniper.apstra --ignore-certs
 ### "ansible-galaxy: command not found"
 
 ```bash
-pip install "ansible-core>=2.16.14"
+pip install "ansible-core>=2.16.16"
 ```
 
 ### Version compatibility matrix
