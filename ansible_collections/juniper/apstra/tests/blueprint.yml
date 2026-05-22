@@ -294,6 +294,7 @@
         id: "{{ bp_assign.id }}"
         rack_id: "{{ rack_node_id }}"
         rack_label: "rack-test-baseline"
+        node_type: rack
         state: node_updated
         auth_token: "{{ auth.token }}"
 
@@ -341,6 +342,7 @@
         id: "{{ bp_assign.id }}"
         rack_id: "{{ rack_node_id }}"
         rack_label: "rack-by-uuid"
+        node_type: rack
         state: node_updated
         auth_token: "{{ auth.token }}"
       register: rack_rename_by_id
@@ -358,6 +360,7 @@
         id: "{{ bp_assign.id }}"
         rack_id: "{{ rack_node_id }}"
         rack_label: "{{ rack_original_label }}"
+        node_type: rack
         state: node_updated
         auth_token: "{{ auth.token }}"
       register: rack_restore
