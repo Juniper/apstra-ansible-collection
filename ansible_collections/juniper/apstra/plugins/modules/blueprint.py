@@ -796,6 +796,7 @@ def _handle_node_updated(module, client_factory, blueprint_id):
     # ── Resolve current_label → node_id ────────────────────────────────────
     current_label = params.get("current_label")
     node_type = params.get("node_type")
+    node_id_already_resolved = False
     if current_label and not node_id:
         if node_type == "rack":
             try:
@@ -821,6 +822,7 @@ def _handle_node_updated(module, client_factory, blueprint_id):
                     msg=f"No node{filter_msg} with label '{current_label}' found in blueprint '{blueprint_id}'"
                 )
             node_id = matched_id
+        node_id_already_resolved = True
 
     # ── Single-node mode (node_id) ────────────────────────────────────────
     if not node_id:
@@ -834,14 +836,21 @@ def _handle_node_updated(module, client_factory, blueprint_id):
     else:
         node_ids = list(node_id)
 
-    # Resolve each entry: label → graph-node UUID via system node resolution
-    resolved_ids = []
-    for nid in node_ids:
-        try:
-            resolved = resolve_system_node_id(client_factory, blueprint_id, nid)
-        except ValueError as exc:
-            module.fail_json(msg=str(exc))
-        resolved_ids.append((nid, resolved))
+    # Resolve each entry: label → graph-node UUID via system/rack node resolution
+    # Skip resolution if node_id was already resolved from current_label
+    if node_id_already_resolved:
+        resolved_ids = [(nid, nid) for nid in node_ids]
+    else:
+        resolved_ids = []
+        for nid in node_ids:
+            try:
+                if node_type == "rack":
+                    resolved = resolve_rack_node_id(client_factory, blueprint_id, nid)
+                else:
+                    resolved = resolve_system_node_id(client_factory, blueprint_id, nid)
+            except ValueError as exc:
+                module.fail_json(msg=str(exc))
+            resolved_ids.append((nid, resolved))
 
     # Build desired fields from params
     desired = {}
