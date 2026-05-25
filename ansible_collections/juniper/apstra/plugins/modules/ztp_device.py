@@ -26,9 +26,12 @@ description:
   - Device status can be retrieved using the
     C(/api/ztp/device/{ip_addr}/status) API endpoint by setting
     C(state) to C(status).
-  - The ZTP device API does not support individual GET or PUT/PATCH
-    operations. Updates are performed by deleting and recreating the
-    device.
+  - The C(create_agent) state calls the ZTP VM's
+    C(/api/ztp/create_agent) endpoint to create a system agent AND
+    track it in ZTP. This requires ZTP VM connection parameters.
+  - The C(update_status) state calls the ZTP VM's
+    C(/api/ztp/device/log) endpoint to update the device provisioning
+    status. Setting task to C(Device Ready) marks it as completed.
   - The module uses the Apstra SDK when available, falling back to
     direct API calls if necessary.
 
@@ -75,6 +78,19 @@ options:
       - Used for create and update operations.
       - C(ip_addr) (string) - Management IP address of the device (required for create).
       - C(system_id) (string) - System identifier for the device (required for create).
+      - For C(create_agent) state, the following fields are used.
+      - C(management_ip) (string) - Device management IP (required).
+      - C(username) (string) - SSH username for device (required).
+      - C(password) (string) - SSH password for device (required).
+      - C(agent_type) (string) - Agent type, default C(offbox).
+      - C(job_on_create) (string) - Job to run on create, default C(install).
+      - C(platform) (string) - Device platform, default C(junos).
+      - For C(update_status) state, the following fields are used.
+      - C(ip) (string) - Device IP address (required).
+      - C(system_id) (string) - Device system ID.
+      - C(platform) (string) - Device platform.
+      - C(task) (string) - Task name. C(Device Ready) marks completed.
+      - C(log) (string) - Log message.
     required: false
     type: dict
   state:
@@ -84,9 +100,15 @@ options:
       - C(absent) will delete the device.
       - C(status) will retrieve the ZTP status of the device
         (requires C(ip_addr) or C(system_id) in C(id)).
+      - C(create_agent) will create a system agent via the ZTP VM's
+        C(/api/ztp/create_agent) endpoint. Requires ZTP VM connection
+        parameters and device credentials in C(body).
+      - C(update_status) will update device status via the ZTP VM's
+        C(/api/ztp/device/log) endpoint. Requires ZTP VM connection
+        parameters and status fields in C(body).
     required: false
     type: str
-    choices: ["present", "absent", "status"]
+    choices: ["present", "absent", "status", "create_agent", "update_status"]
     default: "present"
 """
 
@@ -104,18 +126,29 @@ EXAMPLES = """
   ansible.builtin.debug:
     msg: "ZTP status is {{ ztp_status.status }}"
 
-# Check ZTP device status by system_id
-# Fails with an error if no device with that system_id is registered
-- name: Get ZTP device status by system_id
+# Create agent via ZTP VM (handles both ZTP tracking and Apstra agent creation)
+- name: Create system agent via ZTP VM
   juniper.apstra.ztp_device:
-    id:
-      system_id: "device-001"
-    state: status
-  register: ztp_status
+    state: create_agent
+    body:
+      management_ip: "{{ device_mgmt_ip }}"
+      username: "{{ device_username }}"
+      password: "{{ device_password }}"
+      agent_type: offbox
+      job_on_create: install
+      platform: junos
+  register: agent_result
 
-- name: Show full ZTP device details
-  ansible.builtin.debug:
-    var: ztp_status.ztp_device
+# Update ZTP device status to completed
+- name: Mark device as completed in ZTP
+  juniper.apstra.ztp_device:
+    state: update_status
+    body:
+      ip: "{{ device_mgmt_ip }}"
+      system_id: "{{ device_system_id }}"
+      platform: junos
+      task: "Device Ready"
+      log: "Agent installed and connected successfully"
 """
 
 RETURN = """
@@ -138,6 +171,11 @@ id:
   sample: {
       "ip_addr": "192.168.50.10"
   }
+agent_id:
+  description: The Apstra system agent UUID returned by create_agent.
+  type: str
+  returned: when state is create_agent
+  sample: "acc45b14-2ae0-4c35-8cd5-2cb0228c7ad6"
 ztp_device:
   description: Full ZTP device details retrieved from the status endpoint.
   type: dict
@@ -184,6 +222,11 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client import (
     apstra_client_module_args,
     ApstraClientFactory,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ztp_client import (
+    ztp_client_module_args,
+    ZtpClient,
+    ZtpClientError,
 )
 
 
@@ -306,16 +349,17 @@ def _get_current_device(ztp_device, base_client, module, ip_addr, use_sdk):
 def main():
     object_module_args = dict(
         id=dict(type="dict", required=False, default=None),
-        body=dict(type="dict", required=False, default=None),
+        body=dict(type="dict", required=False, default=None, no_log=False),
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent", "status"],
+            choices=["present", "absent", "status", "create_agent", "update_status"],
             default="present",
         ),
     )
     client_module_args = apstra_client_module_args()
-    module_args = client_module_args | object_module_args
+    ztp_module_args = ztp_client_module_args()
+    module_args = client_module_args | ztp_module_args | object_module_args
 
     result = dict(changed=False)
 
@@ -340,6 +384,68 @@ def main():
         # If ip_addr not in id, check body for create operations
         if ip_addr is None and body is not None:
             ip_addr = body.get("ip_addr", None)
+
+        # --- State: create_agent ---
+        if state == "create_agent":
+            if not body:
+                raise ValueError(
+                    "Must specify 'body' with device credentials for create_agent."
+                )
+            management_ip = body.get("management_ip")
+            if not management_ip:
+                raise ValueError(
+                    "Must specify 'management_ip' in 'body' for create_agent."
+                )
+            device_username = body.get("username")
+            device_password = body.get("password")
+            if not device_username or not device_password:
+                raise ValueError(
+                    "Must specify 'username' and 'password' in 'body' for create_agent."
+                )
+
+            ztp_client = ZtpClient.from_module_params(module)
+            agent_response = ztp_client.create_agent(
+                management_ip=management_ip,
+                username=device_username,
+                password=device_password,
+                agent_type=body.get("agent_type", "offbox"),
+                job_on_create=body.get("job_on_create", "install"),
+                platform=body.get("platform", "junos"),
+            )
+
+            result["changed"] = True
+            result["response"] = agent_response
+            result["id"] = {"ip_addr": management_ip}
+            if isinstance(agent_response, dict) and "id" in agent_response:
+                result["agent_id"] = agent_response["id"]
+            result["msg"] = "System agent created via ZTP VM"
+            module.exit_json(**result)
+            return
+
+        # --- State: update_status ---
+        if state == "update_status":
+            if not body:
+                raise ValueError(
+                    "Must specify 'body' with status fields for update_status."
+                )
+            device_ip = body.get("ip")
+            if not device_ip:
+                raise ValueError("Must specify 'ip' in 'body' for update_status.")
+
+            ztp_client = ZtpClient.from_module_params(module)
+            ztp_client.update_device_log(
+                ip=device_ip,
+                system_id=body.get("system_id", ""),
+                platform=body.get("platform", ""),
+                task=body.get("task", ""),
+                log=body.get("log", ""),
+            )
+
+            result["changed"] = True
+            result["id"] = {"ip_addr": device_ip}
+            result["msg"] = "ZTP device status updated"
+            module.exit_json(**result)
+            return
 
         # --- State: status ---
         if state == "status":

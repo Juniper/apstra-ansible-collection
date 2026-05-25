@@ -1,0 +1,275 @@
+---
+# Integration test playbook for juniper.apstra.ztp_config module
+#
+# Required environment variables:
+#   ZTP_URL          - ZTP VM base URL (e.g., https://192.168.50.2)
+#   ZTP_USERNAME     - ZTP admin username (default: admin)
+#   ZTP_PASSWORD     - ZTP admin password
+#   APSTRA_API_URL   - Apstra server URL (for authenticate module)
+#   APSTRA_USERNAME  - Apstra username
+#   APSTRA_PASSWORD  - Apstra password
+#
+# Usage:
+#   export ZTP_URL=https://192.168.50.2
+#   export ZTP_USERNAME=admin
+#   export ZTP_PASSWORD='Apstramarvis@123'
+#   ansible-playbook tests/ztp_config.yml -v
+
+- name: Test ZTP Config Module — DHCP Configurator and ZTP JSON Config
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    ztp_url: "{{ lookup('env', 'ZTP_URL') }}"
+    ztp_username: "{{ lookup('env', 'ZTP_USERNAME') | default('admin', true) }}"
+    ztp_password: "{{ lookup('env', 'ZTP_PASSWORD') }}"
+
+  tasks:
+    # =====================================================================
+    # 1. DHCP CONFIGURATOR — QUERY
+    # =====================================================================
+    - name: "[DHCP] Query current DHCP configurator config"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: query
+      register: dhcp_query
+
+    - name: "[DHCP] Show current DHCP config"
+      ansible.builtin.debug:
+        var: dhcp_query.config
+
+    - name: "[DHCP] Verify query returned config"
+      ansible.builtin.assert:
+        that:
+          - dhcp_query.config is defined
+          - dhcp_query.config.subnets is defined
+          - dhcp_query.config.options is defined
+        fail_msg: "DHCP query did not return expected config structure"
+
+    # =====================================================================
+    # 2. DHCP CONFIGURATOR — UPDATE (PRESENT)
+    # =====================================================================
+    - name: "[DHCP] Configure DHCP subnets and options"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: present
+        options:
+          domain-name: "ztplab.local"
+          domain-search: "ztplab.local"
+          domain-name-servers:
+            - "8.8.8.8"
+            - "8.8.4.4"
+          tftp-server-name: "192.168.50.2"
+        subnets:
+          - subnet: "192.168.50.0/24"
+            router: "192.168.50.1"
+            pools:
+              - range-start: "192.168.50.10"
+                range-end: "192.168.50.50"
+            host-reservations: []
+            reservation-mode: []
+      register: dhcp_update
+
+    - name: "[DHCP] Show DHCP update result"
+      ansible.builtin.debug:
+        var: dhcp_update
+
+    # =====================================================================
+    # 3. DHCP CONFIGURATOR — IDEMPOTENCY CHECK
+    # =====================================================================
+    - name: "[DHCP] Re-apply same DHCP config (idempotency test)"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: present
+        options:
+          domain-name: "ztplab.local"
+          domain-search: "ztplab.local"
+          domain-name-servers:
+            - "8.8.8.8"
+            - "8.8.4.4"
+          tftp-server-name: "192.168.50.2"
+        subnets:
+          - subnet: "192.168.50.0/24"
+            router: "192.168.50.1"
+            pools:
+              - range-start: "192.168.50.10"
+                range-end: "192.168.50.50"
+            host-reservations: []
+            reservation-mode: []
+      register: dhcp_idempotent
+
+    - name: "[DHCP] Verify idempotency — no changes"
+      ansible.builtin.assert:
+        that:
+          - not dhcp_idempotent.changed
+        fail_msg: "DHCP idempotency check failed — module reported changes on identical config"
+
+    # =====================================================================
+    # 4. DHCP CONFIGURATOR — ADD HOST RESERVATION
+    # =====================================================================
+    - name: "[DHCP] Add a host reservation"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: present
+        host_reservations:
+          - hw-address: "aa:bb:cc:dd:ee:01"
+            ip-address: "192.168.50.100"
+            hostname: "test-switch-1"
+      register: dhcp_add_res
+
+    - name: "[DHCP] Verify reservation was added"
+      ansible.builtin.assert:
+        that:
+          - dhcp_add_res.changed
+        fail_msg: "Host reservation was not added"
+
+    - name: "[DHCP] Show config after adding reservation"
+      ansible.builtin.debug:
+        var: dhcp_add_res.config
+
+    # =====================================================================
+    # 5. DHCP CONFIGURATOR — REMOVE HOST RESERVATION
+    # =====================================================================
+    - name: "[DHCP] Remove the host reservation"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: absent
+        host_reservations:
+          - hw-address: "aa:bb:cc:dd:ee:01"
+            ip-address: "192.168.50.100"
+      register: dhcp_remove_res
+
+    - name: "[DHCP] Verify reservation was removed"
+      ansible.builtin.assert:
+        that:
+          - dhcp_remove_res.changed
+        fail_msg: "Host reservation was not removed"
+
+    - name: "[DHCP] Verify reservation is gone"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: query
+      register: dhcp_after_remove
+
+    - name: "[DHCP] Verify no reservations remain in first subnet"
+      ansible.builtin.assert:
+        that:
+          - dhcp_after_remove.config.subnets[0]['host-reservations'] | length == 0
+        fail_msg: "Host reservations still present after removal"
+
+    # =====================================================================
+    # 6. ZTP CONFIG — QUERY
+    # =====================================================================
+    - name: "[ZTP] Query current ZTP JSON config"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: ztp_config
+        state: query
+      register: ztp_query
+
+    - name: "[ZTP] Show current ZTP config"
+      ansible.builtin.debug:
+        var: ztp_query.config
+
+    - name: "[ZTP] Verify query returned config"
+      ansible.builtin.assert:
+        that:
+          - ztp_query.config is defined
+          - ztp_query.config.defaults is defined
+        fail_msg: "ZTP query did not return expected config structure"
+
+    # =====================================================================
+    # 7. ZTP CONFIG — UPDATE FIRMWARE SETTINGS
+    # =====================================================================
+    - name: "[ZTP] Update Junos firmware settings"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: ztp_config
+        state: present
+        firmware:
+          junos:
+            device-root-password: "Juniper123"
+            device-user-password: "Juniper123"
+            system-agent-params:
+              agent_type: "offbox"
+              job_on_create: "install"
+              platform: "junos"
+      register: ztp_update
+
+    - name: "[ZTP] Show ZTP update result"
+      ansible.builtin.debug:
+        var: ztp_update
+
+    # =====================================================================
+    # 8. ZTP CONFIG — IDEMPOTENCY CHECK
+    # =====================================================================
+    - name: "[ZTP] Re-apply same ZTP config (idempotency test)"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: ztp_config
+        state: present
+        firmware:
+          junos:
+            device-root-password: "Juniper123"
+            device-user-password: "Juniper123"
+            system-agent-params:
+              agent_type: "offbox"
+              job_on_create: "install"
+              platform: "junos"
+      register: ztp_idempotent
+
+    - name: "[ZTP] Verify idempotency — no changes"
+      ansible.builtin.assert:
+        that:
+          - not ztp_idempotent.changed
+        fail_msg: "ZTP config idempotency check failed"
+
+    # =====================================================================
+    # 9. SUMMARY
+    # =====================================================================
+    - name: "[SUMMARY] All ZTP config tests passed"
+      ansible.builtin.debug:
+        msg: |
+          All tests completed successfully:
+            - DHCP configurator query: OK
+            - DHCP configurator update: OK
+            - DHCP idempotency: OK
+            - DHCP host-reservation add: OK
+            - DHCP host-reservation remove: OK
+            - ZTP config query: OK
+            - ZTP firmware update: OK
+            - ZTP config idempotency: OK
