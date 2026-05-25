@@ -12,7 +12,7 @@
 # Usage:
 #   export ZTP_URL=https://192.168.50.2
 #   export ZTP_USERNAME=admin
-#   export ZTP_PASSWORD='Apstramarvis@123'
+#   export ZTP_PASSWORD='<your-ztp-password>'
 #   ansible-playbook tests/ztp_config.yml -v
 
 - name: Test ZTP Config Module — DHCP Configurator and ZTP JSON Config

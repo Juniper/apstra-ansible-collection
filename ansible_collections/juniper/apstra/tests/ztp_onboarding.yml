@@ -1,0 +1,390 @@
+---
+# =============================================================================
+# End-to-End ZTP Onboarding Test
+# =============================================================================
+#
+# This playbook tests the full ZTP device onboarding lifecycle using three
+# modules:
+#   1. juniper.apstra.ztp_config    — Configure ZTP VM (DHCP + ZTP JSON)
+#   2. juniper.apstra.ztp_device    — Create agent via ZTP VM, update status,
+#                                     query device status via Apstra
+#   3. juniper.apstra.system_agents — Verify agent connection + acknowledge
+#
+# The onboarding flow:
+#   a) Configure ZTP VM with DHCP subnet and ZTP JSON (device passwords)
+#   b) Create agent via ZTP VM's /api/ztp/create_agent (tracks in ZTP + Apstra)
+#   c) Wait for agent to install and connect
+#   d) Update ZTP device status to "completed" via /api/ztp/device/log
+#   e) Acknowledge device if quarantined
+#   f) Verify completed status in both ZTP VM and Apstra
+#
+# Password Handling:
+#   The device password used for create_agent must match what is currently
+#   configured on the device. In a full ZTP flow, ztp.py changes the device
+#   password to match ztp.json BEFORE calling create_agent. When bypassing
+#   ztp.py (e.g., management-instance configured), ensure the device password
+#   matches what you pass to create_agent.
+#
+# Prerequisites:
+#   - .env file sourced with APSTRA_* and ZTP_* env vars (public IPs)
+#   - A vJunos switch connected to mgmt-br and reachable by ZTP VM
+#   - ZTP VM and Apstra Server running
+#   - Device SSH credentials known (aosadmin user configured)
+#
+# Usage:
+#   source .env
+#   ansible-playbook -v tests/ztp_onboarding.yml
+#
+#   # Override device settings via env vars or extra vars:
+#   DEVICE_MGMT_IP=192.168.50.18 DEVICE_PASSWORD=MyPass123 \
+#       ansible-playbook -v tests/ztp_onboarding.yml
+#
+#   ansible-playbook -v tests/ztp_onboarding.yml \
+#       -e device_mgmt_ip=192.168.50.18 \
+#       -e device_username=aosadmin \
+#       -e device_password=MyPass123 \
+#       -e device_platform=junos
+#
+#   # Override network settings for a different ZTP subnet:
+#   ansible-playbook -v tests/ztp_onboarding.yml \
+#       -e ztp_subnet=10.0.0.0/24 \
+#       -e ztp_gateway=10.0.0.1 \
+#       -e ztp_tftp_server=10.0.0.2
+#
+# =============================================================================
+
+- name: End-to-End ZTP Onboarding Test
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # ---- Device settings ----
+    # vJunos switch management IP (on mgmt-br, assigned by ZTP DHCP)
+    device_mgmt_ip: "{{ lookup('env', 'DEVICE_MGMT_IP') | default('192.168.50.18', true) }}"
+    # Device SSH credentials — must match what is currently on the device.
+    # In a full ZTP flow, ztp.py sets these from ztp.json config.
+    # The password used here is the POST-onboarding password (what ztp.py sets).
+    device_username: "{{ lookup('env', 'DEVICE_USERNAME') | default('aosadmin', true) }}"
+    device_password: "{{ lookup('env', 'DEVICE_PASSWORD') | default('Juniper123', true) }}"
+    # Platform settings
+    device_platform: "{{ lookup('env', 'DEVICE_PLATFORM') | default('junos', true) }}"
+    agent_type: "{{ lookup('env', 'AGENT_TYPE') | default('offbox', true) }}"
+
+    # ---- ZTP Network settings ----
+    # These define the DHCP subnet served by ZTP VM on mgmt-br.
+    # Adjust for your lab network.
+    ztp_subnet: "{{ lookup('env', 'ZTP_SUBNET') | default('192.168.50.0/24', true) }}"
+    ztp_gateway: "{{ lookup('env', 'ZTP_GATEWAY') | default('192.168.50.1', true) }}"
+    ztp_pool_start: "{{ lookup('env', 'ZTP_POOL_START') | default('192.168.50.10', true) }}"
+    ztp_pool_end: "{{ lookup('env', 'ZTP_POOL_END') | default('192.168.50.50', true) }}"
+    ztp_tftp_server: "{{ lookup('env', 'ZTP_TFTP_SERVER') | default('192.168.50.2', true) }}"
+    ztp_domain_name: "{{ lookup('env', 'ZTP_DOMAIN_NAME') | default('ztplab.local', true) }}"
+    ztp_dns_servers: "{{ (lookup('env', 'ZTP_DNS_SERVERS') | default('8.8.8.8,8.8.4.4', true)).split(',') }}"
+
+  tasks:
+    # =========================================================================
+    # Phase 1: Authentication
+    # =========================================================================
+
+    - name: "Phase 1 — Authenticate to Apstra Server"
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Show Apstra auth token (truncated)
+      ansible.builtin.debug:
+        msg: "Apstra token: {{ auth.token[:20] }}..."
+
+    # =========================================================================
+    # Phase 2: ZTP VM Configuration (ztp_config module)
+    # =========================================================================
+
+    - name: "Phase 2.1 — Query current DHCP configurator"
+      juniper.apstra.ztp_config:
+        scope: dhcp_configurator
+        state: query
+      register: dhcp_query
+
+    - name: Show current DHCP config
+      ansible.builtin.debug:
+        msg: >-
+          Subnets: {{ dhcp_query.config.subnets | default([]) | length }},
+          Host reservations: {{ dhcp_query.config['global-host-reservations'] | default([]) | length }},
+          TFTP server: {{ dhcp_query.config.options['tftp-server-name'] | default('not set') }}
+
+    - name: "Phase 2.2 — Ensure DHCP subnet and options are configured"
+      juniper.apstra.ztp_config:
+        scope: dhcp_configurator
+        state: present
+        subnets:
+          - subnet: "{{ ztp_subnet }}"
+            router: "{{ ztp_gateway }}"
+            pools:
+              - range-start: "{{ ztp_pool_start }}"
+                range-end: "{{ ztp_pool_end }}"
+        options:
+          tftp-server-name: "{{ ztp_tftp_server }}"
+          domain-name: "{{ ztp_domain_name }}"
+          domain-name-servers: "{{ ztp_dns_servers }}"
+          domain-search: "{{ ztp_domain_name }}"
+      register: dhcp_config_result
+
+    - name: Show DHCP config result
+      ansible.builtin.debug:
+        msg: "DHCP config changed: {{ dhcp_config_result.changed }}"
+
+    - name: Verify DHCP config applied
+      ansible.builtin.assert:
+        that:
+          - not dhcp_config_result.failed
+        fail_msg: "Failed to configure DHCP"
+
+    - name: "Phase 2.3 — Query current ZTP JSON config"
+      juniper.apstra.ztp_config:
+        scope: ztp_config
+        state: query
+      register: ztp_json_query
+
+    - name: Show current ZTP JSON settings
+      ansible.builtin.debug:
+        msg: >-
+          Junos agent_type: {{ ztp_json_query.config.junos['system-agent-params'].agent_type | default('not set') }},
+          Root password set: {{ ztp_json_query.config.junos['device-root-password'] | default('') | length > 0 }}
+
+    - name: "Phase 2.4 — Ensure ZTP JSON has correct device passwords and agent params"
+      juniper.apstra.ztp_config:
+        scope: ztp_config
+        state: present
+        firmware:
+          junos:
+            device-root-password: "{{ device_password }}"
+            device-user-password: "{{ device_password }}"
+            system-agent-params:
+              agent_type: "{{ agent_type }}"
+              job_on_create: "install"
+              platform: "{{ device_platform }}"
+      register: ztp_json_result
+
+    - name: Show ZTP JSON config result
+      ansible.builtin.debug:
+        msg: "ZTP JSON config changed: {{ ztp_json_result.changed }}"
+
+    - name: Verify ZTP JSON config applied
+      ansible.builtin.assert:
+        that:
+          - not ztp_json_result.failed
+        fail_msg: "Failed to configure ZTP JSON"
+
+    # =========================================================================
+    # Phase 3: Check Existing State Before Creating Agent
+    # =========================================================================
+
+    - name: "Phase 3.1 — Check if system agent already exists"
+      juniper.apstra.system_agents:
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: all_agents
+
+    - name: Find existing agent for target device
+      ansible.builtin.set_fact:
+        existing_agent: >-
+          {{ all_agents.agents
+             | selectattr('management_ip', 'equalto', device_mgmt_ip)
+             | list | first | default(None) }}
+
+    - name: "Phase 3.2 — Check ZTP device status on Apstra"
+      juniper.apstra.ztp_device:
+        id:
+          ip_addr: "{{ device_mgmt_ip }}"
+        state: status
+        auth_token: "{{ auth.token }}"
+      register: existing_ztp_status
+      ignore_errors: true
+
+    - name: Show existing state
+      ansible.builtin.debug:
+        msg: >-
+          Existing agent: {{ existing_agent.agent_id | default('none') }}
+          ({{ existing_agent.connection_state | default('N/A') }}),
+          ZTP status: {{ existing_ztp_status.status | default('not registered') }}
+
+    # =========================================================================
+    # Phase 4: Create Agent via ZTP VM (ztp_device create_agent)
+    # =========================================================================
+    # This calls ZTP VM's /api/ztp/create_agent which:
+    #   - Creates the system agent on Apstra server
+    #   - Tracks the device in ZTP VM's status database
+    #   - If agent already exists, it deletes and recreates it
+    # The password here must match what's on the device RIGHT NOW.
+
+    - name: "Phase 4.1 — Create system agent via ZTP VM"
+      juniper.apstra.ztp_device:
+        state: create_agent
+        body:
+          management_ip: "{{ device_mgmt_ip }}"
+          username: "{{ device_username }}"
+          password: "{{ device_password }}"
+          agent_type: "{{ agent_type }}"
+          job_on_create: "install"
+          platform: "{{ device_platform }}"
+      register: create_agent_result
+      when: existing_agent is none or existing_agent == "None"
+            or existing_agent.connection_state != "connected"
+
+    - name: Show agent creation result
+      ansible.builtin.debug:
+        msg: >-
+          Agent ID: {{ create_agent_result.agent_id | default('N/A') }},
+          Changed: {{ create_agent_result.changed | default(false) }}
+      when: create_agent_result is not skipped
+
+    - name: Note existing connected agent
+      ansible.builtin.debug:
+        msg: >-
+          Agent {{ existing_agent.agent_id }} already connected,
+          skipping create_agent.
+      when: create_agent_result is skipped
+
+    # =========================================================================
+    # Phase 5: Wait for Agent Connection
+    # =========================================================================
+
+    - name: "Phase 5.1 — Wait for agent to install and connect (up to 5 min)"
+      juniper.apstra.system_agents:
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: agent_check
+      until: >-
+        agent_check.agents
+        | selectattr('management_ip', 'equalto', device_mgmt_ip)
+        | selectattr('connection_state', 'equalto', 'connected')
+        | list | length > 0
+      retries: 30
+      delay: 10
+
+    - name: Get connected agent details
+      ansible.builtin.set_fact:
+        connected_agent: >-
+          {{ agent_check.agents
+             | selectattr('management_ip', 'equalto', device_mgmt_ip)
+             | list | first }}
+
+    - name: Show connected agent
+      ansible.builtin.debug:
+        msg: >-
+          Agent {{ connected_agent.agent_id }} connected!
+          System ID: {{ connected_agent.system_id }},
+          Platform: {{ connected_agent.platform | default('N/A') }}
+
+    - name: Verify agent is connected
+      ansible.builtin.assert:
+        that:
+          - connected_agent.connection_state == "connected"
+          - connected_agent.system_id | length > 0
+        fail_msg: "Agent not connected after waiting"
+        success_msg: "Agent {{ connected_agent.agent_id }} is connected"
+
+    # =========================================================================
+    # Phase 6: Update ZTP Status to Completed
+    # =========================================================================
+    # The ZTP VM status only updates to "completed" when the device reports
+    # task="Device Ready" via /api/ztp/device/log. In a full ZTP flow,
+    # ztp.py does this. Since we called create_agent directly, we need to
+    # update the status ourselves after confirming the agent is connected.
+
+    - name: "Phase 6.1 — Mark device as completed in ZTP"
+      juniper.apstra.ztp_device:
+        state: update_status
+        body:
+          ip: "{{ device_mgmt_ip }}"
+          system_id: "{{ connected_agent.system_id }}"
+          platform: "{{ device_platform }}"
+          task: "Device Ready"
+          log: "Agent {{ connected_agent.agent_id }} installed and connected"
+      register: status_update_result
+
+    - name: Show status update result
+      ansible.builtin.debug:
+        msg: "ZTP status updated: {{ status_update_result.changed }}"
+
+    # =========================================================================
+    # Phase 7: Acknowledge Device
+    # =========================================================================
+
+    - name: "Phase 7.1 — Acknowledge device {{ device_mgmt_ip }} (if quarantined)"
+      juniper.apstra.system_agents:
+        body:
+          management_ip: "{{ device_mgmt_ip }}"
+        state: acknowledged
+        auth_token: "{{ auth.token }}"
+      register: ack_result
+
+    - name: Show acknowledgement result
+      ansible.builtin.debug:
+        msg: >-
+          Acknowledged: {{ ack_result.acknowledged_systems | default([]) | length }} device(s).
+          {{ ack_result.msg }}
+
+    # =========================================================================
+    # Phase 8: Final Verification
+    # =========================================================================
+
+    - name: "Phase 8.1 — Verify ZTP status is completed"
+      juniper.apstra.ztp_device:
+        id:
+          ip_addr: "{{ device_mgmt_ip }}"
+        state: status
+        auth_token: "{{ auth.token }}"
+      register: final_ztp_status
+
+    - name: Assert ZTP status is completed
+      ansible.builtin.assert:
+        that:
+          - final_ztp_status.status == "completed"
+        fail_msg: >-
+          ZTP status is '{{ final_ztp_status.status }}', expected 'completed'.
+          Task: {{ final_ztp_status.ztp_device.task | default('N/A') }}
+        success_msg: "ZTP status: completed"
+
+    - name: "Phase 8.2 — Verify agent is still connected"
+      juniper.apstra.system_agents:
+        state: gathered
+        auth_token: "{{ auth.token }}"
+      register: final_agents
+
+    - name: Get final agent state
+      ansible.builtin.set_fact:
+        verified_agent: >-
+          {{ final_agents.agents
+             | selectattr('management_ip', 'equalto', device_mgmt_ip)
+             | list | first | default(None) }}
+
+    - name: "=== ONBOARDING SUMMARY ==="
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║                  ZTP ONBOARDING SUMMARY                    ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║ Device IP:        {{ device_mgmt_ip }}
+          ║ ZTP Status:       {{ final_ztp_status.status | default('N/A') }}
+          ║ ZTP Task:         {{ final_ztp_status.ztp_device.task | default('N/A') }}
+          ║ Agent ID:         {{ verified_agent.agent_id | default('N/A') }}
+          ║ Agent Connected:  {{ verified_agent.connection_state | default('N/A') }}
+          ║ System ID:        {{ verified_agent.system_id | default('N/A') }}
+          ║ Acknowledged:     {{ ack_result.msg | default('N/A') }}
+          ╚══════════════════════════════════════════════════════════════╝
+
+    - name: Final assertions
+      ansible.builtin.assert:
+        that:
+          - verified_agent is not none
+          - verified_agent != "None"
+          - verified_agent.connection_state == "connected"
+          - final_ztp_status.status == "completed"
+        fail_msg: "FAIL — Device {{ device_mgmt_ip }} is not fully onboarded"
+        success_msg: >-
+          PASS — Device {{ device_mgmt_ip }} is fully onboarded
+          (agent={{ verified_agent.agent_id }},
+          system_id={{ verified_agent.system_id }},
+          ztp_status={{ final_ztp_status.status }})
