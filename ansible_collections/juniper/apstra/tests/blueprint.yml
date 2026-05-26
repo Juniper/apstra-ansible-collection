@@ -472,21 +472,22 @@
         existing_rack: "{{ rack_qe_result.results[0].rack }}"
         existing_rack_type_ref: "{{ (rack_qe_result.results[0].rack.rack_type_json | from_json).display_name | default('') }}"
         existing_rack_node_id: "{{ rack_qe_result.results[0].rack.id }}"
+        initial_rack_count: "{{ rack_qe_result.results | length }}"
       when:
         - rack_qe_result is success
         - rack_qe_result.results | length > 0
 
     - name: "[RACK SETUP] Show discovered rack type display_name"
       ansible.builtin.debug:
-        msg: "Discovered rack_type_ref='{{ existing_rack_type_ref }}', rack_node_id={{ existing_rack_node_id }}"
+        msg: "Discovered rack_type_ref='{{ existing_rack_type_ref }}', rack_node_id={{ existing_rack_node_id }}, initial_rack_count={{ initial_rack_count }}"
       when: existing_rack_type_ref is defined
 
     # ── TEST RACK_ADD-1 ───────────────────────────────────────────────────
-    - name: "[TEST RACK_ADD-1] Add 1 rack by rack_type_id"
+    - name: "[TEST RACK_ADD-1] Add racks to exceed initial count (tests actual API call)"
       juniper.apstra.blueprint:
         id: "{{ bp_rack.id }}"
         rack_type: "{{ existing_rack_type_ref }}"
-        rack_count: 3
+        rack_count: "{{ initial_rack_count | int + 1 }}"
         state: rack_added
         auth_token: "{{ auth.token }}"
       register: rack_add1
@@ -497,14 +498,15 @@
         var: rack_add1
       when: rack_add1 is defined
 
-    - name: "[TEST RACK_ADD-1] Verify rack was added"
+    - name: "[TEST RACK_ADD-1] Verify racks were added and changed=true"
       ansible.builtin.assert:
         that:
           - rack_add1 is defined
           - rack_add1 is success
-          - rack_add1.racks | length >= 3
-        fail_msg: "FAILED: rack_added did not return expected results"
-        success_msg: "PASSED: rack_added succeeded, racks={{ rack_add1.racks | length }}"
+          - rack_add1.changed
+          - rack_add1.racks_added == 1
+        fail_msg: "FAILED: rack_added did not add racks (changed={{ rack_add1.changed }}, racks_added={{ rack_add1.racks_added }})"
+        success_msg: "PASSED: rack_added succeeded, racks_added={{ rack_add1.racks_added }}, total={{ rack_add1.racks | length }}, changed={{ rack_add1.changed }}"
       when: rack_add1 is defined
 
     # ── TEST RACK_ADD-2 (idempotency) ────────────────────────────────────
@@ -512,7 +514,7 @@
       juniper.apstra.blueprint:
         id: "{{ bp_rack.id }}"
         rack_type: "{{ existing_rack_type_ref }}"
-        rack_count: 3
+        rack_count: "{{ initial_rack_count | int + 1 }}"
         state: rack_added
         auth_token: "{{ auth.token }}"
       register: rack_add2
