@@ -146,6 +146,7 @@ install: build
 	test-system_agents \
 	test-os_upgrade \
 	test-upgrade_group \
+	test-interface \
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
@@ -222,6 +223,9 @@ test-os_upgrade: install
 
 test-upgrade_group: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/upgrade_group.yml
+
+test-interface: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interface.yml
 
 test-interface_map: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interface_map.yml

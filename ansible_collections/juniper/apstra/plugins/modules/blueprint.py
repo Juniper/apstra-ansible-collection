@@ -143,10 +143,74 @@ options:
       - C(rack_added) adds racks of a rack type using either C(rack_count)
         (desired total, idempotent) or C(racks_to_add) (delta, non-idempotent).
       - C(rack_deleted) deletes rack(s) by C(rack_id) / C(node_id).
+      - C(interface_updated) sets the admin state (shut/no-shut) of a
+        blueprint interface node. Use C(system_name), C(interface_name),
+        and C(admin_state) to target and configure the interface.
+      - C(interface_tagged) adds or removes tags on a blueprint interface
+        node. Use C(system_name), C(interface_name), C(tags), and
+        C(state=interface_tagged) with C(tag_state=present/absent).
+      - C(lag_updated) sets C(lag_mode) (and optionally C(port_channel_id))
+        on a port-channel interface of a managed switch.
     required: false
     type: str
-    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted"]
+    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted", "interface_updated", "interface_tagged", "lag_updated"]
     default: "present"
+  system_name:
+    description:
+      - The label of the system (switch/server) node in the blueprint.
+      - Required when C(state=interface_updated), C(state=interface_tagged),
+        or C(state=lag_updated).
+    type: str
+    required: false
+  interface_name:
+    description:
+      - The interface name on the system (e.g. C(ge-0/0/0), C(ae4)).
+      - Required when C(state=interface_updated), C(state=interface_tagged),
+        or C(state=lag_updated).
+    type: str
+    required: false
+  admin_state:
+    description:
+      - Desired administrative state of the interface.
+      - C(up) enables the interface (no-shut).
+      - C(down) disables the interface (shut).
+      - Only used when C(state=interface_updated).
+    type: str
+    required: false
+    choices: ["up", "down"]
+  tags:
+    description:
+      - List of tag labels to add or remove on the interface node.
+      - Only used when C(state=interface_tagged).
+      - Combined with C(tag_state) to determine whether tags are added
+        or removed.
+    type: list
+    elements: str
+    required: false
+  tag_state:
+    description:
+      - Whether to add or remove the specified C(tags) on the interface.
+      - C(present) ensures the tags exist on the interface node.
+      - C(absent) removes the tags from the interface node.
+      - Only used when C(state=interface_tagged).
+    type: str
+    required: false
+    choices: ["present", "absent"]
+    default: "present"
+  lag_mode:
+    description:
+      - LAG mode to set on a port-channel interface of a managed switch.
+      - Only used when C(state=lag_updated).
+    type: str
+    required: false
+    choices: ["lacp_active", "lacp_passive", "static_lag", "none"]
+  port_channel_id:
+    description:
+      - Optional port-channel interface number (e.g. C(4) for C(ae4)).
+      - When set, updates the C(port_channel_id) field alongside C(lag_mode).
+      - Only used when C(state=lag_updated).
+    type: int
+    required: false
   query:
     description:
       - A raw QE query string.
@@ -514,6 +578,62 @@ EXAMPLES = """
       blueprint: "{{ blueprint_id }}"
     rack_id: "da_rack_001"
     state: rack_deleted
+
+# Shut down an interface (admin down)
+- name: Shut leaf1 ge-0/0/0 interface
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    admin_state: "down"
+    state: interface_updated
+  register: intf_shut
+
+# Re-enable a shut-down interface
+- name: No-shut leaf1 ge-0/0/0
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    admin_state: "up"
+    state: interface_updated
+
+# Add tags to an ethernet interface
+- name: Tag leaf1 ge-0/0/0 as 'uplink' and 'production'
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    tags:
+      - uplink
+      - production
+    tag_state: present
+    state: interface_tagged
+
+# Remove a tag from an interface
+- name: Remove 'uplink' tag from leaf1 ge-0/0/0
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    tags:
+      - uplink
+    tag_state: absent
+    state: interface_tagged
+
+# Change LAG mode on a port-channel interface
+- name: Set leaf1 ae4 to lacp_passive
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ae4"
+    lag_mode: "lacp_passive"
+    state: lag_updated
 """
 
 RETURN = """
@@ -627,6 +747,42 @@ racks_deleted:
     returned: when racks were deleted
     type: list
     elements: str
+interface_node_id:
+    description:
+        - The blueprint node UUID of the interface that was targeted.
+        - Returned by C(state=interface_updated), C(state=interface_tagged),
+          and C(state=lag_updated).
+    returned: when using interface management states
+    type: str
+admin_state:
+    description:
+        - The resolved admin state of the interface after the operation.
+        - Returned by C(state=interface_updated).
+    returned: when using interface_updated
+    type: str
+    sample: "down"
+operation_state:
+    description:
+        - The raw Apstra C(operation_state) value on the interface node.
+        - C("up") means enabled; C("admin_down") means shut.
+        - Returned by C(state=interface_updated).
+    returned: when using interface_updated
+    type: str
+    sample: "admin_down"
+interface_tags:
+    description:
+        - Final list of tag labels on the interface node after the operation.
+        - Returned by C(state=interface_tagged).
+    returned: when using interface_tagged
+    type: list
+    elements: str
+lag_mode:
+    description:
+        - The final C(lag_mode) on the interface node after the operation.
+        - Returned by C(state=lag_updated).
+    returned: when using lag_updated
+    type: str
+    sample: "lacp_passive"
 """
 
 from time import sleep
@@ -663,6 +819,12 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_graph_node_id,
     resolve_rack_node_id,
     resolve_system_node_id,
+)
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interface import (
+    find_interface_node,
+    set_operation_state,
+    set_interface_tags,
+    set_lag_mode,
 )
 
 
@@ -874,6 +1036,90 @@ def _handle_rack_deleted(module, client_factory, blueprint_id):
         racks_deleted=deleted,
         msg=f"Deleted {n} rack(s) from blueprint",
     )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Interface management handlers (Features 2, 3, 4)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _resolve_interface_node_id(module, client_factory, blueprint_id):
+    """Resolve system_name + interface_name to an interface node UUID.
+
+    Fails the module with a descriptive error if either the system or the
+    interface cannot be found.
+
+    Returns:
+        str: The interface node UUID.
+    """
+    system_name = module.params.get("system_name")
+    interface_name = module.params.get("interface_name")
+
+    if not system_name:
+        module.fail_json(msg="system_name is required for interface management states")
+    if not interface_name:
+        module.fail_json(
+            msg="interface_name is required for interface management states"
+        )
+
+    iface = find_interface_node(
+        client_factory, blueprint_id, system_name, interface_name
+    )
+    if iface is None:
+        module.fail_json(
+            msg=(
+                f"Interface '{interface_name}' not found on system '{system_name}' "
+                f"in blueprint '{blueprint_id}'"
+            )
+        )
+    return iface["id"]
+
+
+def _handle_interface_updated(module, client_factory, blueprint_id):
+    """Handle state=interface_updated — set admin state (shut/no-shut)."""
+    admin_state = module.params.get("admin_state")
+    if not admin_state:
+        module.fail_json(msg="admin_state is required when state=interface_updated")
+
+    iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
+    result = set_operation_state(client_factory, blueprint_id, iface_id, admin_state)
+    result["interface_node_id"] = result.pop("node_id", iface_id)
+    return result
+
+
+def _handle_interface_tagged(module, client_factory, blueprint_id):
+    """Handle state=interface_tagged — add or remove tags on an interface."""
+    tags = module.params.get("tags")
+    if not tags:
+        module.fail_json(msg="tags is required when state=interface_tagged")
+
+    tag_state = module.params.get("tag_state") or "present"
+    iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
+    result = set_interface_tags(
+        client_factory, blueprint_id, iface_id, tags, state=tag_state
+    )
+    result["interface_node_id"] = result.pop("node_id", iface_id)
+    result["interface_tags"] = result.pop("tags", [])
+    return result
+
+
+def _handle_lag_updated(module, client_factory, blueprint_id):
+    """Handle state=lag_updated — set lag_mode on a port-channel interface."""
+    lag_mode = module.params.get("lag_mode")
+    if not lag_mode:
+        module.fail_json(msg="lag_mode is required when state=lag_updated")
+
+    port_channel_id = module.params.get("port_channel_id")
+    iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
+    result = set_lag_mode(
+        client_factory,
+        blueprint_id,
+        iface_id,
+        lag_mode,
+        port_channel_id=port_channel_id,
+    )
+    result["interface_node_id"] = result.pop("node_id", iface_id)
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1261,6 +1507,9 @@ def main():
                 "node_updated",
                 "rack_added",
                 "rack_deleted",
+                "interface_updated",
+                "interface_tagged",
+                "lag_updated",
             ],
             default="present",
         ),
@@ -1302,6 +1551,20 @@ def main():
         hostname=dict(type="str", required=False),
         node_label=dict(type="str", required=False, aliases=["rack_label"]),
         node_properties=dict(type="dict", required=False),
+        # Interface management params (state=interface_updated / interface_tagged / lag_updated)
+        system_name=dict(type="str", required=False),
+        interface_name=dict(type="str", required=False),
+        admin_state=dict(type="str", required=False, choices=["up", "down"]),
+        tags=dict(type="list", elements="str", required=False),
+        tag_state=dict(
+            type="str", required=False, choices=["present", "absent"], default="present"
+        ),
+        lag_mode=dict(
+            type="str",
+            required=False,
+            choices=["lacp_active", "lacp_passive", "static_lag", "none"],
+        ),
+        port_channel_id=dict(type="int", required=False),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | blueprint_module_args
@@ -1366,6 +1629,34 @@ def main():
             if not blueprint_id:
                 module.fail_json(msg="id.blueprint is required when state=rack_deleted")
             result = _handle_rack_deleted(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=interface_updated ───────────────────────────────
+        if state == "interface_updated":
+            if not blueprint_id:
+                module.fail_json(
+                    msg="id.blueprint is required when state=interface_updated"
+                )
+            result = _handle_interface_updated(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=interface_tagged ────────────────────────────────
+        if state == "interface_tagged":
+            if not blueprint_id:
+                module.fail_json(
+                    msg="id.blueprint is required when state=interface_tagged"
+                )
+            result = _handle_interface_tagged(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=lag_updated ─────────────────────────────────────
+        if state == "lag_updated":
+            if not blueprint_id:
+                module.fail_json(msg="id.blueprint is required when state=lag_updated")
+            result = _handle_lag_updated(module, client_factory, blueprint_id)
             module.exit_json(**result)
             return
 

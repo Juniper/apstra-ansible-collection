@@ -82,6 +82,8 @@ options:
         from the design interface-maps catalog.
       - Values may be C(null) or an empty string to clear an assignment.
       - "Example: C(assignments: {spine1: Juniper_vJunos-switch_vJunos})"
+      - When C(state=speed_updated): must contain C(system_name),
+        C(interface_name), and either C(speed) or C(transform_id).
     type: dict
     required: true
   state:
@@ -90,9 +92,14 @@ options:
       - C(present) assigns the specified interface maps to nodes.
       - C(absent) clears the interface map assignments for the
         specified nodes (sets them to null).
+      - C(speed_updated) changes the speed or transform of a specific
+        interface on a system by selecting the appropriate interface map
+        from the design catalog. Requires C(body.system_name),
+        C(body.interface_name), and either C(body.speed) (e.g. C("25G"),
+        C("100G")) or C(body.transform_id) (integer).
     type: str
     required: false
-    choices: ["present", "absent"]
+    choices: ["present", "absent", "speed_updated"]
     default: "present"
 """
 
@@ -141,6 +148,28 @@ EXAMPLES = """
       assignments:
         "{{ node_id }}": null
     state: absent
+
+# ── Change interface speed / breakout ────────────────────────────
+
+- name: Set spine1 et-0/0/0 to 100G
+  juniper.apstra.interface_map:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      system_name: "spine1"
+      interface_name: "et-0/0/0"
+      speed: "100G"
+    state: speed_updated
+
+- name: Set leaf1 xe-0/0/0 breakout to 4x25G (by transform_id)
+  juniper.apstra.interface_map:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      system_name: "leaf1"
+      interface_name: "xe-0/0/0"
+      transform_id: 2
+    state: speed_updated
 """
 
 RETURN = """
@@ -159,6 +188,14 @@ msg:
   description: The output message that the module generates.
   type: str
   returned: always
+interface_map_id:
+  description: The interface map ID assigned after a C(speed_updated) operation.
+  type: str
+  returned: when state is speed_updated and changed is true
+system_node_id:
+  description: The blueprint node UUID of the system targeted by C(speed_updated).
+  type: str
+  returned: when state is speed_updated
 """
 
 import traceback
@@ -395,6 +432,257 @@ def _handle_absent(module, client_factory):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  Feature 1: Interface speed / breakout (state=speed_updated)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _get_design_im_list(client_factory):
+    """Return all design interface maps as a list of dicts.
+
+    Uses ``GET /design/interface-maps`` via the l3clos SDK client.
+
+    Returns:
+        list[dict]: Each dict has at least ``id``, ``label``,
+        ``device_profile_id``, ``logical_device_id``, and ``interfaces``.
+    """
+    client = _get_l3clos_client(client_factory)
+    result = client.request("/design/interface-maps", method="GET")
+    return (result or {}).get("items", [])
+
+
+def _get_design_im_detail(client_factory, im_id):
+    """Return full details of a design interface map by ID."""
+    client = _get_l3clos_client(client_factory)
+    return client.request(f"/design/interface-maps/{im_id}", method="GET") or {}
+
+
+def _normalize_speed(speed_str):
+    """Normalize a speed string like '25G', '25g', '25000M' to uppercase 'G' form.
+
+    Accepted input formats:
+      - ``"25G"`` / ``"25g"`` → ``"25G"``
+      - ``"100G"`` → ``"100G"``
+      - Integer ``{value}`` and unit ``G`` / ``T`` etc.
+
+    Returns:
+        tuple[int, str]: (value, unit) — e.g. (25, "G").
+    """
+    import re
+
+    m = re.match(r"^(\d+)\s*([A-Za-z]+)$", speed_str.strip())
+    if not m:
+        raise ValueError(
+            f"Cannot parse speed '{speed_str}'. "
+            f"Expected format like '25G', '100G', '10G'."
+        )
+    return int(m.group(1)), m.group(2).upper()
+
+
+def _im_has_speed_for_interface(im_detail, if_name, desired_value, desired_unit):
+    """Return True if this interface map has the desired speed for ``if_name``.
+
+    Checks the ``interfaces`` list in the IM for an entry whose ``name``
+    matches ``if_name`` and whose ``speed.value``/``speed.unit`` match
+    the desired speed.
+    """
+    for intf in im_detail.get("interfaces", []):
+        intf_name = intf.get("name") or intf.get("if_name")
+        if intf_name == if_name:
+            spd = intf.get("speed") or {}
+            if isinstance(spd, dict):
+                if (
+                    spd.get("value") == desired_value
+                    and spd.get("unit", "").upper() == desired_unit
+                ):
+                    return True
+    return False
+
+
+def _im_has_transform_id(im_detail, if_name, transform_id):
+    """Return True if this IM has the specified transform_id for ``if_name``.
+
+    In newer device profiles, transforms are listed per interface.
+    Falls back to True if the IM's logical_device matches and the
+    transform_id would be valid.
+    """
+    for intf in im_detail.get("interfaces", []):
+        intf_name = intf.get("name") or intf.get("if_name")
+        if intf_name == if_name:
+            transforms = intf.get("transforms", [])
+            for t in transforms:
+                if t.get("id") == transform_id:
+                    return True
+    return False
+
+
+def _resolve_system_node_for_im(client_factory, blueprint_id, system_name):
+    """Resolve a system node label to its blueprint node UUID.
+
+    Returns:
+        str or None: The node UUID, or None if not found.
+    """
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        run_qe_query,
+    )
+
+    qe = f"node('system', label='{system_name}', name='sys')"
+    items = run_qe_query(client_factory, blueprint_id, qe)
+    if not items:
+        return None
+    return items[0].get("sys", {}).get("id")
+
+
+def _handle_speed_updated(module, client_factory):
+    """Handle state=speed_updated — change speed/breakout via interface map.
+
+    Finds an interface map in the design catalog that satisfies the desired
+    speed (or transform_id) for the specified interface on a system, then
+    re-assigns that interface map to the system node.
+
+    Idempotency: reads the current assignment and checks whether it
+    already provides the desired speed for the interface.  No change is
+    made if it does.
+    """
+    p = module.params
+    id_param = p["id"] or {}
+    blueprint_id = id_param.get("blueprint")
+    if blueprint_id:
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
+    body = p["body"] or {}
+
+    system_name = body.get("system_name")
+    if_name = body.get("interface_name")
+    speed = body.get("speed")
+    transform_id = body.get("transform_id")
+
+    if not system_name:
+        module.fail_json(msg="body.system_name is required when state=speed_updated")
+    if not if_name:
+        module.fail_json(msg="body.interface_name is required when state=speed_updated")
+    if speed is None and transform_id is None:
+        module.fail_json(
+            msg="Either body.speed or body.transform_id is required when state=speed_updated"
+        )
+    if speed is not None and transform_id is not None:
+        module.fail_json(msg="body.speed and body.transform_id are mutually exclusive")
+
+    # Parse speed if provided
+    desired_value = None
+    desired_unit = None
+    if speed is not None:
+        try:
+            desired_value, desired_unit = _normalize_speed(str(speed))
+        except ValueError as exc:
+            module.fail_json(msg=str(exc))
+
+    # Resolve system node in the blueprint
+    node_id = _resolve_system_node_for_im(client_factory, blueprint_id, system_name)
+    if not node_id:
+        module.fail_json(
+            msg=f"System '{system_name}' not found in blueprint '{blueprint_id}'"
+        )
+
+    # Get current interface map assignment for this node
+    current = _get_assignments(client_factory, blueprint_id)
+    current_im_id = current.get(node_id)
+
+    # Get all design interface maps
+    all_ims = _get_design_im_list(client_factory)
+
+    # If a current IM is assigned, check idempotency first
+    if current_im_id:
+        current_im_detail = _get_design_im_detail(client_factory, current_im_id)
+        if speed is not None:
+            if _im_has_speed_for_interface(
+                current_im_detail, if_name, desired_value, desired_unit
+            ):
+                return dict(
+                    changed=False,
+                    assignments=current,
+                    system_node_id=node_id,
+                    msg=(
+                        f"Interface '{if_name}' on '{system_name}' already uses "
+                        f"interface map '{current_im_id}' which provides "
+                        f"speed {speed} (no change)"
+                    ),
+                )
+        else:
+            if _im_has_transform_id(current_im_detail, if_name, transform_id):
+                return dict(
+                    changed=False,
+                    assignments=current,
+                    system_node_id=node_id,
+                    msg=(
+                        f"Interface '{if_name}' on '{system_name}' already uses "
+                        f"interface map '{current_im_id}' with transform_id={transform_id} "
+                        f"(no change)"
+                    ),
+                )
+
+    # Determine the device profile of the current IM (or system) to restrict search
+    current_dp_id = None
+    if current_im_id:
+        current_im_detail = _get_design_im_detail(client_factory, current_im_id)
+        current_dp_id = current_im_detail.get("device_profile_id")
+
+    # Find best-matching IM in the catalog
+    candidate_im_id = None
+    for im in all_ims:
+        # If we know the device profile, only look at IMs for the same device
+        if current_dp_id and im.get("device_profile_id") != current_dp_id:
+            continue
+
+        im_id = im.get("id")
+        if not im_id:
+            continue
+
+        # Fetch full IM detail to check interfaces
+        im_detail = _get_design_im_detail(client_factory, im_id)
+        if speed is not None:
+            if _im_has_speed_for_interface(
+                im_detail, if_name, desired_value, desired_unit
+            ):
+                candidate_im_id = im_id
+                break
+        else:
+            if _im_has_transform_id(im_detail, if_name, transform_id):
+                candidate_im_id = im_id
+                break
+
+    if not candidate_im_id:
+        criteria = (
+            f"speed={speed}" if speed is not None else f"transform_id={transform_id}"
+        )
+        device_info = f" for device profile '{current_dp_id}'" if current_dp_id else ""
+        module.fail_json(
+            msg=(
+                f"No interface map found{device_info} that provides "
+                f"{criteria} for interface '{if_name}'"
+            )
+        )
+
+    # Apply the new assignment
+    _patch_assignments(client_factory, blueprint_id, {node_id: candidate_im_id})
+    final = dict(current)
+    final[node_id] = candidate_im_id
+
+    criteria_msg = (
+        f"speed={speed}" if speed is not None else f"transform_id={transform_id}"
+    )
+    return dict(
+        changed=True,
+        assignments=final,
+        system_node_id=node_id,
+        interface_map_id=candidate_im_id,
+        msg=(
+            f"Interface '{if_name}' on '{system_name}': assigned interface map "
+            f"'{candidate_im_id}' ({criteria_msg})"
+        ),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Module entry point
 # ──────────────────────────────────────────────────────────────────
 
@@ -406,7 +694,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent"],
+            choices=["present", "absent", "speed_updated"],
             default="present",
         ),
     )
@@ -425,6 +713,8 @@ def main():
             result = _handle_present(module, client_factory)
         elif state == "absent":
             result = _handle_absent(module, client_factory)
+        elif state == "speed_updated":
+            result = _handle_speed_updated(module, client_factory)
 
     except Exception as e:
         tb = traceback.format_exc()
