@@ -643,15 +643,43 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
 def _get_racks_by_type(client_factory, blueprint_id, rack_type_id):
     """Return rack node dicts from the blueprint filtered by rack_type_id.
 
-    Uses the QE graph query so no separate REST call is required.  Each
-    rack node is expected to carry a ``rack_type_id`` property; nodes
-    without that property are excluded from the filtered result.
+    Blueprint rack nodes store the full rack type definition as the JSON
+    string ``rack_type_json``.  The ``id`` inside that JSON is a content
+    hash, not the design-API rack type ID.  We look up the rack type's
+    ``display_name`` via the design API and match against
+    ``rack_type_json.display_name`` to filter correctly.
     """
+    import json as _json
+
     items = run_qe_query(client_factory, blueprint_id, "node('rack', name='rack')")
     racks = [r.get("rack", {}) for r in items if r.get("rack")]
-    if rack_type_id:
-        racks = [r for r in racks if r.get("rack_type_id") == rack_type_id]
-    return racks
+    if not rack_type_id:
+        return racks
+
+    # Resolve the design-API display_name for this rack_type_id.
+    base = client_factory.get_base_client()
+    resp = base.raw_request("/design/rack-types")
+    design_display_name = None
+    if resp.status_code == 200:
+        for rt in (resp.json() or {}).get("items", []):
+            if rt.get("id") == rack_type_id:
+                design_display_name = rt.get("display_name")
+                break
+
+    if not design_display_name:
+        # Cannot match by display_name — return unfiltered
+        return racks
+
+    filtered = []
+    for rack in racks:
+        rt_json_str = rack.get("rack_type_json")
+        if rt_json_str:
+            try:
+                if _json.loads(rt_json_str).get("display_name") == design_display_name:
+                    filtered.append(rack)
+            except Exception:
+                pass
+    return filtered
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -690,10 +718,23 @@ def _handle_rack_added(module, client_factory, blueprint_id):
 
     to_add = rack_count - current_count
     base = client_factory.get_base_client()
+
+    # Fetch the full rack type definition required by the add-racks body
+    rt_resp = base.raw_request(f"/design/rack-types/{rack_type_id}")
+    if rt_resp.status_code != 200:
+        raise Exception(
+            f"Failed to fetch rack type definition for '{rack_type_id}': "
+            f"HTTP {rt_resp.status_code} — {rt_resp.text}"
+        )
+    rack_type_def = rt_resp.json()
+
     resp = base.raw_request(
-        f"/blueprints/{blueprint_id}/racks",
+        f"/blueprints/{blueprint_id}/add-racks",
         method="POST",
-        data={"rack_type_id": rack_type_id, "rack_count": to_add},
+        data={
+            "rack_types": [rack_type_def],
+            "rack_type_counts": {rack_type_id: to_add},
+        },
     )
     if resp.status_code not in (200, 201, 202):
         raise Exception(
@@ -741,18 +782,16 @@ def _handle_rack_deleted(module, client_factory, blueprint_id):
         )
 
     base = client_factory.get_base_client()
-    deleted = []
-    for orig_ref, resolved_id in resolved_ids:
-        resp = base.raw_request(
-            f"/blueprints/{blueprint_id}/racks/{resolved_id}",
-            method="DELETE",
+    resp = base.raw_request(
+        f"/blueprints/{blueprint_id}/delete-racks",
+        method="POST",
+        data={"racks_to_delete": [resolved_id for _, resolved_id in resolved_ids]},
+    )
+    if resp.status_code not in (200, 201, 202, 204):
+        raise Exception(
+            f"Failed to delete racks: " f"HTTP {resp.status_code} — {resp.text}"
         )
-        if resp.status_code not in (200, 202, 204):
-            raise Exception(
-                f"Failed to delete rack '{orig_ref}' ({resolved_id}): "
-                f"HTTP {resp.status_code} — {resp.text}"
-            )
-        deleted.append(resolved_id)
+    deleted = [resolved_id for _, resolved_id in resolved_ids]
 
     n = len(deleted)
     return dict(
