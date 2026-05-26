@@ -156,6 +156,60 @@ def resolve_template_id(client_factory, template_ref):
     )
 
 
+def resolve_rack_type_id(client_factory, rack_type_ref):
+    """Resolve a rack type reference (ID or display_name) to its design ID.
+
+    :param client_factory: An ``ApstraClientFactory`` instance.
+    :param rack_type_ref: The rack type ID or display_name.
+    :return: The resolved rack type ID string.
+    :raises ValueError: If no matching rack type is found.
+    """
+    if not rack_type_ref:
+        return rack_type_ref
+
+    base = client_factory.get_base_client()
+    resp = base.raw_request("/design/rack-types")
+    if resp.status_code != 200:
+        raise Exception(f"Failed to list rack types: {resp.status_code} {resp.text}")
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+    rack_types = data.get("items", [])
+
+    # 1. Exact ID match (fast path — already a valid ID)
+    for rt in rack_types:
+        if rt.get("id") == rack_type_ref:
+            return rack_type_ref
+
+    # 2. Exact display_name match
+    for rt in rack_types:
+        if rt.get("display_name") == rack_type_ref:
+            return rt["id"]
+
+    # 3. Case-insensitive display_name match
+    ref_lower = rack_type_ref.lower()
+    matches = [
+        rt for rt in rack_types if (rt.get("display_name") or "").lower() == ref_lower
+    ]
+    if len(matches) == 1:
+        return matches[0]["id"]
+    if len(matches) > 1:
+        ids = [m["id"] for m in matches]
+        raise ValueError(
+            f"Multiple rack types match '{rack_type_ref}': {ids}. "
+            "Use the exact rack type ID instead."
+        )
+
+    available = [
+        f"  - {rt.get('id')!r} ({rt.get('display_name', '')})" for rt in rack_types
+    ]
+    raise ValueError(
+        f"Rack type '{rack_type_ref}' not found. "
+        f"Available rack types:\n" + "\n".join(available)
+    )
+
+
 def resolve_system_node_ids(client_factory, blueprint_id, node_refs):
     """Resolve a list of system node references to their graph node IDs.
 

@@ -399,6 +399,309 @@
         state: absent
         auth_token: "{{ auth.token }}"
 
+    # ─────────────────────────────────────────────────────────────────────
+    #  Rack management tests (state=rack_added, state=rack_deleted)
+    # ─────────────────────────────────────────────────────────────────────
+
+    - name: "[RACK SETUP] Find leftover rack test blueprint from prior runs"
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}_rack_test"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2 Virtual EVPN"
+        lock_state: ignore
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp_rack_stale
+      ignore_errors: true
+
+    - name: "[RACK SETUP] Delete leftover rack test blueprint if found"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack_stale.id }}"
+        lock_state: ignore
+        state: absent
+        auth_token: "{{ auth.token }}"
+      when:
+        - bp_rack_stale is success
+        - bp_rack_stale.id is defined
+        - bp_rack_stale.id.blueprint is defined
+        - bp_rack_stale.id.blueprint | length > 0
+      ignore_errors: true
+
+    - name: "[RACK SETUP] Create L2-EVPN blueprint for rack management tests"
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}_rack_test"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2 Virtual EVPN"
+        lock_state: locked
+        auth_token: "{{ auth.token }}"
+      register: bp_rack
+
+    - name: "[RACK SETUP] Save rack test blueprint ID"
+      ansible.builtin.set_fact:
+        rack_bp_id: "{{ bp_rack.id.blueprint }}"
+
+    - name: "[RACK SETUP] Query initial racks in blueprint"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query_type: "nodes_by_type"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+      register: rack_initial_query
+
+    - name: "[RACK SETUP] Get available rack types from design"
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth_check
+
+    # Use the raw QE approach to discover rack types already in the blueprint
+    - name: "[RACK SETUP] Query racks via QE to discover rack_type_id"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query: "node('rack', name='rack')"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: rack_qe_result
+
+    - name: "[RACK SETUP] Save first existing rack info for later tests"
+      ansible.builtin.set_fact:
+        existing_rack: "{{ rack_qe_result.results[0].rack }}"
+        existing_rack_type_ref: "{{ (rack_qe_result.results[0].rack.rack_type_json | from_json).display_name | default('') }}"
+        existing_rack_node_id: "{{ rack_qe_result.results[0].rack.id }}"
+        initial_rack_count: "{{ rack_qe_result.results | length }}"
+      when:
+        - rack_qe_result is success
+        - rack_qe_result.results | length > 0
+
+    - name: "[RACK SETUP] Show discovered rack type display_name"
+      ansible.builtin.debug:
+        msg: "Discovered rack_type_ref='{{ existing_rack_type_ref }}', rack_node_id={{ existing_rack_node_id }}, initial_rack_count={{ initial_rack_count }}"
+      when: existing_rack_type_ref is defined
+
+
+    # ── TEST RACK_ADD-DELTA-1 (WebUI-style, non-idempotent) ─────────────
+    - name: "[TEST RACK_ADD-DELTA-1] Capture rack IDs before racks_to_add"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query: "node('rack', name='rack')"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: rack_qe_before_delta_add
+
+    - name: "[TEST RACK_ADD-DELTA-1] Add 1 rack using racks_to_add"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_type: "{{ existing_rack_type_ref }}"
+        racks_to_add: 1
+        state: rack_added
+        auth_token: "{{ auth.token }}"
+      register: rack_add_delta1
+      when: existing_rack_type_ref is defined and existing_rack_type_ref | length > 0
+
+    - name: "[TEST RACK_ADD-DELTA-1] Verify 1 rack was added and changed=true"
+      ansible.builtin.assert:
+        that:
+          - rack_add_delta1 is defined
+          - rack_add_delta1 is success
+          - rack_add_delta1.changed
+          - rack_add_delta1.racks_added == 1
+        fail_msg: "FAILED: racks_to_add did not add 1 rack (changed={{ rack_add_delta1.changed }}, racks_added={{ rack_add_delta1.racks_added }})"
+        success_msg: "PASSED: racks_to_add added 1 rack (changed=true)"
+      when: rack_add_delta1 is defined
+
+    - name: "[TEST RACK_ADD-DELTA-1] Capture rack IDs after racks_to_add"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query: "node('rack', name='rack')"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: rack_qe_after_delta_add
+
+    - name: "[TEST RACK_ADD-DELTA-1] Identify newly added rack candidate IDs"
+      ansible.builtin.set_fact:
+        rack_added_by_delta_candidates: "{{ (rack_qe_after_delta_add.results | map(attribute='rack') | map(attribute='id') | list) | difference(rack_qe_before_delta_add.results | map(attribute='rack') | map(attribute='id') | list) }}"
+
+    - name: "[TEST RACK_ADD-DELTA-1] Verify exactly one new rack ID was discovered"
+      ansible.builtin.assert:
+        that:
+          - rack_added_by_delta_candidates | length == 1
+        fail_msg: "FAILED: Expected exactly 1 new rack after racks_to_add, got {{ rack_added_by_delta_candidates | length }}"
+        success_msg: "PASSED: Identified exactly one newly added rack candidate"
+
+    - name: "[TEST RACK_ADD-DELTA-1] Save newly added rack ID"
+      ansible.builtin.set_fact:
+        rack_added_by_delta: "{{ rack_added_by_delta_candidates[0] }}"
+
+    - name: "[TEST RACK_ADD-DELTA-1] Delete the newly added rack"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_id: "{{ rack_added_by_delta }}"
+        state: rack_deleted
+        auth_token: "{{ auth.token }}"
+      register: rack_del_delta1
+
+    - name: "[TEST RACK_ADD-DELTA-1] Verify the newly added rack was deleted"
+      ansible.builtin.assert:
+        that:
+          - rack_del_delta1 is defined
+          - rack_del_delta1 is success
+          - rack_del_delta1.changed
+          - rack_del_delta1.racks_deleted | length == 1
+          - rack_added_by_delta in rack_del_delta1.racks_deleted
+        fail_msg: "FAILED: Could not delete the rack added by racks_to_add"
+        success_msg: "PASSED: Deleted rack added by racks_to_add and continued"
+
+    # ── TEST RACK_ADD-1 ───────────────────────────────────────────────────
+    - name: "[TEST RACK_ADD-1] Ensure blueprint has (initial+1) racks — rack_count is desired total, not delta (idempotent)"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_type: "{{ existing_rack_type_ref }}"
+        rack_count: "{{ initial_rack_count | int + 1 }}"
+        state: rack_added
+        auth_token: "{{ auth.token }}"
+      register: rack_add1
+      when: existing_rack_type_ref is defined and existing_rack_type_ref | length > 0
+
+    - name: "[TEST RACK_ADD-1] Verify racks were added and changed=true"
+      ansible.builtin.assert:
+        that:
+          - rack_add1 is defined
+          - rack_add1 is success
+          - rack_add1.changed
+          - rack_add1.racks_added == 1
+        fail_msg: "FAILED: rack_added did not add racks (changed={{ rack_add1.changed }}, racks_added={{ rack_add1.racks_added }})"
+        success_msg: "PASSED: rack_added succeeded, racks_added={{ rack_add1.racks_added }}, total={{ rack_add1.racks | length }}, changed={{ rack_add1.changed }}"
+      when: rack_add1 is defined
+
+    # ── TEST RACK_ADD-2 (idempotency) ────────────────────────────────────
+    - name: "[TEST RACK_ADD-2] Re-run with same desired total — no change (idempotency)"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_type: "{{ existing_rack_type_ref }}"
+        rack_count: "{{ initial_rack_count | int + 1 }}"
+        state: rack_added
+        auth_token: "{{ auth.token }}"
+      register: rack_add2
+      when: existing_rack_type_ref is defined and existing_rack_type_ref | length > 0
+
+    - name: "[TEST RACK_ADD-2] Verify idempotency"
+      ansible.builtin.assert:
+        that:
+          - rack_add2 is defined
+          - rack_add2 is success
+          - not rack_add2.changed
+        fail_msg: "FAILED: rack_added is not idempotent (changed=true on second run)"
+        success_msg: "PASSED: rack_added is idempotent (changed=false)"
+      when: rack_add2 is defined
+
+    # ── TEST RACK_ADD-3 (lower count — still idempotent) ─────────────────
+    - name: "[TEST RACK_ADD-3] Desired total below current count — no change (already satisfied)"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_type: "{{ existing_rack_type_ref }}"
+        rack_count: 1
+        state: rack_added
+        auth_token: "{{ auth.token }}"
+      register: rack_add3
+      when: existing_rack_type_ref is defined and existing_rack_type_ref | length > 0
+
+    - name: "[TEST RACK_ADD-3] Verify no change when below current count"
+      ansible.builtin.assert:
+        that:
+          - rack_add3 is defined
+          - rack_add3 is success
+          - not rack_add3.changed
+        fail_msg: "FAILED: rack_added should not change when count <= existing"
+        success_msg: "PASSED: rack_added with lower count is idempotent"
+      when: rack_add3 is defined
+
+    # ── TEST RACK_TYPE-1 (invalid type → fail with helpful message) ───────
+    - name: "[TEST RACK_TYPE-1] rack_added with non-existent type name"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_type: "nonexistent-rack-type-xyz"
+        rack_count: 1
+        state: rack_added
+        auth_token: "{{ auth.token }}"
+      register: rack_bad_type
+      ignore_errors: true
+
+    - name: "[TEST RACK_TYPE-1] Verify failure with helpful error"
+      ansible.builtin.assert:
+        that:
+          - rack_bad_type is failed
+          - "'nonexistent-rack-type-xyz' in rack_bad_type.msg"
+        fail_msg: "FAILED: Invalid rack type should fail with name in msg"
+        success_msg: "PASSED: Invalid rack type correctly rejected"
+
+    # ── TEST RACK_DEL-1 — delete a rack by its graph node ID ─────────────
+    - name: "[TEST RACK_DEL-1] Refresh rack list to pick a node ID to delete"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query: "node('rack', name='rack')"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: rack_qe_before_del
+
+    - name: "[TEST RACK_DEL-1] Save the last rack's node_id for deletion"
+      ansible.builtin.set_fact:
+        rack_to_delete: "{{ rack_qe_before_del.results[-1].rack.id }}"
+      when:
+        - rack_qe_before_del is success
+        - rack_qe_before_del.results | length > 0
+
+    - name: "[TEST RACK_DEL-1] Delete the rack by node ID"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_id: "{{ rack_to_delete }}"
+        state: rack_deleted
+        auth_token: "{{ auth.token }}"
+      register: rack_del1
+      when: rack_to_delete is defined
+
+    - name: "[TEST RACK_DEL-1] Verify rack was deleted"
+      ansible.builtin.assert:
+        that:
+          - rack_del1 is defined
+          - rack_del1 is success
+          - rack_del1.changed
+          - rack_del1.racks_deleted | length == 1
+          - rack_to_delete in rack_del1.racks_deleted
+        fail_msg: "FAILED: rack_deleted did not report the deleted rack"
+        success_msg: "PASSED: rack_deleted succeeded, deleted={{ rack_del1.racks_deleted }}"
+      when: rack_del1 is defined
+
+    # ── TEST RACK_DEL-2 (idempotency — same ID, already gone) ────────────
+    - name: "[TEST RACK_DEL-2] Delete same rack again (idempotency)"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_id: "{{ rack_to_delete }}"
+        state: rack_deleted
+        auth_token: "{{ auth.token }}"
+      register: rack_del2
+      when: rack_to_delete is defined
+
+    - name: "[TEST RACK_DEL-2] Verify idempotency"
+      ansible.builtin.assert:
+        that:
+          - rack_del2 is defined
+          - rack_del2 is success
+          - not rack_del2.changed
+        fail_msg: "FAILED: rack_deleted is not idempotent (changed=true for already-deleted rack)"
+        success_msg: "PASSED: rack_deleted is idempotent (changed=false for already-deleted rack)"
+      when: rack_del2 is defined
+
+    # ── Cleanup ───────────────────────────────────────────────────────────
+    - name: "[RACK CLEANUP] Delete rack test blueprint"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
     - name: Logout of Apstra
       juniper.apstra.authenticate:
         logout: true
