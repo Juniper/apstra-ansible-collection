@@ -483,7 +483,7 @@
       when: existing_rack_type_ref is defined
 
     # ── TEST RACK_ADD-1 ───────────────────────────────────────────────────
-    - name: "[TEST RACK_ADD-1] Add racks to exceed initial count (tests actual API call)"
+    - name: "[TEST RACK_ADD-1] Ensure blueprint has (initial+1) racks — rack_count is desired total, not delta"
       juniper.apstra.blueprint:
         id: "{{ bp_rack.id }}"
         rack_type: "{{ existing_rack_type_ref }}"
@@ -510,7 +510,7 @@
       when: rack_add1 is defined
 
     # ── TEST RACK_ADD-2 (idempotency) ────────────────────────────────────
-    - name: "[TEST RACK_ADD-2] Re-run rack_added with same count (idempotency)"
+    - name: "[TEST RACK_ADD-2] Re-run with same desired total — no change (idempotency)"
       juniper.apstra.blueprint:
         id: "{{ bp_rack.id }}"
         rack_type: "{{ existing_rack_type_ref }}"
@@ -531,7 +531,7 @@
       when: rack_add2 is defined
 
     # ── TEST RACK_ADD-3 (lower count — still idempotent) ─────────────────
-    - name: "[TEST RACK_ADD-3] rack_added with smaller count than current — no change"
+    - name: "[TEST RACK_ADD-3] Desired total below current count — no change (already satisfied)"
       juniper.apstra.blueprint:
         id: "{{ bp_rack.id }}"
         rack_type: "{{ existing_rack_type_ref }}"
