@@ -448,6 +448,41 @@ EXAMPLES = """
     rack_label: "border-rack-1"
     node_type: rack
     state: node_updated
+
+# Add 2 racks of a given rack type (by display name)
+- name: Add 2 racks of type 'AOS-2x10-1'
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    rack_type: "AOS-2x10-1"
+    rack_count: 2
+    state: rack_added
+  register: racks_result
+
+# Add racks idempotently — re-run is safe (returns changed=false if already present)
+- name: Ensure at least 1 rack of type 'AOS-2x10-1' exists
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    rack_type: "AOS-2x10-1"
+    rack_count: 1
+    state: rack_added
+
+# Delete a rack by its blueprint rack ID
+- name: Remove a rack from the blueprint
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    rack_id: "{{ rack_node_id }}"
+    state: rack_deleted
+
+# Delete a rack by its label (name resolution handled automatically)
+- name: Remove rack by label
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    rack_id: "da_rack_001"
+    state: rack_deleted
 """
 
 RETURN = """
@@ -534,6 +569,33 @@ node:
         - Returned by C(state=node_updated).
     returned: when using node_updated
     type: dict
+racks:
+    description:
+        - List of rack dicts currently in the blueprint for the requested
+          rack type after the operation.
+        - Returned by C(state=rack_added).
+    returned: when using rack_added
+    type: list
+    elements: dict
+racks_added:
+    description:
+        - Number of racks added during this run.
+        - Returned by C(state=rack_added) when C(changed=true).
+    returned: when racks were added
+    type: int
+rack_type_id:
+    description:
+        - Resolved rack type ID used for the operation.
+        - Returned by C(state=rack_added).
+    returned: when using rack_added
+    type: str
+racks_deleted:
+    description:
+        - List of rack node IDs that were deleted.
+        - Returned by C(state=rack_deleted) when C(changed=true).
+    returned: when racks were deleted
+    type: list
+    elements: str
 """
 
 from time import sleep
@@ -566,10 +628,138 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes imp
 
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_template_id as _resolve_template_id,
+    resolve_rack_type_id,
     resolve_graph_node_id,
     resolve_rack_node_id,
     resolve_system_node_id,
 )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Rack management helpers
+# ──────────────────────────────────────────────────────────────────
+
+
+def _get_racks_by_type(client_factory, blueprint_id, rack_type_id):
+    """Return rack node dicts from the blueprint filtered by rack_type_id.
+
+    Uses the QE graph query so no separate REST call is required.  Each
+    rack node is expected to carry a ``rack_type_id`` property; nodes
+    without that property are excluded from the filtered result.
+    """
+    items = run_qe_query(client_factory, blueprint_id, "node('rack', name='rack')")
+    racks = [r.get("rack", {}) for r in items if r.get("rack")]
+    if rack_type_id:
+        racks = [r for r in racks if r.get("rack_type_id") == rack_type_id]
+    return racks
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Rack management handlers (state=rack_added / state=rack_deleted)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _handle_rack_added(module, client_factory, blueprint_id):
+    """Handle state=rack_added — add racks of a given type to the blueprint."""
+    rack_type_ref = module.params.get("rack_type")
+    rack_count = module.params.get("rack_count") or 1
+
+    if not rack_type_ref:
+        module.fail_json(msg="rack_type is required when state=rack_added")
+
+    # Resolve rack type name/display_name → design ID
+    try:
+        rack_type_id = resolve_rack_type_id(client_factory, rack_type_ref)
+    except (ValueError, Exception) as exc:
+        module.fail_json(msg=str(exc))
+
+    # Idempotency check: count existing racks of this type in the blueprint
+    existing = _get_racks_by_type(client_factory, blueprint_id, rack_type_id)
+    current_count = len(existing)
+
+    if current_count >= rack_count:
+        return dict(
+            changed=False,
+            racks=existing,
+            rack_type_id=rack_type_id,
+            msg=(
+                f"Blueprint already has {current_count} rack(s) of type "
+                f"'{rack_type_ref}' (desired: {rack_count}). No changes needed."
+            ),
+        )
+
+    to_add = rack_count - current_count
+    base = client_factory.get_base_client()
+    resp = base.raw_request(
+        f"/blueprints/{blueprint_id}/racks",
+        method="POST",
+        data={"rack_type_id": rack_type_id, "rack_count": to_add},
+    )
+    if resp.status_code not in (200, 201, 202):
+        raise Exception(
+            f"Failed to add racks to blueprint: HTTP {resp.status_code} — {resp.text}"
+        )
+
+    all_racks = _get_racks_by_type(client_factory, blueprint_id, rack_type_id)
+    return dict(
+        changed=True,
+        racks=all_racks,
+        racks_added=to_add,
+        rack_type_id=rack_type_id,
+        msg=(
+            f"Added {to_add} rack(s) of type '{rack_type_ref}' to blueprint "
+            f"(total: {len(all_racks)})"
+        ),
+    )
+
+
+def _handle_rack_deleted(module, client_factory, blueprint_id):
+    """Handle state=rack_deleted — remove rack(s) from the blueprint."""
+    # node_id has alias rack_id (defined in argspec)
+    rack_id = module.params.get("node_id")
+
+    if not rack_id:
+        module.fail_json(msg="rack_id is required when state=rack_deleted")
+
+    rack_ids = [rack_id] if isinstance(rack_id, str) else list(rack_id)
+
+    # Resolve each reference (label or UUID) to a blueprint rack node ID.
+    # Racks that cannot be found are silently skipped (idempotency).
+    resolved_ids = []
+    for rid in rack_ids:
+        try:
+            resolved = resolve_rack_node_id(client_factory, blueprint_id, rid)
+            resolved_ids.append((rid, resolved))
+        except ValueError:
+            pass  # already deleted or never existed
+
+    if not resolved_ids:
+        return dict(
+            changed=False,
+            racks_deleted=[],
+            msg="Rack(s) not found in blueprint (already deleted or never existed)",
+        )
+
+    base = client_factory.get_base_client()
+    deleted = []
+    for orig_ref, resolved_id in resolved_ids:
+        resp = base.raw_request(
+            f"/blueprints/{blueprint_id}/racks/{resolved_id}",
+            method="DELETE",
+        )
+        if resp.status_code not in (200, 202, 204):
+            raise Exception(
+                f"Failed to delete rack '{orig_ref}' ({resolved_id}): "
+                f"HTTP {resp.status_code} — {resp.text}"
+            )
+        deleted.append(resolved_id)
+
+    n = len(deleted)
+    return dict(
+        changed=True,
+        racks_deleted=deleted,
+        msg=f"Deleted {n} rack(s) from blueprint",
+    )
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -949,9 +1139,20 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "committed", "absent", "queried", "node_updated"],
+            choices=[
+                "present",
+                "committed",
+                "absent",
+                "queried",
+                "node_updated",
+                "rack_added",
+                "rack_deleted",
+            ],
             default="present",
         ),
+        # Rack management params (state=rack_added / rack_deleted)
+        rack_type=dict(type="str", required=False),
+        rack_count=dict(type="int", required=False, default=1),
         # Query params (state=queried)
         query=dict(type="str", required=False),
         query_type=dict(
@@ -1034,6 +1235,22 @@ def main():
             if not blueprint_id:
                 module.fail_json(msg="id.blueprint is required when state=node_updated")
             result = _handle_node_updated(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=rack_added ─────────────────────────────────────
+        if state == "rack_added":
+            if not blueprint_id:
+                module.fail_json(msg="id.blueprint is required when state=rack_added")
+            result = _handle_rack_added(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=rack_deleted ────────────────────────────────────
+        if state == "rack_deleted":
+            if not blueprint_id:
+                module.fail_json(msg="id.blueprint is required when state=rack_deleted")
+            result = _handle_rack_deleted(module, client_factory, blueprint_id)
             module.exit_json(**result)
             return
 
