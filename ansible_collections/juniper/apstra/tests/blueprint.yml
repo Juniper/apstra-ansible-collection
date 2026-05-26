@@ -482,8 +482,81 @@
         msg: "Discovered rack_type_ref='{{ existing_rack_type_ref }}', rack_node_id={{ existing_rack_node_id }}, initial_rack_count={{ initial_rack_count }}"
       when: existing_rack_type_ref is defined
 
+
+    # ── TEST RACK_ADD-DELTA-1 (WebUI-style, non-idempotent) ─────────────
+    - name: "[TEST RACK_ADD-DELTA-1] Capture rack IDs before racks_to_add"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query: "node('rack', name='rack')"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: rack_qe_before_delta_add
+
+    - name: "[TEST RACK_ADD-DELTA-1] Add 1 rack using racks_to_add"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_type: "{{ existing_rack_type_ref }}"
+        racks_to_add: 1
+        state: rack_added
+        auth_token: "{{ auth.token }}"
+      register: rack_add_delta1
+      when: existing_rack_type_ref is defined and existing_rack_type_ref | length > 0
+
+    - name: "[TEST RACK_ADD-DELTA-1] Verify 1 rack was added and changed=true"
+      ansible.builtin.assert:
+        that:
+          - rack_add_delta1 is defined
+          - rack_add_delta1 is success
+          - rack_add_delta1.changed
+          - rack_add_delta1.racks_added == 1
+        fail_msg: "FAILED: racks_to_add did not add 1 rack (changed={{ rack_add_delta1.changed }}, racks_added={{ rack_add_delta1.racks_added }})"
+        success_msg: "PASSED: racks_to_add added 1 rack (changed=true)"
+      when: rack_add_delta1 is defined
+
+    - name: "[TEST RACK_ADD-DELTA-1] Capture rack IDs after racks_to_add"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        query: "node('rack', name='rack')"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: rack_qe_after_delta_add
+
+    - name: "[TEST RACK_ADD-DELTA-1] Identify newly added rack candidate IDs"
+      ansible.builtin.set_fact:
+        rack_added_by_delta_candidates: "{{ (rack_qe_after_delta_add.results | map(attribute='rack') | map(attribute='id') | list) | difference(rack_qe_before_delta_add.results | map(attribute='rack') | map(attribute='id') | list) }}"
+
+    - name: "[TEST RACK_ADD-DELTA-1] Verify exactly one new rack ID was discovered"
+      ansible.builtin.assert:
+        that:
+          - rack_added_by_delta_candidates | length == 1
+        fail_msg: "FAILED: Expected exactly 1 new rack after racks_to_add, got {{ rack_added_by_delta_candidates | length }}"
+        success_msg: "PASSED: Identified exactly one newly added rack candidate"
+
+    - name: "[TEST RACK_ADD-DELTA-1] Save newly added rack ID"
+      ansible.builtin.set_fact:
+        rack_added_by_delta: "{{ rack_added_by_delta_candidates[0] }}"
+
+    - name: "[TEST RACK_ADD-DELTA-1] Delete the newly added rack"
+      juniper.apstra.blueprint:
+        id: "{{ bp_rack.id }}"
+        rack_id: "{{ rack_added_by_delta }}"
+        state: rack_deleted
+        auth_token: "{{ auth.token }}"
+      register: rack_del_delta1
+
+    - name: "[TEST RACK_ADD-DELTA-1] Verify the newly added rack was deleted"
+      ansible.builtin.assert:
+        that:
+          - rack_del_delta1 is defined
+          - rack_del_delta1 is success
+          - rack_del_delta1.changed
+          - rack_del_delta1.racks_deleted | length == 1
+          - rack_added_by_delta in rack_del_delta1.racks_deleted
+        fail_msg: "FAILED: Could not delete the rack added by racks_to_add"
+        success_msg: "PASSED: Deleted rack added by racks_to_add and continued"
+
     # ── TEST RACK_ADD-1 ───────────────────────────────────────────────────
-    - name: "[TEST RACK_ADD-1] Ensure blueprint has (initial+1) racks — rack_count is desired total, not delta"
+    - name: "[TEST RACK_ADD-1] Ensure blueprint has (initial+1) racks — rack_count is desired total, not delta (idempotent)"
       juniper.apstra.blueprint:
         id: "{{ bp_rack.id }}"
         rack_type: "{{ existing_rack_type_ref }}"
@@ -492,11 +565,6 @@
         auth_token: "{{ auth.token }}"
       register: rack_add1
       when: existing_rack_type_ref is defined and existing_rack_type_ref | length > 0
-
-    - name: "[TEST RACK_ADD-1] Show result"
-      ansible.builtin.debug:
-        var: rack_add1
-      when: rack_add1 is defined
 
     - name: "[TEST RACK_ADD-1] Verify racks were added and changed=true"
       ansible.builtin.assert:

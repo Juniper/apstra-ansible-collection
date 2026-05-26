@@ -83,6 +83,33 @@ options:
     required: false
     type: int
     default: 60
+  rack_type:
+    description:
+      - Rack type reference for C(state=rack_added).
+      - Accepts either rack type ID (for example C(L2_Virtual)) or display name
+        (for example C(L2 Virtual)).
+      - Required when C(state=rack_added).
+    type: str
+    required: false
+  rack_count:
+    description:
+      - Desired total number of racks of C(rack_type) to exist in the blueprint.
+      - Declarative/idempotent behavior: the module only adds missing racks until
+        the desired total is reached.
+      - Mutually exclusive with C(racks_to_add).
+      - Only used when C(state=rack_added).
+    type: int
+    required: false
+    default: 1
+  racks_to_add:
+    description:
+      - Number of racks to add in this run.
+      - Imperative/non-idempotent behavior (WebUI-style): each run adds this many
+        racks regardless of current count.
+      - Mutually exclusive with C(rack_count).
+      - Only used when C(state=rack_added).
+    type: int
+    required: false
   commit_timeout:
     description:
       - The timeout in seconds for committing the blueprint.
@@ -113,9 +140,12 @@ options:
       - C(node_updated) patches properties on one or more blueprint
         nodes. Use C(node_id) to target a single node by UUID, or
         C(assignment) to assign multiple nodes by label in one task.
+      - C(rack_added) adds racks of a rack type using either C(rack_count)
+        (desired total, idempotent) or C(racks_to_add) (delta, non-idempotent).
+      - C(rack_deleted) deletes rack(s) by C(rack_id) / C(node_id).
     required: false
     type: str
-    choices: ["present", "committed", "absent", "queried", "node_updated"]
+    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted"]
     default: "present"
   query:
     description:
@@ -449,18 +479,19 @@ EXAMPLES = """
     node_type: rack
     state: node_updated
 
-# Add 2 racks of a given rack type (by display name)
-- name: Add 2 racks of type 'AOS-2x10-1'
+
+# Add 2 racks (WebUI-style, non-idempotent)
+- name: Add 2 racks of type 'AOS-2x10-1' (non-idempotent)
   juniper.apstra.blueprint:
     id:
       blueprint: "{{ blueprint_id }}"
     rack_type: "AOS-2x10-1"
-    rack_count: 2
+    racks_to_add: 2
     state: rack_added
   register: racks_result
 
-# Add racks idempotently — re-run is safe (returns changed=false if already present)
-- name: Ensure at least 1 rack of type 'AOS-2x10-1' exists
+# Ensure at least 1 rack exists (idempotent)
+- name: Ensure at least 1 rack of type 'AOS-2x10-1' exists (idempotent)
   juniper.apstra.blueprint:
     id:
       blueprint: "{{ blueprint_id }}"
@@ -690,16 +721,64 @@ def _get_racks_by_type(client_factory, blueprint_id, rack_type_id):
 def _handle_rack_added(module, client_factory, blueprint_id):
     """Handle state=rack_added — add racks of a given type to the blueprint."""
     rack_type_ref = module.params.get("rack_type")
-    rack_count = module.params.get("rack_count") or 1
+    rack_count = module.params.get("rack_count")
+    racks_to_add = module.params.get("racks_to_add")
 
     if not rack_type_ref:
         module.fail_json(msg="rack_type is required when state=rack_added")
+
+    if rack_count is not None and racks_to_add is not None:
+        module.fail_json(
+            msg="rack_count and racks_to_add are mutually exclusive. Use only one."
+        )
 
     # Resolve rack type name/display_name → design ID
     try:
         rack_type_id = resolve_rack_type_id(client_factory, rack_type_ref)
     except (ValueError, Exception) as exc:
         module.fail_json(msg=str(exc))
+
+    base = client_factory.get_base_client()
+
+    # Non-idempotent: racks_to_add (WebUI style)
+    if racks_to_add is not None:
+        if racks_to_add < 1:
+            module.fail_json(msg="racks_to_add must be >= 1 if specified.")
+        # Fetch the full rack type definition required by the add-racks body
+        rt_resp = base.raw_request(f"/design/rack-types/{rack_type_id}")
+        if rt_resp.status_code != 200:
+            raise Exception(
+                f"Failed to fetch rack type definition for '{rack_type_id}': "
+                f"HTTP {rt_resp.status_code} — {rt_resp.text}"
+            )
+        rack_type_def = rt_resp.json()
+        resp = base.raw_request(
+            f"/blueprints/{blueprint_id}/add-racks",
+            method="POST",
+            data={
+                "rack_types": [rack_type_def],
+                "rack_type_counts": {rack_type_id: racks_to_add},
+            },
+        )
+        if resp.status_code not in (200, 201, 202):
+            raise Exception(
+                f"Failed to add racks to blueprint: HTTP {resp.status_code} — {resp.text}"
+            )
+        all_racks = _get_racks_by_type(client_factory, blueprint_id, rack_type_id)
+        return dict(
+            changed=True,
+            racks=all_racks,
+            racks_added=racks_to_add,
+            rack_type_id=rack_type_id,
+            msg=(
+                f"Added {racks_to_add} rack(s) of type '{rack_type_ref}' to blueprint "
+                f"(total: {len(all_racks)})"
+            ),
+        )
+
+    # Idempotent: rack_count (Ansible style, default)
+    if rack_count is None:
+        rack_count = 1
 
     # Idempotency check: count existing racks of this type in the blueprint
     existing = _get_racks_by_type(client_factory, blueprint_id, rack_type_id)
@@ -717,8 +796,6 @@ def _handle_rack_added(module, client_factory, blueprint_id):
         )
 
     to_add = rack_count - current_count
-    base = client_factory.get_base_client()
-
     # Fetch the full rack type definition required by the add-racks body
     rt_resp = base.raw_request(f"/design/rack-types/{rack_type_id}")
     if rt_resp.status_code != 200:
@@ -727,7 +804,6 @@ def _handle_rack_added(module, client_factory, blueprint_id):
             f"HTTP {rt_resp.status_code} — {rt_resp.text}"
         )
     rack_type_def = rt_resp.json()
-
     resp = base.raw_request(
         f"/blueprints/{blueprint_id}/add-racks",
         method="POST",
@@ -740,7 +816,6 @@ def _handle_rack_added(module, client_factory, blueprint_id):
         raise Exception(
             f"Failed to add racks to blueprint: HTTP {resp.status_code} — {resp.text}"
         )
-
     all_racks = _get_racks_by_type(client_factory, blueprint_id, rack_type_id)
     return dict(
         changed=True,
@@ -1191,7 +1266,8 @@ def main():
         ),
         # Rack management params (state=rack_added / rack_deleted)
         rack_type=dict(type="str", required=False),
-        rack_count=dict(type="int", required=False, default=1),
+        rack_count=dict(type="int", required=False),
+        racks_to_add=dict(type="int", required=False),
         # Query params (state=queried)
         query=dict(type="str", required=False),
         query_type=dict(
