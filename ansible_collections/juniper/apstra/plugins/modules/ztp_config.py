@@ -14,7 +14,7 @@ module: ztp_config
 
 short_description: Manage ZTP VM configuration (DHCP, firmware, passwords)
 
-version_added: "0.1.0"
+version_added: "1.0.9"
 
 author:
   - "Prabhanjan KV (@kvp_jnpr)"
