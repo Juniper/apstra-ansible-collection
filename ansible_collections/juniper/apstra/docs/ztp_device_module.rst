@@ -259,6 +259,10 @@ Parameters
 
       ``status`` will retrieve the ZTP provisioning status of the device (requires ``ip_addr`` or ``system_id`` in ``id``). Fails if the device is not registered.
 
+      ``create_agent`` will create a system agent via the ZTP VM's ``/api/ztp/create_agent`` endpoint. Requires ZTP VM connection parameters and device credentials in ``body`` (``management_ip``, ``username``, ``password``, ``agent_type``, ``job_on_create``, ``platform``).
+
+      ``update_status`` will update the device provisioning status via the ZTP VM's ``/api/ztp/device/log`` endpoint. Requires ``body`` with ``ip``, ``system_id``, ``platform``, ``task``, and ``log``. Setting ``task`` to ``Device Ready`` marks it as completed.
+
       .. rst-class:: ansible-option-line
 
       :ansible-option-choices:`Choices:`
@@ -266,6 +270,8 @@ Parameters
       - :ansible-option-choices-entry-default:`"present"` :ansible-option-choices-default-mark:`← (default)`
       - :ansible-option-choices-entry:`"absent"`
       - :ansible-option-choices-entry:`"status"`
+      - :ansible-option-choices-entry:`"create_agent"`
+      - :ansible-option-choices-entry:`"update_status"`
 
       .. raw:: html
 
@@ -275,6 +281,10 @@ Examples
 --------
 
 .. code-block:: yaml+jinja
+
+    # =========================================================================
+    # STATUS — Query ZTP device provisioning status
+    # =========================================================================
 
     # Check ZTP device status by IP address
     # Module fails if the IP address is not registered
@@ -294,13 +304,87 @@ Examples
     - name: Get ZTP device status by system_id
       juniper.apstra.ztp_device:
         id:
-          system_id: "device-001"
+          system_id: "525400B52016"
         state: status
       register: ztp_status
 
     - name: Show full ZTP device details
       ansible.builtin.debug:
         var: ztp_status.ztp_device
+
+    # =========================================================================
+    # CREATE_AGENT — Create system agent via ZTP VM
+    # =========================================================================
+    # This calls the ZTP VM's /api/ztp/create_agent endpoint which:
+    #   - Creates the system agent on the Apstra server
+    #   - Tracks the device in the ZTP VM's status database
+    #   - If agent already exists, deletes and recreates it
+    # The password must match what is currently on the device.
+
+    - name: Create offbox system agent via ZTP VM
+      juniper.apstra.ztp_device:
+        state: create_agent
+        body:
+          management_ip: "192.168.50.11"
+          username: "aosadmin"
+          password: "Juniper123"
+          agent_type: "offbox"
+          job_on_create: "install"
+          platform: "junos"
+      register: agent_result
+
+    - name: Show created agent ID
+      ansible.builtin.debug:
+        msg: "Agent ID: {{ agent_result.agent_id }}"
+
+    # Create onbox agent (for NX-OS or other onbox platforms)
+    - name: Create onbox system agent via ZTP VM
+      juniper.apstra.ztp_device:
+        state: create_agent
+        body:
+          management_ip: "192.168.50.20"
+          username: "admin"
+          password: "admin123"
+          agent_type: "onbox"
+          job_on_create: "install"
+          platform: "nxos"
+
+    # =========================================================================
+    # UPDATE_STATUS — Update ZTP device provisioning status
+    # =========================================================================
+    # This calls the ZTP VM's /api/ztp/device/log endpoint.
+    # Setting task to "Device Ready" marks the device as completed.
+    # In a full ZTP flow, ztp.py does this automatically.
+    # When using create_agent directly, update status manually.
+
+    - name: Mark device as completed in ZTP
+      juniper.apstra.ztp_device:
+        state: update_status
+        body:
+          ip: "192.168.50.11"
+          system_id: "525400B52016"
+          platform: "junos"
+          task: "Device Ready"
+          log: "Agent installed and connected successfully"
+
+    # =========================================================================
+    # PRESENT / ABSENT — Register or remove ZTP devices
+    # =========================================================================
+
+    # Register a new ZTP device
+    - name: Register ZTP device
+      juniper.apstra.ztp_device:
+        state: present
+        body:
+          ip_addr: "192.168.50.11"
+          system_id: "525400B52016"
+
+    # Delete a ZTP device by IP
+    - name: Remove ZTP device
+      juniper.apstra.ztp_device:
+        id:
+          ip_addr: "192.168.50.11"
+        state: absent
 
 Return Values
 -------------

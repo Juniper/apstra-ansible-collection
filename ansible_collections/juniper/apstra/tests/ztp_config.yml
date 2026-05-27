@@ -24,8 +24,23 @@
     ztp_url: "{{ lookup('env', 'ZTP_URL') }}"
     ztp_username: "{{ lookup('env', 'ZTP_USERNAME') | default('admin', true) }}"
     ztp_password: "{{ lookup('env', 'ZTP_PASSWORD') }}"
+    ztp_configured: "{{ (ztp_url | length > 0) and (ztp_password | length > 0) }}"
 
   tasks:
+    # =====================================================================
+    # PRECONDITION — Skip all tests when ZTP env vars are not set
+    # =====================================================================
+    - name: "[SKIP] ZTP environment variables not configured — skipping all ZTP config tests"
+      ansible.builtin.debug:
+        msg: >-
+          ZTP_URL and/or ZTP_PASSWORD not set in environment.
+          Skipping ZTP config tests. Set these variables in .env to enable.
+      when: not ztp_configured
+
+    - name: "[SKIP] End play when ZTP is not configured"
+      ansible.builtin.meta: end_play
+      when: not ztp_configured
+
     # =====================================================================
     # 1. DHCP CONFIGURATOR — QUERY
     # =====================================================================

@@ -163,6 +163,10 @@ options:
 """
 
 EXAMPLES = """
+# =============================================================================
+# DHCP CONFIGURATOR SCOPE — Query, Update, Reservations
+# =============================================================================
+
 # Query current DHCP configurator state
 - name: Get current DHCP configuration
   juniper.apstra.ztp_config:
@@ -174,8 +178,9 @@ EXAMPLES = """
   ansible.builtin.debug:
     var: dhcp_config.config
 
-# Configure DHCP subnets and host-reservations
-- name: Configure DHCP
+# Configure DHCP subnets, pools, options, and host-reservations
+# This example shows all available DHCP options
+- name: Configure DHCP with all options
   juniper.apstra.ztp_config:
     scope: dhcp_configurator
     state: present
@@ -196,27 +201,78 @@ EXAMPLES = """
           - hw-address: "aa:bb:cc:dd:ee:01"
             ip-address: "192.168.50.100"
             hostname: "switch1"
+          - hw-address: "aa:bb:cc:dd:ee:02"
+            ip-address: "192.168.50.101"
+            hostname: "switch2"
         reservation-mode:
           - "all"
 
-# Add host-reservations to existing subnet
+# Configure multiple DHCP subnets with separate pools
+- name: Configure multiple subnets
+  juniper.apstra.ztp_config:
+    scope: dhcp_configurator
+    state: present
+    subnets:
+      - subnet: "192.168.50.0/24"
+        router: "192.168.50.1"
+        pools:
+          - range-start: "192.168.50.10"
+            range-end: "192.168.50.50"
+      - subnet: "10.0.0.0/24"
+        router: "10.0.0.1"
+        pools:
+          - range-start: "10.0.0.10"
+            range-end: "10.0.0.100"
+
+# Add host-reservations to the first existing subnet
+# When subnets are not provided, reservations merge into the first subnet
 - name: Add host reservation
   juniper.apstra.ztp_config:
     scope: dhcp_configurator
     state: present
     host_reservations:
-      - hw-address: "aa:bb:cc:dd:ee:02"
-        ip-address: "192.168.50.101"
-        hostname: "switch2"
+      - hw-address: "aa:bb:cc:dd:ee:03"
+        ip-address: "192.168.50.102"
+        hostname: "switch3"
 
-# Remove a host-reservation
+# Add global host reservations (outside any subnet)
+- name: Add global host reservation
+  juniper.apstra.ztp_config:
+    scope: dhcp_configurator
+    state: present
+    global_host_reservations:
+      - hw-address: "aa:bb:cc:dd:ee:ff"
+        ip-address: "10.10.10.100"
+        hostname: "global-device"
+
+# Set default reservation mode
+- name: Set reservation mode
+  juniper.apstra.ztp_config:
+    scope: dhcp_configurator
+    state: present
+    reservation_mode_default:
+      - "all"
+
+# Remove a host-reservation by MAC address
 - name: Remove host reservation
   juniper.apstra.ztp_config:
     scope: dhcp_configurator
     state: absent
     host_reservations:
-      - hw-address: "aa:bb:cc:dd:ee:02"
-        ip-address: "192.168.50.101"
+      - hw-address: "aa:bb:cc:dd:ee:03"
+        ip-address: "192.168.50.102"
+
+# Remove an entire subnet
+- name: Remove a subnet
+  juniper.apstra.ztp_config:
+    scope: dhcp_configurator
+    state: absent
+    subnets:
+      - subnet: "10.0.0.0/24"
+
+# =============================================================================
+# ZTP CONFIG SCOPE — Query, Update firmware/password/agent settings
+# =============================================================================
 
 # Query current ZTP JSON config
 - name: Get ZTP firmware config
@@ -229,8 +285,75 @@ EXAMPLES = """
   ansible.builtin.debug:
     var: ztp_fw.config
 
-# Update ZTP firmware and password config
-- name: Update ZTP config
+# Configure complete ZTP JSON with all platform blocks
+# This manages the full ztp.json used by the ZTP VM for device provisioning
+- name: Configure complete ZTP JSON
+  juniper.apstra.ztp_config:
+    scope: ztp_config
+    state: present
+    firmware:
+      defaults:
+        device-root-password: "admin"
+        device-user: "aosadmin"
+        device-user-password: "aosadmin"
+        dual-routing-engine: false
+        junos-versions:
+          - "25.4R1.12"
+        junos-evo-image: "http://server/path/to/junos-evo-install.tgz"
+        junos-evo-versions:
+          - "junos-evo-version1"
+        eos-image: "aos_eos_image.bin"
+        eos-versions:
+          - "eos-version1"
+          - "eos-version2"
+        nxos-image: "aos_nxos_image.bin"
+        nxos-versions:
+          - "nxos-version1"
+        sonic-image: "http://server/path/to/sonic.bin"
+        sonic-versions:
+          - "sonic-version1"
+          - "sonic-version2"
+        management-subnet-prefixlen: 0
+        system-agent-params:
+          agent_type: "onbox"
+      junos:
+        device-root-password: "Juniper123"
+        device-user-password: "Juniper123"
+        system-agent-params:
+          agent_type: "offbox"
+          job_on_create: "install"
+          platform: "junos"
+      junos-evo:
+        device-root-password: "root123"
+        device-user-password: "aosadmin123"
+        system-agent-params:
+          agent_type: "offbox"
+          job_on_create: "install"
+          platform: "junos"
+      eos:
+        custom-config: "eos_custom.sh"
+      nxos:
+        device-root-password: "admin123"
+        system-agent-params:
+          agent_type: "onbox"
+
+# Update only Junos settings (other platforms are preserved)
+# The module does a deep merge — only specified keys are updated
+- name: Update Junos ZTP settings only
+  juniper.apstra.ztp_config:
+    scope: ztp_config
+    state: present
+    firmware:
+      junos:
+        device-root-password: "{{ junos_root_password }}"
+        device-user-password: "{{ junos_user_password }}"
+        system-agent-params:
+          agent_type: "offbox"
+          job_on_create: "install"
+          platform: "junos"
+
+# Update default settings only
+- name: Update default ZTP settings
   juniper.apstra.ztp_config:
     scope: ztp_config
     state: present
@@ -241,13 +364,10 @@ EXAMPLES = """
         device-user-password: "{{ device_user_password }}"
         junos-versions:
           - "25.4R1.12"
-      junos:
-        device-root-password: "{{ junos_root_password }}"
-        device-user-password: "{{ junos_user_password }}"
-        system-agent-params:
-          agent_type: "offbox"
-          job_on_create: "install"
-          platform: "junos"
+
+# =============================================================================
+# PASSWORD SCOPE — Change ZTP web UI admin password
+# =============================================================================
 
 # Change ZTP web UI password
 - name: Change ZTP admin password

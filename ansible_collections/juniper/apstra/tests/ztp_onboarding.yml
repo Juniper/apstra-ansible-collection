@@ -82,7 +82,26 @@
     ztp_domain_name: "{{ lookup('env', 'ZTP_DOMAIN_NAME') | default('ztplab.local', true) }}"
     ztp_dns_servers: "{{ (lookup('env', 'ZTP_DNS_SERVERS') | default('8.8.8.8,8.8.4.4', true)).split(',') }}"
 
+    # ---- Precondition check ----
+    ztp_url: "{{ lookup('env', 'ZTP_URL') }}"
+    ztp_password: "{{ lookup('env', 'ZTP_PASSWORD') }}"
+    ztp_configured: "{{ (ztp_url | length > 0) and (ztp_password | length > 0) }}"
+
   tasks:
+    # =========================================================================
+    # Precondition — Skip when ZTP env vars are not set
+    # =========================================================================
+    - name: "[SKIP] ZTP environment variables not configured — skipping onboarding tests"
+      ansible.builtin.debug:
+        msg: >-
+          ZTP_URL and/or ZTP_PASSWORD not set in environment.
+          Skipping ZTP onboarding tests. Set these variables in .env to enable.
+      when: not ztp_configured
+
+    - name: "[SKIP] End play when ZTP is not configured"
+      ansible.builtin.meta: end_play
+      when: not ztp_configured
+
     # =========================================================================
     # Phase 1: Authentication
     # =========================================================================
