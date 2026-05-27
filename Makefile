@@ -64,6 +64,7 @@ pipenv: build/wheels
 		rm -f Pipfile.lock; \
 	fi
 	(pip install pipenv pre-commit && \
+	 export PATH="$$HOME/.local/bin:$$PATH" && \
 	 pre-commit install && \
 	 pipenv install --dev)
 
