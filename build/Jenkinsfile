@@ -1,0 +1,155 @@
+// Nightly/Weekly build pipeline for apstra-ansible-collection
+// Builds, tests, and publishes the Ansible Execution Environment image
+
+pipeline {
+    agent { label 'apstra-eda' }
+
+    triggers {
+        // Run once a week - every Monday at 2:00 AM
+        cron('0 2 * * 1')
+    }
+
+    parameters {
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Branch to checkout from the apstra-ansible-collection repository'
+        )
+    }
+
+    environment {
+        REPO_URL          = 'https://github.com/Juniper/apstra-ansible-collection.git'
+        // Base registry path; branch sub-path is appended dynamically in 'Set Image Tag'.
+        // Works with both a parameterized pipeline (params.BRANCH) and a
+        // Multibranch Pipeline job (env.BRANCH_NAME set automatically by Jenkins).
+        REGISTRY_BASE     = 's-artifactory.juniper.net/atom-docker/ee'
+        IMAGE_NAME        = 'apstra-ee'
+        APSTRA_API_URL              = "https://10.84.5.248/api"
+        APSTRA_VERIFY_CERTIFICATES  = "false"
+
+        // Apstra API credentials (Jenkins credential ID: apstra-eda-collection)
+        // Exposes APSTRA_CREDS_USR and APSTRA_CREDS_PSW, which are re-exported
+        // as APSTRA_USERNAME / APSTRA_PASSWORD so the collection picks them up
+        // from the environment without hardcoding them in playbooks.
+        APSTRA_CREDS      = credentials('apstra-eda-collection')
+        APSTRA_USERNAME   = "${APSTRA_CREDS_USR}"
+        APSTRA_PASSWORD   = "${APSTRA_CREDS_PSW}"
+
+        // Red Hat registry credentials (Jenkins credential ID: apstra-redhat)
+        RH_CREDS          = credentials('apstra-redhat')
+
+        PYENV_ROOT        = "${env.HOME}/.pyenv"
+        // BASH_ENV is sourced automatically by bash before every sh step,
+        // so pyenv is initialised once without repeating it in each stage.
+        BASH_ENV          = "${env.WORKSPACE}/build/pyenv_setup.sh"
+    }
+
+    options {
+        // Keep last 10 builds
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // Abort if build takes more than 2 hours
+        timeout(time: 2, unit: 'HOURS')
+        timestamps()
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo "Checking out branch '${params.BRANCH}' from ${REPO_URL}"
+                git branch: "${params.BRANCH}", url: "${REPO_URL}"
+            }
+        }
+
+        stage('Set Image Tag') {
+            steps {
+                script {
+                    // BRANCH_NAME is set automatically by Multibranch Pipeline jobs.
+                    // Fall back to the BRANCH parameter for standard parameterized builds.
+                    def branchName = (env.BRANCH_NAME ?: params.BRANCH).replaceAll('/', '-')
+
+                    // Full registry path includes the branch so images are isolated per branch:
+                    //   s-artifactory.juniper.net/atom-docker/ee/<branch>/apstra-ee:<tag>
+                    env.REGISTRY_URL = "${REGISTRY_BASE}/${branchName}"
+
+                    def apstraVersion = readFile('build/apstra_version').trim()
+                    env.APSTRA_VERSION = apstraVersion
+                    env.IMAGE_TAG = "${apstraVersion}-${env.BUILD_NUMBER}"
+
+                    echo "Branch         : ${branchName}"
+                    echo "Registry URL   : ${env.REGISTRY_URL}"
+                    echo "Apstra Version : ${env.APSTRA_VERSION}"
+                    echo "Image Tag      : ${env.IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Download SDK') {
+            steps {
+                sh '''
+                    AOS_SDK_WHL="aos_sdk-${APSTRA_VERSION}-py3-none-any.whl"
+                    AOS_SDK_URL="https://s-artifactory.juniper.net/atom-docker/eda/${AOS_SDK_WHL}"
+                    echo "Downloading Apstra SDK wheel: ${AOS_SDK_WHL}"
+                    curl -fso "build/wheels/${AOS_SDK_WHL}" "${AOS_SDK_URL}"
+                    echo "SDK wheel downloaded: $(ls -lh build/wheels/${AOS_SDK_WHL})"
+                '''
+            }
+        }
+
+        stage('Setup') {
+            steps {
+                sh 'make setup'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'make test'
+            }
+            post {
+                failure {
+                    echo 'Tests failed! Sending notification...'
+                    // Add notification steps here (email, Slack, etc.)
+                }
+            }
+        }
+
+        stage('Build & Push Image') {
+            steps {
+                echo "Building and pushing Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
+                sh '''
+                    export RH_USERNAME="${RH_CREDS_USR}"
+                    export RH_PASSWORD="${RH_CREDS_PSW}"
+                    export REGISTRY_URL="${REGISTRY_URL}"
+                    export TAG="${IMAGE_TAG}"
+
+                    # make image calls build_image.sh which builds, tags and pushes
+                    # Anonymous push is used - no Artifactory login required
+                    make image
+
+                    echo "Image pushed: ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            node('apstra-eda') {
+                echo 'Cleaning up Docker images to save disk space'
+                sh '''
+                    docker rmi "${IMAGE_NAME}:latest" || true
+                    docker rmi "${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}" || true
+                    docker image prune -f || true
+                '''
+            }
+        }
+        success {
+            echo "Build ${BUILD_NUMBER} succeeded! Image: ${REGISTRY_URL}/${IMAGE_NAME}:${IMAGE_TAG}"
+        }
+        failure {
+            echo "Build ${BUILD_NUMBER} FAILED!"
+            // Add notification steps here (email, Slack, etc.)
+        }
+    }
+}
