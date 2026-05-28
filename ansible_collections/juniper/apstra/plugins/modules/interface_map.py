@@ -455,6 +455,34 @@ def _get_design_im_detail(client_factory, im_id):
     return client.request(f"/design/interface-maps/{im_id}", method="GET") or {}
 
 
+def _get_blueprint_im_node(client_factory, blueprint_id, im_id):
+    """Return a blueprint node of type interface_map by ID.
+
+    Used as fallback when the IM exists only at the blueprint level
+    (e.g. Apstra-created ``_v2`` variants) and is not in the design catalog.
+    Returns an empty dict if not found.
+    """
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/nodes/{im_id}")
+    if resp.status_code == 200:
+        return resp.json()
+    return {}
+
+
+def _get_blueprint_im_nodes(client_factory, blueprint_id):
+    """Return all interface_map nodes defined at the blueprint level.
+
+    Uses ``GET /blueprints/{id}/nodes?node_type=interface_map``.
+    Returns a list of node dicts (may include both design-derived and
+    blueprint-local IMs such as Apstra-created ``_v2`` speed variants).
+    """
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/nodes?node_type=interface_map")
+    if resp.status_code == 200:
+        return list(resp.json().get("nodes", {}).values())
+    return []
+
+
 def _normalize_speed(speed_str):
     """Normalize a speed string like '25G', '25g', '25000M' to uppercase 'G' form.
 
@@ -589,12 +617,20 @@ def _handle_speed_updated(module, client_factory):
     # Get all design interface maps
     all_ims = _get_design_im_list(client_factory)
 
-    # Fetch current IM detail once (used for idempotency + DP/LD filtering)
+    # Fetch current IM detail once (used for idempotency + DP/LD filtering).
+    # Try design catalog first; fall back to blueprint node lookup for
+    # blueprint-local IMs (e.g. Apstra-created ``_v2`` speed variants that
+    # exist only in the blueprint, not in ``/design/interface-maps``).
     current_im_detail = None
     current_dp_id = None
     current_ld_id = None
     if current_im_id:
         current_im_detail = _get_design_im_detail(client_factory, current_im_id)
+        if not current_im_detail:
+            # Not in design catalog — look it up as a blueprint node
+            current_im_detail = _get_blueprint_im_node(
+                client_factory, blueprint_id, current_im_id
+            )
         current_dp_id = current_im_detail.get("device_profile_id")
         current_ld_id = current_im_detail.get("logical_device_id")
 
@@ -655,6 +691,32 @@ def _handle_speed_updated(module, client_factory):
             if _im_has_transform_id(im_detail, if_name, transform_id):
                 candidate_im_id = im_id
                 break
+
+    if not candidate_im_id:
+        # Design catalog has no suitable IM.  Also search blueprint-level IM
+        # nodes — Apstra creates blueprint-local variants (e.g. ``_v2``) when
+        # the WebUI changes a port speed.  These nodes share the same device
+        # profile but may carry a different (derived) logical_device_id, so
+        # we only filter by device_profile_id here.
+        bp_ims = _get_blueprint_im_nodes(client_factory, blueprint_id)
+        for im in bp_ims:
+            im_id = im.get("id")
+            if not im_id or im_id == current_im_id:
+                continue
+            if current_dp_id and im.get("device_profile_id") != current_dp_id:
+                continue
+            # Note: skip the LD filter for blueprint IMs — their LD may differ
+            # from the design LD while still being a valid speed variant.
+            if speed is not None:
+                if _im_has_speed_for_interface(
+                    im, if_name, desired_value, desired_unit
+                ):
+                    candidate_im_id = im_id
+                    break
+            else:
+                if _im_has_transform_id(im, if_name, transform_id):
+                    candidate_im_id = im_id
+                    break
 
     if not candidate_im_id:
         criteria = (
