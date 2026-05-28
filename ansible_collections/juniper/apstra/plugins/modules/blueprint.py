@@ -18,6 +18,8 @@ description:
     a blueprint using C(state=queried).
   - Patch individual node properties such as system_id and deploy_mode
     using C(state=node_updated).
+  - Run commit checks (dry-run validation) and collect build errors
+    and deploy diagnostics using C(state=commit_check).
   - The QE query and node utilities are also available as importable
     helpers in C(module_utils/apstra/bp_query.py) and
     C(module_utils/apstra/bp_nodes.py) for use by other modules.
@@ -143,10 +145,19 @@ options:
       - C(rack_added) adds racks of a rack type using either C(rack_count)
         (desired total, idempotent) or C(racks_to_add) (delta, non-idempotent).
       - C(rack_deleted) deletes rack(s) by C(rack_id) / C(node_id).
+      - C(commit_check) runs a dry-run validation — collects build
+        errors and deploy diagnostics without deploying. Read-only.
     required: false
     type: str
-    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted"]
+    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted", "commit_check"]
     default: "present"
+  include_warnings:
+    description:
+      - Include warnings in the commit check output.
+      - Only used when C(state=commit_check).
+    type: bool
+    required: false
+    default: true
   query:
     description:
       - A raw QE query string.
@@ -514,6 +525,23 @@ EXAMPLES = """
       blueprint: "{{ blueprint_id }}"
     rack_id: "da_rack_001"
     state: rack_deleted
+
+# Run commit checks (dry-run validation) before deploying
+- name: Validate blueprint before deploying
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    state: commit_check
+  register: check_result
+
+# Run commit checks without warnings
+- name: Check for errors only (no warnings)
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    state: commit_check
+    include_warnings: false
+  register: check_result
 """
 
 RETURN = """
@@ -627,6 +655,50 @@ racks_deleted:
     returned: when racks were deleted
     type: list
     elements: str
+errors:
+    description:
+        - List of categorized build error dicts.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: list
+    elements: dict
+    sample:
+        - type: "config_error"
+          severity: "error"
+          message: "BGP session failed"
+          node: "spine1"
+commit_warnings:
+    description:
+        - List of categorized warning dicts.
+        - Returned by C(state=commit_check) when C(include_warnings=true).
+    returned: when using commit_check with include_warnings
+    type: list
+    elements: dict
+deploy_ready:
+    description:
+        - Whether the blueprint is ready for deployment.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: bool
+    sample: true
+errors_count:
+    description:
+        - Total number of errors found.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: int
+warnings_count:
+    description:
+        - Total number of warnings found.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: int
+diagnostics:
+    description:
+        - Raw deploy diagnostics data from the Apstra API.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: dict
 """
 
 from time import sleep
@@ -654,6 +726,10 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes imp
     patch_node,
     node_needs_update,
     assign_nodes_by_label,
+)
+
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_dci import (
+    get_blueprint_errors,
 )
 
 
@@ -874,6 +950,121 @@ def _handle_rack_deleted(module, client_factory, blueprint_id):
         racks_deleted=deleted,
         msg=f"Deleted {n} rack(s) from blueprint",
     )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Commit check handler (state=commit_check)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _get_deploy_diagnostics(client_factory, blueprint_id):
+    """Retrieve deploy readiness diagnostics for a blueprint.
+
+    Calls ``GET /api/blueprints/{bp_id}/deploy-diagnostics``.
+
+    Returns:
+        dict: The diagnostics payload or empty dict on failure.
+    """
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/deploy-diagnostics")
+    if resp.status_code == 200:
+        return resp.json()
+    return {}
+
+
+def _handle_commit_check(module, client_factory, blueprint_id):
+    """Handle state=commit_check -- dry-run validation without deploying.
+
+    Collects build errors via GET /api/blueprints/{id}/errors and
+    deploy diagnostics via GET /api/blueprints/{id}/deploy-diagnostics.
+    Returns structured output with categorized errors, warnings, and
+    deploy readiness status.  This is a read-only operation with no
+    side effects on the blueprint.
+    """
+    include_warnings = module.params.get("include_warnings", True)
+
+    # ── Collect build errors ──────────────────────────────────────
+    raw_errors = get_blueprint_errors(client_factory, blueprint_id)
+
+    errors_list = []
+    warnings_list = []
+    metadata_keys = {"version", "errors_count", "warnings_count"}
+
+    for category, items in raw_errors.items():
+        if category in metadata_keys:
+            continue
+        if not items:
+            continue
+        # items may be a dict (keyed by node/relationship id) or a list
+        if isinstance(items, dict):
+            entries = items.values()
+        elif isinstance(items, list):
+            entries = items
+        else:
+            continue
+
+        for entry in entries:
+            if isinstance(entry, dict):
+                severity = entry.get("severity", "error")
+                record = dict(
+                    type=category,
+                    severity=severity,
+                    message=entry.get("message", entry.get("error", str(entry))),
+                    node=entry.get("node", entry.get("identity", "")),
+                )
+                if severity == "warning":
+                    warnings_list.append(record)
+                else:
+                    errors_list.append(record)
+            elif isinstance(entry, list):
+                # Nested list of error dicts
+                for sub in entry:
+                    if isinstance(sub, dict):
+                        severity = sub.get("severity", "error")
+                        record = dict(
+                            type=category,
+                            severity=severity,
+                            message=sub.get("message", sub.get("error", str(sub))),
+                            node=sub.get("node", sub.get("identity", "")),
+                        )
+                        if severity == "warning":
+                            warnings_list.append(record)
+                        else:
+                            errors_list.append(record)
+
+    # ── Collect deploy diagnostics ────────────────────────────────
+    diagnostics = _get_deploy_diagnostics(client_factory, blueprint_id)
+
+    # Determine deploy readiness
+    deploy_ready = len(errors_list) == 0 and not diagnostics.get("has_errors", False)
+
+    errors_count = raw_errors.get("errors_count", len(errors_list))
+    warnings_count = raw_errors.get("warnings_count", len(warnings_list))
+
+    result = dict(
+        changed=False,
+        errors=errors_list,
+        errors_count=errors_count,
+        warnings_count=warnings_count,
+        deploy_ready=deploy_ready,
+        diagnostics=diagnostics,
+    )
+
+    if include_warnings:
+        result["commit_warnings"] = warnings_list
+
+    if errors_list:
+        result["msg"] = (
+            f"Commit check found {errors_count} error(s) and "
+            f"{warnings_count} warning(s) — blueprint is NOT deploy-ready"
+        )
+    else:
+        result["msg"] = (
+            f"Commit check passed with {warnings_count} warning(s) — "
+            f"blueprint is deploy-ready"
+        )
+
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1261,6 +1452,7 @@ def main():
                 "node_updated",
                 "rack_added",
                 "rack_deleted",
+                "commit_check",
             ],
             default="present",
         ),
@@ -1302,6 +1494,8 @@ def main():
         hostname=dict(type="str", required=False),
         node_label=dict(type="str", required=False, aliases=["rack_label"]),
         node_properties=dict(type="dict", required=False),
+        # Commit check params (state=commit_check)
+        include_warnings=dict(type="bool", required=False, default=True),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | blueprint_module_args
@@ -1366,6 +1560,14 @@ def main():
             if not blueprint_id:
                 module.fail_json(msg="id.blueprint is required when state=rack_deleted")
             result = _handle_rack_deleted(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=commit_check ────────────────────────────────────
+        if state == "commit_check":
+            if not blueprint_id:
+                module.fail_json(msg="id.blueprint is required when state=commit_check")
+            result = _handle_commit_check(module, client_factory, blueprint_id)
             module.exit_json(**result)
             return
 

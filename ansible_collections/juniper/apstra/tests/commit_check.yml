@@ -1,0 +1,109 @@
+---
+- name: Test blueprint commit check (dry-run validation)
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_commit_check_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Create a test blueprint ────────────────────────────────────
+    - name: Create freeform blueprint for testing
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: blueprint_create
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: blueprint_create
+
+    # ── Run commit check (with warnings) ──────────────────────────
+    - name: Run commit check with warnings
+      juniper.apstra.blueprint:
+        id: "{{ blueprint_create.id }}"
+        lock_state: "ignore"
+        state: commit_check
+        include_warnings: true
+        auth_token: "{{ auth.token }}"
+      register: commit_check_result
+
+    - name: Show commit check result
+      ansible.builtin.debug:
+        var: commit_check_result
+
+    - name: Verify commit check returns expected fields
+      ansible.builtin.assert:
+        that:
+          - commit_check_result.changed == false
+          - commit_check_result.errors is defined
+          - commit_check_result.errors_count is defined
+          - commit_check_result.warnings_count is defined
+          - commit_check_result.deploy_ready is defined
+          - commit_check_result.diagnostics is defined
+          - commit_check_result.msg is defined
+        fail_msg: "Commit check result is missing expected fields"
+
+    # ── Run commit check (without warnings) ───────────────────────
+    - name: Run commit check without warnings
+      juniper.apstra.blueprint:
+        id: "{{ blueprint_create.id }}"
+        lock_state: "ignore"
+        state: commit_check
+        include_warnings: false
+        auth_token: "{{ auth.token }}"
+      register: commit_check_no_warn
+
+    - name: Show commit check result (no warnings)
+      ansible.builtin.debug:
+        var: commit_check_no_warn
+
+    - name: Verify warnings are excluded when include_warnings is false
+      ansible.builtin.assert:
+        that:
+          - commit_check_no_warn.commit_warnings is not defined
+          - commit_check_no_warn.errors is defined
+          - commit_check_no_warn.deploy_ready is defined
+        fail_msg: "Commit check should not include warnings when include_warnings=false"
+
+    # ── Verify no side effects (read-only) ────────────────────────
+    - name: Run commit check again to verify idempotency
+      juniper.apstra.blueprint:
+        id: "{{ blueprint_create.id }}"
+        lock_state: "ignore"
+        state: commit_check
+        auth_token: "{{ auth.token }}"
+      register: commit_check_again
+
+    - name: Verify commit check is idempotent (no changes)
+      ansible.builtin.assert:
+        that:
+          - commit_check_again.changed == false
+        fail_msg: "Commit check should never report changed=true"
+
+    # ── Cleanup ───────────────────────────────────────────────────
+    - name: Delete test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ blueprint_create.id }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: blueprint_delete
+
+    - name: Show delete result
+      ansible.builtin.debug:
+        var: blueprint_delete
