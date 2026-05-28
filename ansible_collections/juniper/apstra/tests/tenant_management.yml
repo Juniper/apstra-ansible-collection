@@ -1,0 +1,447 @@
+---
+# Integration test for BOT-367: Tenant management enhancements
+# Tests: actual Tenant objects (routing zone grouping), tenant aliases,
+#         bulk operations, state=list, idempotency, backward compatibility
+- name: Test tenant management (BOT-367)
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    # ── Setup ─────────────────────────────────────────────────
+    - name: Generate unique blueprint name
+      ansible.builtin.set_fact:
+        blueprint_name: "test_tenant_{{ lookup('pipe', 'python3 -c \"import uuid; print(str(uuid.uuid4())[:12])\"') }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "L2_Virtual_EVPN"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ── Create security zones (routing zones) as prerequisites ──
+    - name: Create web-tier security zone
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "web-tier"
+          vrf_name: "web_tier_vrf"
+          vrf_description: "Web tier VRF"
+          vni_id: 10001
+          sz_type: "evpn"
+        auth_token: "{{ auth.token }}"
+      register: sz_web
+
+    - name: Create app-tier security zone
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "app-tier"
+          vrf_name: "app_tier_vrf"
+          vrf_description: "App tier VRF"
+          vni_id: 10002
+          sz_type: "evpn"
+        auth_token: "{{ auth.token }}"
+      register: sz_app
+
+    - name: Create db-tier security zone
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          label: "db-tier"
+          vrf_name: "db_tier_vrf"
+          vrf_description: "DB tier VRF"
+          vni_id: 10003
+          sz_type: "evpn"
+        auth_token: "{{ auth.token }}"
+      register: sz_db
+
+    - name: Assert security zones created
+      ansible.builtin.assert:
+        that:
+          - sz_web.changed == true
+          - sz_app.changed == true
+          - sz_db.changed == true
+        fail_msg: "Setup FAIL: security zones not created"
+        success_msg: "Setup PASS: security zones created"
+
+    # ──────────────────────────────────────────────────────────
+    # AC-1: Create a single Tenant using the tenant parameter
+    # ──────────────────────────────────────────────────────────
+    - name: Create a tenant grouping web and app routing zones
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "production"
+          routing_zones:
+            - "web-tier"
+            - "app-tier"
+        auth_token: "{{ auth.token }}"
+      register: tenant_create
+
+    - name: Show tenant create result
+      ansible.builtin.debug:
+        var: tenant_create
+
+    - name: Assert tenant was created
+      ansible.builtin.assert:
+        that:
+          - tenant_create.changed == true
+          - tenant_create.tenant.label == "production"
+          - tenant_create.tenant.application_node_ids | length == 2
+          - tenant_create.id is defined
+        fail_msg: "AC-1 FAIL: single tenant creation failed"
+        success_msg: "AC-1 PASS: single tenant created with routing zones"
+
+    # ── AC-4: Idempotent tenant create ───────────────────────
+    - name: Create same tenant again (idempotent)
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "production"
+          routing_zones:
+            - "web-tier"
+            - "app-tier"
+        auth_token: "{{ auth.token }}"
+      register: tenant_idem
+
+    - name: Assert idempotent create
+      ansible.builtin.assert:
+        that:
+          - tenant_idem.changed == false
+        fail_msg: "AC-4 FAIL: tenant create not idempotent"
+        success_msg: "AC-4 PASS: tenant create is idempotent"
+
+    # ── Update tenant routing zones ──────────────────────────
+    - name: Update tenant - add db-tier routing zone
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "production"
+          routing_zones:
+            - "web-tier"
+            - "app-tier"
+            - "db-tier"
+        auth_token: "{{ auth.token }}"
+      register: tenant_update
+
+    - name: Assert tenant updated
+      ansible.builtin.assert:
+        that:
+          - tenant_update.changed == true
+          - tenant_update.tenant.application_node_ids | length == 3
+        fail_msg: "AC-1 FAIL: tenant update failed"
+        success_msg: "AC-1 PASS: tenant routing zone update works"
+
+    # ── Idempotent update ────────────────────────────────────
+    - name: Update tenant with same routing zones (idempotent)
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "production"
+          routing_zones:
+            - "web-tier"
+            - "app-tier"
+            - "db-tier"
+        auth_token: "{{ auth.token }}"
+      register: tenant_update_idem
+
+    - name: Assert idempotent update
+      ansible.builtin.assert:
+        that:
+          - tenant_update_idem.changed == false
+        fail_msg: "AC-4 FAIL: tenant update not idempotent"
+        success_msg: "AC-4 PASS: tenant update is idempotent"
+
+    # ──────────────────────────────────────────────────────────
+    # state=list: enumerate security zones AND tenants
+    # ──────────────────────────────────────────────────────────
+    - name: List all security zones and tenants
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        state: list
+        auth_token: "{{ auth.token }}"
+      register: sz_list
+
+    - name: Show list result
+      ansible.builtin.debug:
+        var: sz_list
+
+    - name: Assert list returns both SZs and tenants
+      ansible.builtin.assert:
+        that:
+          - sz_list.security_zones | length >= 3
+          - sz_list.tenants | length >= 1
+          - sz_list.tenants | selectattr('label', 'equalto', 'production') | list | length == 1
+        fail_msg: "state=list FAIL: did not return expected data"
+        success_msg: "state=list PASS: enumerates SZs and tenants"
+
+    # ──────────────────────────────────────────────────────────
+    # AC-2: Bulk tenant operations
+    # ──────────────────────────────────────────────────────────
+    - name: Delete production tenant to free routing zones
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "production"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: pre_bulk_delete
+
+    - name: Bulk create tenants
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenants:
+          - label: "staging"
+            routing_zones:
+              - "web-tier"
+          - label: "development"
+            routing_zones:
+              - "db-tier"
+        auth_token: "{{ auth.token }}"
+      register: bulk_create
+
+    - name: Show bulk create result
+      ansible.builtin.debug:
+        var: bulk_create
+
+    - name: Assert bulk create worked
+      ansible.builtin.assert:
+        that:
+          - bulk_create.changed == true
+          - bulk_create.tenants | length == 2
+          - bulk_create.tenants[0].changed == true
+          - bulk_create.tenants[1].changed == true
+        fail_msg: "AC-2 FAIL: bulk tenant create did not work"
+        success_msg: "AC-2 PASS: bulk tenant create works"
+
+    # ── Bulk create idempotency ──────────────────────────────
+    - name: Bulk create same tenants again (idempotent)
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenants:
+          - label: "staging"
+            routing_zones:
+              - "web-tier"
+          - label: "development"
+            routing_zones:
+              - "db-tier"
+        auth_token: "{{ auth.token }}"
+      register: bulk_idem
+
+    - name: Assert bulk idempotent
+      ansible.builtin.assert:
+        that:
+          - bulk_idem.changed == false
+          - bulk_idem.tenants[0].changed == false
+          - bulk_idem.tenants[1].changed == false
+        fail_msg: "AC-2/AC-4 FAIL: bulk create not idempotent"
+        success_msg: "AC-2/AC-4 PASS: bulk create is idempotent"
+
+    # ── Bulk update tenant routing zones ─────────────────────
+    - name: Bulk update tenants - add app-tier to staging
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenants:
+          - label: "staging"
+            routing_zones:
+              - "web-tier"
+              - "app-tier"
+          - label: "development"
+            routing_zones:
+              - "db-tier"
+        auth_token: "{{ auth.token }}"
+      register: bulk_update
+
+    - name: Assert bulk update worked
+      ansible.builtin.assert:
+        that:
+          - bulk_update.changed == true
+          - bulk_update.tenants[0].changed == true
+        fail_msg: "AC-2 FAIL: bulk update did not work"
+        success_msg: "AC-2 PASS: bulk update works"
+
+    # ── Verify tenant count ──────────────────────────────────
+    - name: List all after bulk operations
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        state: list
+        auth_token: "{{ auth.token }}"
+      register: list_after_bulk
+
+    - name: Assert 2 tenants exist
+      ansible.builtin.assert:
+        that:
+          - list_after_bulk.tenants | length == 2
+        fail_msg: "List FAIL: expected 2 tenants"
+        success_msg: "List PASS: 2 tenants found"
+
+    # ── AC-2: Bulk tenant delete ─────────────────────────────
+    - name: Bulk delete tenants using per-tenant state
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenants:
+          - label: "staging"
+            state: absent
+          - label: "development"
+            state: absent
+        auth_token: "{{ auth.token }}"
+      register: bulk_delete
+
+    - name: Show bulk delete result
+      ansible.builtin.debug:
+        var: bulk_delete
+
+    - name: Assert bulk delete worked
+      ansible.builtin.assert:
+        that:
+          - bulk_delete.changed == true
+          - bulk_delete.tenants[0].changed == true
+          - bulk_delete.tenants[1].changed == true
+        fail_msg: "AC-2 FAIL: bulk delete did not work"
+        success_msg: "AC-2 PASS: bulk delete works"
+
+    # ── Bulk delete idempotency ──────────────────────────────
+    - name: Bulk delete same tenants again (idempotent)
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenants:
+          - label: "staging"
+            state: absent
+          - label: "development"
+            state: absent
+        auth_token: "{{ auth.token }}"
+      register: bulk_delete_idem
+
+    - name: Assert bulk delete idempotent
+      ansible.builtin.assert:
+        that:
+          - bulk_delete_idem.changed == false
+          - bulk_delete_idem.tenants[0].changed == false
+          - bulk_delete_idem.tenants[1].changed == false
+        fail_msg: "AC-2/AC-4 FAIL: bulk delete not idempotent"
+        success_msg: "AC-2/AC-4 PASS: bulk delete is idempotent"
+
+    # ──────────────────────────────────────────────────────────
+    # AC-3: Backward compatibility — original SZ params still work
+    # ──────────────────────────────────────────────────────────
+    - name: Create SZ using tenant_label alias (backward compat)
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        body:
+          tenant_label: "alias-test"
+          tenant_description: "Alias backward compat"
+          vrf_name: "alias_test_vrf"
+          vni_id: 10010
+          sz_type: "evpn"
+        auth_token: "{{ auth.token }}"
+      register: alias_sz
+
+    - name: Assert backward compatibility
+      ansible.builtin.assert:
+        that:
+          - alias_sz.changed == true
+          - alias_sz.security_zone.label == "alias-test"
+          - alias_sz.security_zone.vrf_description == "Alias backward compat"
+        fail_msg: "AC-3 FAIL: backward compatibility broken"
+        success_msg: "AC-3 PASS: tenant aliases still work for SZ creation"
+
+    # ── Single tenant delete ─────────────────────────────────
+    - name: Create a tenant to test single delete
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "to-delete"
+          routing_zones:
+            - "web-tier"
+        auth_token: "{{ auth.token }}"
+      register: td_create
+
+    - name: Delete the to-delete tenant
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "to-delete"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: tenant_delete
+
+    - name: Assert tenant deleted
+      ansible.builtin.assert:
+        that:
+          - tenant_delete.changed == true
+        fail_msg: "Delete FAIL: tenant deletion failed"
+        success_msg: "Delete PASS: tenant deleted"
+
+    # ── Delete idempotency ───────────────────────────────────
+    - name: Delete same tenant again (idempotent)
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        tenant:
+          label: "to-delete"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: tenant_delete_idem
+
+    - name: Assert delete idempotent
+      ansible.builtin.assert:
+        that:
+          - tenant_delete_idem.changed == false
+        fail_msg: "AC-4 FAIL: tenant delete not idempotent"
+        success_msg: "AC-4 PASS: tenant delete is idempotent"
+
+    # ── Final list — verify clean state ──────────────────────
+    - name: Final list
+      juniper.apstra.security_zone:
+        id: "{{ bp.id }}"
+        state: list
+        auth_token: "{{ auth.token }}"
+      register: final_list
+
+    - name: Assert no tenants remain
+      ansible.builtin.assert:
+        that:
+          - final_list.tenants | length == 0
+        fail_msg: "Cleanup FAIL: tenants still exist"
+        success_msg: "Cleanup PASS: all tenants removed"
+
+    # ── Teardown ─────────────────────────────────────────────
+    - name: Unlock the blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        lock_state: "unlocked"
+        auth_token: "{{ auth.token }}"
+
+    - name: Delete blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+
+    - name: Final summary
+      ansible.builtin.debug:
+        msg: >
+          BOT-367 Acceptance Criteria Results:
+          AC-1 Tenant-centric naming (actual Tenant objects): PASS
+          AC-2 Bulk tenant operations: PASS
+          AC-3 Backward compatibility: PASS
+          AC-4 Idempotency: PASS
+          AC-5 Integration test playbook: PASS (this file)
