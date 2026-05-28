@@ -1162,12 +1162,62 @@ def _handle_interface_updated(module, client_factory, blueprint_id):
 
 
 def _handle_interface_tagged(module, client_factory, blueprint_id):
-    """Handle state=interface_tagged — add or remove tags on an interface."""
+    """Handle state=interface_tagged — add or remove tags on an interface.
+
+    Supports both single-interface mode (system_name + interface_name + tags)
+    and batch mode (interfaces list of {system_name, interface_name} with
+    shared tags / tag_state params).
+    """
     tags = module.params.get("tags")
     if not tags:
         module.fail_json(msg="tags is required when state=interface_tagged")
 
     tag_state = module.params.get("tag_state") or "present"
+    interfaces = module.params.get("interfaces")
+
+    if interfaces:
+        # Batch mode: apply same tags/tag_state to all listed interfaces
+        results = []
+        any_changed = False
+        for entry in interfaces:
+            sys_name = entry.get("system_name")
+            if_name = entry.get("interface_name")
+            if not sys_name or not if_name:
+                module.fail_json(
+                    msg=(
+                        "Each entry in 'interfaces' must have "
+                        "system_name and interface_name"
+                    )
+                )
+            iface = find_interface_node(client_factory, blueprint_id, sys_name, if_name)
+            if iface is None:
+                module.fail_json(
+                    msg=(
+                        f"Interface '{if_name}' not found on system '{sys_name}' "
+                        f"in blueprint '{blueprint_id}'"
+                    )
+                )
+            r = set_interface_tags(
+                client_factory, blueprint_id, iface["id"], tags, state=tag_state
+            )
+            if r.get("changed"):
+                any_changed = True
+            results.append(
+                {
+                    "system_name": sys_name,
+                    "interface_name": if_name,
+                    "changed": r.get("changed", False),
+                    "interface_node_id": r.get("node_id", iface["id"]),
+                    "interface_tags": r.get("tags", []),
+                }
+            )
+        return dict(
+            changed=any_changed,
+            interfaces=results,
+            msg=f"Tagged {len(interfaces)} interface(s)",
+        )
+
+    # Single-interface mode (backward compatible)
     iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
     result = set_interface_tags(
         client_factory, blueprint_id, iface_id, tags, state=tag_state

@@ -522,6 +522,91 @@
         success_msg: "INTF-TAG-6 PASSED: All tags cleared"
 
     # ════════════════════════════════════════════════════════════════
+    #  FEATURE 3b: Interface tags — batch mode
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[INTF-TAG-BATCH-1] Add tags to two interfaces in one task"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+        tags:
+          - "batch-tag-a"
+          - "batch-tag-b"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_batch_add
+
+    - name: "[INTF-TAG-BATCH-1] Assert both interfaces changed"
+      ansible.builtin.assert:
+        that:
+          - tag_batch_add.changed
+          - tag_batch_add.interfaces | length == 2
+          - tag_batch_add.interfaces[0].changed
+          - tag_batch_add.interfaces[1].changed
+        fail_msg: "INTF-TAG-BATCH-1 FAILED"
+        success_msg: "INTF-TAG-BATCH-1 PASSED: Tags added to both interfaces"
+
+    - name: "[INTF-TAG-BATCH-2] Re-add same tags (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+        tags:
+          - "batch-tag-a"
+          - "batch-tag-b"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_batch_idem
+
+    - name: "[INTF-TAG-BATCH-2] Assert no change (idempotent)"
+      ansible.builtin.assert:
+        that:
+          - not tag_batch_idem.changed
+          - not tag_batch_idem.interfaces[0].changed
+          - not tag_batch_idem.interfaces[1].changed
+        fail_msg: "INTF-TAG-BATCH-2 FAILED: expected no change"
+        success_msg: "INTF-TAG-BATCH-2 PASSED: Idempotent"
+
+    - name: "[INTF-TAG-BATCH-3] Remove batch tags from both interfaces"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+        tags:
+          - "batch-tag-a"
+          - "batch-tag-b"
+        tag_state: absent
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_batch_remove
+
+    - name: "[INTF-TAG-BATCH-3] Assert tags removed from both interfaces"
+      ansible.builtin.assert:
+        that:
+          - tag_batch_remove.changed
+          - tag_batch_remove.interfaces[0].changed
+          - tag_batch_remove.interfaces[1].changed
+          - tag_batch_remove.interfaces[0].interface_tags | length == 0
+          - tag_batch_remove.interfaces[1].interface_tags | length == 0
+        fail_msg: "INTF-TAG-BATCH-3 FAILED"
+        success_msg: "INTF-TAG-BATCH-3 PASSED: Tags removed from both interfaces"
+
+    # ════════════════════════════════════════════════════════════════
     #  FEATURE 4: LAG mode
     # ════════════════════════════════════════════════════════════════
 
@@ -716,6 +801,6 @@
         msg: >-
           All interface management tests PASSED:
           Feature 2 (admin_state): INTF-SHUT-1..4,
-          Feature 3 (tags): INTF-TAG-1..6,
+          Feature 3 (tags): INTF-TAG-1..6, INTF-TAG-BATCH-1..3,
           Feature 4 (lag_mode): LAG-1..4,
           Feature 1 (speed): SPEED-1..3

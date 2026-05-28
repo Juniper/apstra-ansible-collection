@@ -41,7 +41,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes imp
     node_needs_update,
 )
 
-
 # ──────────────────────────────────────────────────────────────────
 #  Admin state mapping
 # ──────────────────────────────────────────────────────────────────
@@ -196,12 +195,95 @@ def set_operation_state(client_factory, blueprint_id, iface_id, admin_state):
 # ──────────────────────────────────────────────────────────────────
 
 
-def set_interface_tags(client_factory, blueprint_id, iface_id, tags, state="present"):
-    """Set or remove tags on an interface node.
+def _get_current_tags(client_factory, blueprint_id, iface_id):
+    """Return the list of tag labels currently applied to an interface node.
 
-    Tags are stored as a list of string labels on the interface node's
-    ``tags`` field.  The API accepts any string labels; they do not need
-    to be pre-created as blueprint tag objects.
+    Uses the blueprint graph to read ``type='tag'`` relationships that
+    point TO the interface node.  This is the authoritative source — the
+    Apstra UI also reads these graph relationships (not the node's ``tags``
+    property field).
+
+    Returns:
+        list[str]: Tag labels currently applied.
+    """
+    qe = f"node(id='{iface_id}', name='n').in_('tag').node('tag', name='t')"
+    items = run_qe_query(client_factory, blueprint_id, qe)
+    return [item["t"]["label"] for item in items if item.get("t")]
+
+
+def _ensure_tags_exist(client_factory, blueprint_id, tag_labels):
+    """Ensure tag objects exist in the blueprint for all given labels.
+
+    ``POST /blueprints/{id}/tagging`` silently ignores labels that do not
+    have a corresponding tag object.  This helper creates any missing tag
+    objects via ``POST /blueprints/{id}/tags`` before the tagging API is
+    called.
+
+    Args:
+        tag_labels: Iterable of tag label strings to ensure exist.
+    """
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/nodes?node_type=tag")
+    if resp.status_code not in (200, 201, 202):
+        raise RuntimeError(
+            f"GET /nodes?node_type=tag failed: HTTP {resp.status_code} — {resp.text}"
+        )
+    existing_labels = {
+        v["label"] for v in resp.json().get("nodes", {}).values() if v.get("label")
+    }
+    for label in tag_labels:
+        if label not in existing_labels:
+            cr = base.raw_request(
+                f"/blueprints/{blueprint_id}/tags",
+                method="POST",
+                data={"label": label},
+            )
+            if cr.status_code not in (200, 201, 202):
+                raise RuntimeError(
+                    f"Failed to create tag '{label}': "
+                    f"HTTP {cr.status_code} — {cr.text}"
+                )
+
+
+def _call_tagging_api(client_factory, blueprint_id, iface_id, add, remove):
+    """POST /blueprints/{id}/tagging to add/remove tag graph relationships.
+
+    This is the only correct way to tag nodes so that the Apstra UI shows
+    the tags.  Patching the node's ``tags`` property directly does NOT
+    create the required ``type='tag'`` graph edges.
+
+    Args:
+        add: List of tag label strings to add (pass ``[]`` or ``None`` to skip).
+        remove: List of tag label strings to remove (pass ``[]`` or ``None`` to skip).
+    """
+    base = client_factory.get_base_client()
+    resp = base.raw_request(
+        f"/blueprints/{blueprint_id}/tagging",
+        method="POST",
+        data={
+            "nodes": [iface_id],
+            "add": add if add else None,
+            "remove": remove if remove else None,
+        },
+    )
+    if resp.status_code not in (200, 201, 202):
+        raise RuntimeError(
+            f"POST /tagging failed: HTTP {resp.status_code} — {resp.text}"
+        )
+
+
+def set_interface_tags(client_factory, blueprint_id, iface_id, tags, state="present"):
+    """Set or remove tags on an interface node using the Apstra tagging API.
+
+    Uses ``POST /blueprints/{id}/tagging`` which creates proper ``type='tag'``
+    graph relationships between the tag node and the interface node.  This is
+    the only approach that makes tags visible in the Apstra UI.
+
+    Tag objects are automatically created in the blueprint when ``state=present``
+    if they do not yet exist.
+
+    Idempotent: reads current tag relationships before deciding whether to
+    call the tagging API.
 
     Args:
         client_factory: An ``ApstraClientFactory`` instance.
@@ -215,63 +297,47 @@ def set_interface_tags(client_factory, blueprint_id, iface_id, tags, state="pres
     Returns:
         dict: ``{changed, node_id, tags, msg}``
     """
-    current = get_node(client_factory, blueprint_id, iface_id)
-    if current is None:
-        raise ValueError(
-            f"Interface node '{iface_id}' not found in blueprint '{blueprint_id}'"
-        )
-
-    current_tags = list(current.get("tags") or [])
+    current_tags = _get_current_tags(client_factory, blueprint_id, iface_id)
     desired_tags = list(tags or [])
 
     if state == "present":
-        new_tags = list(current_tags)
-        added = []
-        for tag in desired_tags:
-            if tag not in new_tags:
-                new_tags.append(tag)
-                added.append(tag)
-        if not added:
+        to_add = [t for t in desired_tags if t not in current_tags]
+        if not to_add:
             return dict(
                 changed=False,
                 node_id=iface_id,
                 tags=current_tags,
                 msg="Tags already present (no change)",
             )
-        patch_node(
-            client_factory,
-            blueprint_id,
-            iface_id,
-            {"tags": new_tags},
+        _ensure_tags_exist(client_factory, blueprint_id, to_add)
+        _call_tagging_api(
+            client_factory, blueprint_id, iface_id, add=to_add, remove=None
         )
         return dict(
             changed=True,
             node_id=iface_id,
-            tags=new_tags,
-            msg=f"Added tags: {added}",
+            tags=list(set(current_tags + to_add)),
+            msg=f"Added tags: {to_add}",
         )
 
     elif state == "absent":
-        new_tags = [t for t in current_tags if t not in desired_tags]
-        removed = [t for t in current_tags if t in desired_tags]
-        if not removed:
+        to_remove = [t for t in desired_tags if t in current_tags]
+        if not to_remove:
             return dict(
                 changed=False,
                 node_id=iface_id,
                 tags=current_tags,
                 msg="Tags already absent (no change)",
             )
-        patch_node(
-            client_factory,
-            blueprint_id,
-            iface_id,
-            {"tags": new_tags if new_tags else None},
+        _call_tagging_api(
+            client_factory, blueprint_id, iface_id, add=None, remove=to_remove
         )
+        new_tags = [t for t in current_tags if t not in to_remove]
         return dict(
             changed=True,
             node_id=iface_id,
             tags=new_tags,
-            msg=f"Removed tags: {removed}",
+            msg=f"Removed tags: {to_remove}",
         )
 
     else:
