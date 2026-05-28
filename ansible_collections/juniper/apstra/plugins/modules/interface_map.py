@@ -206,7 +206,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
 )
 
-
 # ──────────────────────────────────────────────────────────────────
 #  SDK helpers
 # ──────────────────────────────────────────────────────────────────
@@ -590,9 +589,17 @@ def _handle_speed_updated(module, client_factory):
     # Get all design interface maps
     all_ims = _get_design_im_list(client_factory)
 
-    # If a current IM is assigned, check idempotency first
+    # Fetch current IM detail once (used for idempotency + DP/LD filtering)
+    current_im_detail = None
+    current_dp_id = None
+    current_ld_id = None
     if current_im_id:
         current_im_detail = _get_design_im_detail(client_factory, current_im_id)
+        current_dp_id = current_im_detail.get("device_profile_id")
+        current_ld_id = current_im_detail.get("logical_device_id")
+
+    # If a current IM is assigned, check idempotency first
+    if current_im_detail:
         if speed is not None:
             if _im_has_speed_for_interface(
                 current_im_detail, if_name, desired_value, desired_unit
@@ -620,17 +627,16 @@ def _handle_speed_updated(module, client_factory):
                     ),
                 )
 
-    # Determine the device profile of the current IM (or system) to restrict search
-    current_dp_id = None
-    if current_im_id:
-        current_im_detail = _get_design_im_detail(client_factory, current_im_id)
-        current_dp_id = current_im_detail.get("device_profile_id")
-
     # Find best-matching IM in the catalog
+    # Restrict to same device_profile_id AND logical_device_id so the assignment
+    # is accepted by Apstra (cross-LD assignments are rejected with HTTP 422).
     candidate_im_id = None
     for im in all_ims:
-        # If we know the device profile, only look at IMs for the same device
+        # Only look at IMs for the same device profile
         if current_dp_id and im.get("device_profile_id") != current_dp_id:
+            continue
+        # Apstra requires the new IM to use the same logical_device_id
+        if current_ld_id and im.get("logical_device_id") != current_ld_id:
             continue
 
         im_id = im.get("id")
@@ -655,10 +661,12 @@ def _handle_speed_updated(module, client_factory):
             f"speed={speed}" if speed is not None else f"transform_id={transform_id}"
         )
         device_info = f" for device profile '{current_dp_id}'" if current_dp_id else ""
+        ld_info = f" with logical_device_id '{current_ld_id}'" if current_ld_id else ""
         module.fail_json(
             msg=(
-                f"No interface map found{device_info} that provides "
-                f"{criteria} for interface '{if_name}'"
+                f"No interface map found{device_info}{ld_info} that provides "
+                f"{criteria} for interface '{if_name}'. "
+                f"Create a compatible interface map in the design catalog first."
             )
         )
 

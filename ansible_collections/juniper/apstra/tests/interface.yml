@@ -222,6 +222,7 @@
     - name: "[SETUP] Set test interface names"
       ansible.builtin.set_fact:
         test_eth_if: "{{ eth_ifaces_qe.results[0]['iface']['if_name'] }}"
+        test_eth_if2: "{{ eth_ifaces_qe.results[1]['iface']['if_name'] }}"
         test_lag_if: "{{ lag_ifaces_qe.results[0]['iface']['if_name'] }}"
 
     - name: "[SETUP] Display test system and interfaces"
@@ -229,6 +230,7 @@
         msg: >-
           system={{ test_system_name }},
           ethernet_if={{ test_eth_if }},
+          ethernet_if2={{ test_eth_if2 }},
           lag_if={{ test_lag_if }}
 
     # ════════════════════════════════════════════════════════════════
@@ -312,6 +314,78 @@
           - not noshut_idem_result.changed
         fail_msg: "INTF-SHUT-4 FAILED: expected changed=False (idempotent)"
         success_msg: "INTF-SHUT-4 PASSED: Idempotent no-shut"
+
+    - name: "[INTF-BATCH-1] Shut two interfaces via batch interfaces list"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+            admin_state: "down"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+            admin_state: "down"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: batch_shut_result
+
+    - name: "[INTF-BATCH-1] Display result"
+      ansible.builtin.debug:
+        var: batch_shut_result
+
+    - name: "[INTF-BATCH-1] Assert changed and both interfaces appear in result"
+      ansible.builtin.assert:
+        that:
+          - batch_shut_result.changed
+          - batch_shut_result.interfaces | length == 2
+        fail_msg: "INTF-BATCH-1 FAILED: expected changed=True and 2 interfaces"
+        success_msg: "INTF-BATCH-1 PASSED: Batch shut applied"
+
+    - name: "[INTF-BATCH-2] Batch shut again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+            admin_state: "down"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+            admin_state: "down"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: batch_idem_result
+
+    - name: "[INTF-BATCH-2] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not batch_idem_result.changed
+        fail_msg: "INTF-BATCH-2 FAILED: expected changed=False (idempotent)"
+        success_msg: "INTF-BATCH-2 PASSED: Idempotent batch shut"
+
+    - name: "[INTF-BATCH-3] Restore interfaces via batch"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+            admin_state: "up"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+            admin_state: "up"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: batch_restore_result
+
+    - name: "[INTF-BATCH-3] Assert both restored"
+      ansible.builtin.assert:
+        that:
+          - batch_restore_result.changed
+          - batch_restore_result.interfaces | length == 2
+        fail_msg: "INTF-BATCH-3 FAILED: expected changed=True and 2 interfaces"
+        success_msg: "INTF-BATCH-3 PASSED: Batch restore applied"
 
     # ════════════════════════════════════════════════════════════════
     #  FEATURE 3: Interface tags

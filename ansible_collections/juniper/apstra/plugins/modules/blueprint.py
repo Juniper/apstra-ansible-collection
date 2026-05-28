@@ -174,10 +174,19 @@ options:
       - Desired administrative state of the interface.
       - C(up) enables the interface (no-shut).
       - C(down) disables the interface (shut).
-      - Only used when C(state=interface_updated).
+      - Only used when C(state=interface_updated) in single-interface mode.
     type: str
     required: false
     choices: ["up", "down"]
+  interfaces:
+    description:
+      - List of interfaces to update in a single task (batch mode).
+      - Only used when C(state=interface_updated).
+      - Each entry must have C(system_name), C(interface_name), and C(admin_state).
+      - Mutually exclusive with single-interface mode (C(system_name) / C(interface_name) / C(admin_state)).
+    type: list
+    elements: dict
+    required: false
   tags:
     description:
       - List of tag labels to add or remove on the interface node.
@@ -600,6 +609,23 @@ EXAMPLES = """
     admin_state: "up"
     state: interface_updated
 
+# Batch shut multiple interfaces in one task
+- name: Shut down multiple spine interfaces
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    interfaces:
+      - system_name: "spine1"
+        interface_name: "et-0/0/0"
+        admin_state: "down"
+      - system_name: "spine1"
+        interface_name: "et-0/0/1"
+        admin_state: "down"
+      - system_name: "spine2"
+        interface_name: "et-0/0/0"
+        admin_state: "up"
+    state: interface_updated
+
 # Add tags to an ethernet interface
 - name: Tag leaf1 ge-0/0/0 as 'uplink' and 'production'
   juniper.apstra.blueprint:
@@ -826,7 +852,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interface
     set_interface_tags,
     set_lag_mode,
 )
-
 
 # ──────────────────────────────────────────────────────────────────
 #  Rack management helpers
@@ -1076,11 +1101,60 @@ def _resolve_interface_node_id(module, client_factory, blueprint_id):
 
 
 def _handle_interface_updated(module, client_factory, blueprint_id):
-    """Handle state=interface_updated — set admin state (shut/no-shut)."""
+    """Handle state=interface_updated — set admin state (shut/no-shut).
+
+    Supports both single-interface mode (system_name + interface_name + admin_state)
+    and batch mode (interfaces list of {system_name, interface_name, admin_state}).
+    """
+    interfaces = module.params.get("interfaces")
+
+    if interfaces:
+        # Batch mode: iterate over the list
+        results = []
+        any_changed = False
+        for entry in interfaces:
+            sys_name = entry.get("system_name")
+            if_name = entry.get("interface_name")
+            adm_state = entry.get("admin_state")
+            if not sys_name or not if_name or not adm_state:
+                module.fail_json(
+                    msg=(
+                        "Each entry in 'interfaces' must have "
+                        "system_name, interface_name, and admin_state"
+                    )
+                )
+            iface = find_interface_node(client_factory, blueprint_id, sys_name, if_name)
+            if iface is None:
+                module.fail_json(
+                    msg=(
+                        f"Interface '{if_name}' not found on system '{sys_name}' "
+                        f"in blueprint '{blueprint_id}'"
+                    )
+                )
+            r = set_operation_state(
+                client_factory, blueprint_id, iface["id"], adm_state
+            )
+            if r.get("changed"):
+                any_changed = True
+            results.append(
+                {
+                    "system_name": sys_name,
+                    "interface_name": if_name,
+                    "admin_state": adm_state,
+                    "changed": r.get("changed", False),
+                    "interface_node_id": r.get("node_id", iface["id"]),
+                }
+            )
+        return dict(
+            changed=any_changed,
+            interfaces=results,
+            msg=f"Updated {len(interfaces)} interface(s)",
+        )
+
+    # Single-interface mode (backward compatible)
     admin_state = module.params.get("admin_state")
     if not admin_state:
         module.fail_json(msg="admin_state is required when state=interface_updated")
-
     iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
     result = set_operation_state(client_factory, blueprint_id, iface_id, admin_state)
     result["interface_node_id"] = result.pop("node_id", iface_id)
@@ -1555,6 +1629,7 @@ def main():
         system_name=dict(type="str", required=False),
         interface_name=dict(type="str", required=False),
         admin_state=dict(type="str", required=False, choices=["up", "down"]),
+        interfaces=dict(type="list", elements="dict", required=False),
         tags=dict(type="list", elements="str", required=False),
         tag_state=dict(
             type="str", required=False, choices=["present", "absent"], default="present"
