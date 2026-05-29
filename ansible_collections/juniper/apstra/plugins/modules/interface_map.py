@@ -512,6 +512,159 @@ def _resolve_system_node_for_im(client_factory, blueprint_id, system_name):
     return items[0].get("sys", {}).get("id")
 
 
+def _get_dp_ports_from_im(client_factory, blueprint_id, im_id):
+    """Return the device_profile ``ports`` list for the given blueprint IM.
+
+    Traverses the blueprint graph ``interface_map → device_profile`` and
+    returns the device profile's port list (with transformations).
+    Returns an empty list when not found.
+    """
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_query import (
+        run_qe_query,
+    )
+
+    qe = f"node('interface_map', id='{im_id}', name='im').out().node('device_profile', name='dp')"
+    items = run_qe_query(client_factory, blueprint_id, qe)
+    if not items:
+        return []
+    return items[0].get("dp", {}).get("ports", [])
+
+
+def _find_transform_id_for_speed(dp_ports, if_name, desired_value, desired_unit):
+    """Return the transformation_id for a non-breakout interface at the given speed.
+
+    Searches each port's transformations for one whose sole interface has
+    ``name == if_name`` and speed matching ``(desired_value, desired_unit)``.
+
+    Returns:
+        int or None: The matching transformation_id, or None if not found.
+    """
+    for port in dp_ports:
+        for transform in port.get("transformations", []):
+            ifaces = transform.get("interfaces", [])
+            if len(ifaces) == 1 and ifaces[0].get("name") == if_name:
+                sp = ifaces[0].get("speed", {})
+                if (
+                    sp.get("value") == desired_value
+                    and sp.get("unit", "").upper() == desired_unit
+                ):
+                    return transform["transformation_id"]
+    return None
+
+
+def _list_speeds_for_iface(dp_ports, if_name):
+    """Return unique non-breakout speeds available for ``if_name`` in device profile."""
+    seen = []
+    for port in dp_ports:
+        for transform in port.get("transformations", []):
+            ifaces = transform.get("interfaces", [])
+            if len(ifaces) == 1 and ifaces[0].get("name") == if_name:
+                sp = ifaces[0].get("speed", {})
+                label = f"{sp.get('value', '?')}{sp.get('unit', '')}"
+                if label not in seen:
+                    seen.append(label)
+    return seen
+
+
+def _speed_via_interface_transformation(
+    module,
+    client_factory,
+    blueprint_id,
+    system_name,
+    if_name,
+    desired_value,
+    desired_unit,
+    desired_speed_str,
+    speed,
+):
+    """Change speed via interface-transformation for blueprint-local IMs.
+
+    Used when ``if_name`` is null in the cabling map (Apstra v6.1.1
+    blueprint-local IMs).  Resolves the transformation_id for the desired
+    speed from the device profile and applies it via
+    ``PUT /blueprints/{id}/interface-transformation``.
+    Apstra resolves ``(system_id, if_name)`` internally even when the
+    graph interface node has ``if_name=None``.
+    """
+    node_id = _resolve_system_node_for_im(client_factory, blueprint_id, system_name)
+    if not node_id:
+        module.fail_json(
+            msg=f"System '{system_name}' not found in blueprint '{blueprint_id}'"
+        )
+
+    assignments = _get_assignments(client_factory, blueprint_id)
+    im_id = assignments.get(node_id)
+    if not im_id:
+        module.fail_json(
+            msg=f"No interface map assignment found for system '{system_name}'"
+        )
+
+    # Idempotency: check current IM speed for this interface
+    im_node = _get_blueprint_im_node(client_factory, blueprint_id, im_id)
+    if not im_node:
+        im_node = _get_design_im_detail(client_factory, im_id) or {}
+    for intf in im_node.get("interfaces", []):
+        intf_name = intf.get("name") or intf.get("if_name")
+        if intf_name == if_name:
+            cur = intf.get("speed", {})
+            if (
+                str(cur.get("value", "")) == str(desired_value)
+                and cur.get("unit", "").upper() == desired_unit
+            ):
+                return dict(
+                    changed=False,
+                    msg=(
+                        f"Interface '{if_name}' on '{system_name}' is already "
+                        f"{speed} in the interface map (no change)"
+                    ),
+                )
+            break
+
+    # Look up the transformation_id that sets the desired speed
+    dp_ports = _get_dp_ports_from_im(client_factory, blueprint_id, im_id)
+    transform_id = _find_transform_id_for_speed(
+        dp_ports, if_name, desired_value, desired_unit
+    )
+    if transform_id is None:
+        available = _list_speeds_for_iface(dp_ports, if_name)
+        module.fail_json(
+            msg=(
+                f"Cannot find a transformation for interface '{if_name}' with "
+                f"speed {speed} on '{system_name}'. "
+                f"Available speeds: {available or 'none found in device profile'}"
+            )
+        )
+
+    if module.check_mode:
+        return dict(
+            changed=True,
+            msg=(
+                f"Would change speed of '{if_name}' on '{system_name}' to {speed} "
+                f"(transformation_id={transform_id})"
+            ),
+        )
+
+    client = _get_l3clos_client(client_factory)
+    payload = {
+        "interfaces": [
+            {
+                "system_id": node_id,
+                "if_name": if_name,
+                "transformation_id": transform_id,
+            }
+        ]
+    }
+    client.blueprints[blueprint_id].interface_transformation.put(payload)
+
+    return dict(
+        changed=True,
+        msg=(
+            f"Speed of '{if_name}' on '{system_name}' changed to {speed} "
+            f"via interface-transformation (transformation_id={transform_id})"
+        ),
+    )
+
+
 def _handle_speed_updated(module, client_factory):
     """Handle state=speed_updated — change a link's speed.
 
@@ -593,14 +746,20 @@ def _handle_speed_updated(module, client_factory):
             if len(null_name_candidates) == 1:
                 link_id, link_speed, link_role = null_name_candidates[0]
             elif len(null_name_candidates) > 1:
-                module.fail_json(
-                    msg=(
-                        f"Found {len(null_name_candidates)} physical links for "
-                        f"system '{system_name}' whose interface names are not "
-                        f"stored in the cabling map. Cannot determine which link "
-                        f"corresponds to '{if_name}'. Please ensure the blueprint "
-                        f"is committed and interface maps are resolved."
-                    )
+                # Blueprint-local IM (Apstra v6.1.1): if_name is null in the
+                # cabling map for all physical port endpoints.  Fall back to
+                # interface-transformation — Apstra resolves (system_id, if_name)
+                # internally from the IM even when graph if_name is None.
+                return _speed_via_interface_transformation(
+                    module,
+                    client_factory,
+                    blueprint_id,
+                    system_name,
+                    if_name,
+                    desired_value,
+                    desired_unit,
+                    desired_speed_str,
+                    speed,
                 )
 
         if not link_id:
