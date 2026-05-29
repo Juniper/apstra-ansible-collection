@@ -435,20 +435,6 @@ def _handle_absent(module, client_factory):
 # ──────────────────────────────────────────────────────────────────
 
 
-def _get_design_im_list(client_factory):
-    """Return all design interface maps as a list of dicts.
-
-    Uses ``GET /design/interface-maps`` via the l3clos SDK client.
-
-    Returns:
-        list[dict]: Each dict has at least ``id``, ``label``,
-        ``device_profile_id``, ``logical_device_id``, and ``interfaces``.
-    """
-    client = _get_l3clos_client(client_factory)
-    result = client.request("/design/interface-maps", method="GET")
-    return (result or {}).get("items", [])
-
-
 def _get_design_im_detail(client_factory, im_id):
     """Return full details of a design interface map by ID."""
     client = _get_l3clos_client(client_factory)
@@ -467,20 +453,6 @@ def _get_blueprint_im_node(client_factory, blueprint_id, im_id):
     if resp.status_code == 200:
         return resp.json()
     return {}
-
-
-def _get_blueprint_im_nodes(client_factory, blueprint_id):
-    """Return all interface_map nodes defined at the blueprint level.
-
-    Uses ``GET /blueprints/{id}/nodes?node_type=interface_map``.
-    Returns a list of node dicts (may include both design-derived and
-    blueprint-local IMs such as Apstra-created ``_v2`` speed variants).
-    """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(f"/blueprints/{blueprint_id}/nodes?node_type=interface_map")
-    if resp.status_code == 200:
-        return list(resp.json().get("nodes", {}).values())
-    return []
 
 
 def _normalize_speed(speed_str):
@@ -505,40 +477,18 @@ def _normalize_speed(speed_str):
     return int(m.group(1)), m.group(2).upper()
 
 
-def _im_has_speed_for_interface(im_detail, if_name, desired_value, desired_unit):
-    """Return True if this interface map has the desired speed for ``if_name``.
-
-    Checks the ``interfaces`` list in the IM for an entry whose ``name``
-    matches ``if_name`` and whose ``speed.value``/``speed.unit`` match
-    the desired speed.
-    """
-    for intf in im_detail.get("interfaces", []):
-        intf_name = intf.get("name") or intf.get("if_name")
-        if intf_name == if_name:
-            spd = intf.get("speed") or {}
-            if isinstance(spd, dict):
-                if (
-                    spd.get("value") == desired_value
-                    and spd.get("unit", "").upper() == desired_unit
-                ):
-                    return True
-    return False
-
-
 def _im_has_transform_id(im_detail, if_name, transform_id):
-    """Return True if this IM has the specified transform_id for ``if_name``.
+    """Return True if ``if_name`` already uses ``transform_id`` in this IM.
 
-    In newer device profiles, transforms are listed per interface.
-    Falls back to True if the IM's logical_device matches and the
-    transform_id would be valid.
+    Checks ``mapping[1]`` of the interface entry — the index of the
+    currently active transform within the port-group's transforms list.
     """
     for intf in im_detail.get("interfaces", []):
         intf_name = intf.get("name") or intf.get("if_name")
         if intf_name == if_name:
-            transforms = intf.get("transforms", [])
-            for t in transforms:
-                if t.get("id") == transform_id:
-                    return True
+            mapping = intf.get("mapping", [])
+            current_tid = mapping[1] if len(mapping) > 1 else None
+            return current_tid == transform_id
     return False
 
 
@@ -560,15 +510,16 @@ def _resolve_system_node_for_im(client_factory, blueprint_id, system_name):
 
 
 def _handle_speed_updated(module, client_factory):
-    """Handle state=speed_updated — change speed/breakout via interface map.
+    """Handle state=speed_updated — change a link's speed.
 
-    Finds an interface map in the design catalog that satisfies the desired
-    speed (or transform_id) for the specified interface on a system, then
-    re-assigns that interface map to the system node.
+    For ``speed``: queries the blueprint cabling map to find the physical
+    link that includes ``if_name`` on ``system_name``, checks idempotency
+    against the link's current speed, then calls the Apstra WebUI API
+    ``PUT /blueprints/{id}/set-physical-link-speed`` (or
+    ``set-switch-system-link-speed`` for access / generic-system links).
 
-    Idempotency: reads the current assignment and checks whether it
-    already provides the desired speed for the interface.  No change is
-    made if it does.
+    For ``transform_id``: uses ``PUT /blueprints/{id}/interface-transformation``
+    and checks idempotency via the current interface map's ``mapping[1]``.
     """
     p = module.params
     id_param = p["id"] or {}
@@ -594,160 +545,167 @@ def _handle_speed_updated(module, client_factory):
     if speed is not None and transform_id is not None:
         module.fail_json(msg="body.speed and body.transform_id are mutually exclusive")
 
-    # Parse speed if provided
-    desired_value = None
-    desired_unit = None
+    base = client_factory.get_base_client()
+
+    # ── speed path: use set-physical-link-speed (same as Apstra WebUI) ────────
     if speed is not None:
         try:
             desired_value, desired_unit = _normalize_speed(str(speed))
         except ValueError as exc:
             module.fail_json(msg=str(exc))
+        desired_speed_str = f"{desired_value}{desired_unit}"
 
-    # Resolve system node in the blueprint
+        # Fetch cabling map to find the link for this interface
+        resp = base.raw_request(f"/blueprints/{blueprint_id}/cabling-map")
+        if resp.status_code != 200:
+            module.fail_json(
+                msg=f"Failed to get cabling map [{resp.status_code}]: {resp.text[:200]}"
+            )
+        cabling = resp.json()
+
+        link_id = None
+        link_speed = None
+        link_role = None
+        for link in cabling.get("links", []):
+            for ep in link.get("endpoints", []):
+                if (
+                    ep.get("system", {}).get("label") == system_name
+                    and ep.get("interface", {}).get("if_name") == if_name
+                ):
+                    link_id = link["id"]
+                    link_speed = link.get("speed", "")
+                    link_role = link.get("role", "")
+                    break
+            if link_id:
+                break
+
+        if not link_id:
+            module.fail_json(
+                msg=(
+                    f"No physical link found for interface '{if_name}' on "
+                    f"system '{system_name}'. Verify the interface is connected "
+                    f"in the blueprint cabling map."
+                )
+            )
+
+        # Idempotency: current link speed already matches desired
+        if link_speed == desired_speed_str:
+            return dict(
+                changed=False,
+                msg=(
+                    f"Link speed of '{if_name}' on '{system_name}' is already "
+                    f"{speed} (no change)"
+                ),
+            )
+
+        if module.check_mode:
+            return dict(
+                changed=True,
+                msg=(
+                    f"Would change link speed of '{if_name}' on '{system_name}' "
+                    f"from {link_speed} to {speed}"
+                ),
+            )
+
+        # Access / generic-system links use a different endpoint
+        _SWITCH_SYS_ROLES = frozenset({"to_generic", "access_l3", "to_access_switch"})
+        endpoint = (
+            "set-switch-system-link-speed"
+            if link_role in _SWITCH_SYS_ROLES
+            else "set-physical-link-speed"
+        )
+        payload = {
+            "links": [
+                {
+                    "link_id": link_id,
+                    "speed": {"unit": desired_unit, "value": desired_value},
+                }
+            ]
+        }
+        resp = base.raw_request(
+            f"/blueprints/{blueprint_id}/{endpoint}",
+            "PUT",
+            data=payload,
+        )
+        if resp.status_code not in (200, 202, 204):
+            module.fail_json(
+                msg=f"{endpoint} failed [{resp.status_code}]: {resp.text[:300]}"
+            )
+
+        return dict(
+            changed=True,
+            msg=(
+                f"Link speed of '{if_name}' on '{system_name}' changed "
+                f"from {link_speed} to {speed}"
+            ),
+        )
+
+    # ── transform_id path: use interface-transformation ────────────────────────
     node_id = _resolve_system_node_for_im(client_factory, blueprint_id, system_name)
     if not node_id:
         module.fail_json(
             msg=f"System '{system_name}' not found in blueprint '{blueprint_id}'"
         )
 
-    # Get current interface map assignment for this node
+    # Idempotency: check current IM mapping[1] against desired transform_id
     current = _get_assignments(client_factory, blueprint_id)
     current_im_id = current.get(node_id)
-
-    # Get all design interface maps
-    all_ims = _get_design_im_list(client_factory)
-
-    # Fetch current IM detail once (used for idempotency + DP/LD filtering).
-    # Try design catalog first; fall back to blueprint node lookup for
-    # blueprint-local IMs (e.g. Apstra-created ``_v2`` speed variants that
-    # exist only in the blueprint, not in ``/design/interface-maps``).
-    current_im_detail = None
-    current_dp_id = None
-    current_ld_id = None
     if current_im_id:
         current_im_detail = _get_design_im_detail(client_factory, current_im_id)
         if not current_im_detail:
-            # Not in design catalog — look it up as a blueprint node
             current_im_detail = _get_blueprint_im_node(
                 client_factory, blueprint_id, current_im_id
             )
-        current_dp_id = current_im_detail.get("device_profile_id")
-        current_ld_id = current_im_detail.get("logical_device_id")
+        if current_im_detail and _im_has_transform_id(
+            current_im_detail, if_name, transform_id
+        ):
+            return dict(
+                changed=False,
+                system_node_id=node_id,
+                msg=(
+                    f"Interface '{if_name}' on '{system_name}' already uses "
+                    f"transform_id={transform_id} (no change)"
+                ),
+            )
 
-    # If a current IM is assigned, check idempotency first
-    if current_im_detail:
-        if speed is not None:
-            if _im_has_speed_for_interface(
-                current_im_detail, if_name, desired_value, desired_unit
-            ):
-                return dict(
-                    changed=False,
-                    assignments=current,
-                    system_node_id=node_id,
-                    msg=(
-                        f"Interface '{if_name}' on '{system_name}' already uses "
-                        f"interface map '{current_im_id}' which provides "
-                        f"speed {speed} (no change)"
-                    ),
-                )
-        else:
-            if _im_has_transform_id(current_im_detail, if_name, transform_id):
-                return dict(
-                    changed=False,
-                    assignments=current,
-                    system_node_id=node_id,
-                    msg=(
-                        f"Interface '{if_name}' on '{system_name}' already uses "
-                        f"interface map '{current_im_id}' with transform_id={transform_id} "
-                        f"(no change)"
-                    ),
-                )
-
-    # Find best-matching IM in the catalog
-    # Restrict to same device_profile_id AND logical_device_id so the assignment
-    # is accepted by Apstra (cross-LD assignments are rejected with HTTP 422).
-    candidate_im_id = None
-    for im in all_ims:
-        # Only look at IMs for the same device profile
-        if current_dp_id and im.get("device_profile_id") != current_dp_id:
-            continue
-        # Apstra requires the new IM to use the same logical_device_id
-        if current_ld_id and im.get("logical_device_id") != current_ld_id:
-            continue
-
-        im_id = im.get("id")
-        if not im_id:
-            continue
-
-        # Fetch full IM detail to check interfaces
-        im_detail = _get_design_im_detail(client_factory, im_id)
-        if speed is not None:
-            if _im_has_speed_for_interface(
-                im_detail, if_name, desired_value, desired_unit
-            ):
-                candidate_im_id = im_id
-                break
-        else:
-            if _im_has_transform_id(im_detail, if_name, transform_id):
-                candidate_im_id = im_id
-                break
-
-    if not candidate_im_id:
-        # Design catalog has no suitable IM.  Also search blueprint-level IM
-        # nodes — Apstra creates blueprint-local variants (e.g. ``_v2``) when
-        # the WebUI changes a port speed.  These nodes share the same device
-        # profile but may carry a different (derived) logical_device_id, so
-        # we only filter by device_profile_id here.
-        bp_ims = _get_blueprint_im_nodes(client_factory, blueprint_id)
-        for im in bp_ims:
-            im_id = im.get("id")
-            if not im_id or im_id == current_im_id:
-                continue
-            if current_dp_id and im.get("device_profile_id") != current_dp_id:
-                continue
-            # Note: skip the LD filter for blueprint IMs — their LD may differ
-            # from the design LD while still being a valid speed variant.
-            if speed is not None:
-                if _im_has_speed_for_interface(
-                    im, if_name, desired_value, desired_unit
-                ):
-                    candidate_im_id = im_id
-                    break
-            else:
-                if _im_has_transform_id(im, if_name, transform_id):
-                    candidate_im_id = im_id
-                    break
-
-    if not candidate_im_id:
-        criteria = (
-            f"speed={speed}" if speed is not None else f"transform_id={transform_id}"
+    if module.check_mode:
+        return dict(
+            changed=True,
+            system_node_id=node_id,
+            msg=(
+                f"Would apply transformation_id={transform_id} to "
+                f"interface '{if_name}' on '{system_name}'"
+            ),
         )
-        device_info = f" for device profile '{current_dp_id}'" if current_dp_id else ""
-        ld_info = f" with logical_device_id '{current_ld_id}'" if current_ld_id else ""
+
+    payload = {
+        "interfaces": [
+            {
+                "system_id": node_id,
+                "if_name": if_name,
+                "transformation_id": transform_id,
+            }
+        ]
+    }
+    resp = base.raw_request(
+        f"/blueprints/{blueprint_id}/interface-transformation",
+        "PUT",
+        data=payload,
+    )
+    if resp.status_code not in (200, 202, 204):
         module.fail_json(
             msg=(
-                f"No interface map found{device_info}{ld_info} that provides "
-                f"{criteria} for interface '{if_name}'. "
-                f"Create a compatible interface map in the design catalog first."
+                f"interface-transformation failed [{resp.status_code}]: "
+                f"{resp.text[:300]}"
             )
         )
 
-    # Apply the new assignment
-    _patch_assignments(client_factory, blueprint_id, {node_id: candidate_im_id})
-    final = dict(current)
-    final[node_id] = candidate_im_id
-
-    criteria_msg = (
-        f"speed={speed}" if speed is not None else f"transform_id={transform_id}"
-    )
     return dict(
         changed=True,
-        assignments=final,
         system_node_id=node_id,
-        interface_map_id=candidate_im_id,
         msg=(
-            f"Interface '{if_name}' on '{system_name}': assigned interface map "
-            f"'{candidate_im_id}' ({criteria_msg})"
+            f"Applied transformation_id={transform_id} to "
+            f"interface '{if_name}' on '{system_name}'"
         ),
     )
 
