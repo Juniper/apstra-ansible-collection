@@ -654,7 +654,21 @@ def _speed_via_interface_transformation(
             }
         ]
     }
-    client.blueprints[blueprint_id].interface_transformation.put(payload)
+    try:
+        client.blueprints[blueprint_id].interface_transformation.put(payload)
+    except Exception as exc:
+        exc_str = str(exc)
+        if "not synced with config" in exc_str.lower() or "staging" in exc_str.lower():
+            module.fail_json(
+                msg=(
+                    f"Cannot change speed of '{if_name}' on '{system_name}': "
+                    f"the blueprint has staged changes that have not been deployed. "
+                    f"Deploy (commit) the blueprint in the Apstra UI or API to sync "
+                    f"staging with the device config, then retry this playbook. "
+                    f"Apstra error: {exc_str}"
+                )
+            )
+        module.fail_json(msg=f"interface-transformation failed: {exc_str}")
 
     return dict(
         changed=True,
