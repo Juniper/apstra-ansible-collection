@@ -567,70 +567,7 @@ def _list_speeds_for_iface(dp_ports, if_name):
     return seen
 
 
-def _fix_im_setting_via_patch(
-    module,
-    client,
-    blueprint_id,
-    im_id,
-    system_name,
-    if_name,
-    desired_value,
-    desired_unit,
-    speed,
-    im_node,
-):
-    """Change IM interface speed via a direct node PATCH with allow_unsafe=true.
-
-    Called when ``interface-transformation`` returns a "staging not synced"
-    error.  Updating ``setting.global.speed`` on the IM node directly
-    bypasses that check, and Apstra automatically selects the matching
-    transform_id (``mapping[1]``) for the new speed.
-    """
-    im_ifaces = im_node.get("interfaces", [])
-    target_entry = next(
-        (i for i in im_ifaces if (i.get("name") or i.get("if_name")) == if_name),
-        None,
-    )
-    if target_entry is None:
-        module.fail_json(
-            msg=(
-                f"Interface '{if_name}' not found in interface map for "
-                f"'{system_name}'"
-            )
-        )
-
-    speed_str = f"{desired_value}{desired_unit.lower()}"
-    updated_ifaces = []
-    for ifc in im_ifaces:
-        if (ifc.get("name") or ifc.get("if_name")) == if_name:
-            ni = dict(ifc)
-            try:
-                setting = json.loads(ni.get("setting", {}).get("param", "{}"))
-            except (ValueError, TypeError):
-                setting = {}
-            setting.setdefault("global", {})["speed"] = speed_str
-            setting.setdefault("interface", {"speed": ""})
-            ni["setting"] = {"param": json.dumps(setting)}
-            updated_ifaces.append(ni)
-        else:
-            updated_ifaces.append(ifc)
-
-    client.request(
-        f"/blueprints/{blueprint_id}/nodes/{im_id}",
-        method="PATCH",
-        data={"interfaces": updated_ifaces},
-        params={"allow_unsafe": "true"},
-    )
-    return dict(
-        changed=True,
-        msg=(
-            f"Speed of '{if_name}' on '{system_name}' changed to {speed} "
-            f"(IM setting updated via direct node patch)"
-        ),
-    )
-
-
-def _speed_via_interface_transformation(
+def _speed_via_im_backtrace(
     module,
     client_factory,
     blueprint_id,
@@ -638,18 +575,27 @@ def _speed_via_interface_transformation(
     if_name,
     desired_value,
     desired_unit,
-    desired_speed_str,
     speed,
 ):
-    """Change speed via interface-transformation for blueprint-local IMs.
+    """Change interface speed by backtracing system_name + if_name to the IM node.
 
     Used when ``if_name`` is null in the cabling map (Apstra v6.1.1
-    blueprint-local IMs).  Resolves the transformation_id for the desired
-    speed from the device profile and applies it via
-    ``PUT /blueprints/{id}/interface-transformation``.
-    Apstra resolves ``(system_id, if_name)`` internally even when the
-    graph interface node has ``if_name=None``.
+    blueprint-local IMs).  Backtraces:
+
+      system_name → system graph node → IM assignment → blueprint IM node
+      → interface entry by name → update ``setting.global.speed``
+      → PATCH ``/blueprints/{id}/nodes/{im_id}?allow_unsafe=true``
+
+    Apstra automatically selects the matching transform_id (``mapping[1]``)
+    for the new speed value, so only ``setting.global.speed`` needs updating.
+
+    Safety guard: only patches interfaces whose ``setting.global`` already
+    contains a ``port`` key (per-port QSFP speed selectors such as
+    ``fpc/pic/port``).  Interfaces without a port selector (e.g. fixed-speed
+    xe copper ports) have no per-port chassis command and must not be patched
+    here — doing so would generate a chassis-wide Junos speed command.
     """
+    # ── Resolve system_name → IM ───────────────────────────────────────────
     node_id = _resolve_system_node_for_im(client_factory, blueprint_id, system_name)
     if not node_id:
         module.fail_json(
@@ -663,28 +609,65 @@ def _speed_via_interface_transformation(
             msg=f"No interface map assignment found for system '{system_name}'"
         )
 
-    # Idempotency: check current IM speed for this interface
     im_node = _get_blueprint_im_node(client_factory, blueprint_id, im_id)
     if not im_node:
         im_node = _get_design_im_detail(client_factory, im_id) or {}
-    for intf in im_node.get("interfaces", []):
-        intf_name = intf.get("name") or intf.get("if_name")
-        if intf_name == if_name:
-            cur = intf.get("speed", {})
-            if (
-                str(cur.get("value", "")) == str(desired_value)
-                and cur.get("unit", "").upper() == desired_unit
-            ):
-                return dict(
-                    changed=False,
-                    msg=(
-                        f"Interface '{if_name}' on '{system_name}' is already "
-                        f"{speed} in the interface map (no change)"
-                    ),
-                )
-            break
 
-    # Look up the transformation_id that sets the desired speed
+    # ── Find the interface entry by name ───────────────────────────────────
+    target_entry = next(
+        (
+            i
+            for i in im_node.get("interfaces", [])
+            if (i.get("name") or i.get("if_name")) == if_name
+        ),
+        None,
+    )
+    if target_entry is None:
+        module.fail_json(
+            msg=(
+                f"Interface '{if_name}' not found in interface map for "
+                f"'{system_name}'. Verify the interface name matches the "
+                f"device profile."
+            )
+        )
+
+    # ── Safety: require a per-port selector in global setting ──────────────
+    # Interfaces without fpc/pic/port (e.g. fixed-speed xe copper ports) have
+    # no per-port Junos chassis speed command.  Patching global.speed without
+    # a port selector would produce a chassis-wide config change.
+    try:
+        cur_setting = json.loads(
+            target_entry.get("setting", {}).get("param", "{}")
+        )
+    except (ValueError, TypeError):
+        cur_setting = {}
+    if "port" not in cur_setting.get("global", {}):
+        dp_ports = _get_dp_ports_from_im(client_factory, blueprint_id, im_id)
+        available = _list_speeds_for_iface(dp_ports, if_name)
+        module.fail_json(
+            msg=(
+                f"Interface '{if_name}' on '{system_name}' does not have a "
+                f"per-port speed selector in its interface map setting. "
+                f"Per-port speed changes require fpc/pic/port in the global "
+                f"setting (only QSFP/breakout ports support this). "
+                f"Available speeds from device profile: "
+                f"{available or 'none found'}"
+            )
+        )
+
+    # ── Idempotency via setting.global.speed ───────────────────────────────
+    desired_speed_norm = f"{desired_value}{desired_unit.lower()}"
+    cur_speed = cur_setting.get("global", {}).get("speed", "")
+    if cur_speed.lower() == desired_speed_norm.lower():
+        return dict(
+            changed=False,
+            msg=(
+                f"Interface '{if_name}' on '{system_name}' is already "
+                f"{speed} in the interface map (no change)"
+            ),
+        )
+
+    # ── Validate desired speed against device profile ──────────────────────
     dp_ports = _get_dp_ports_from_im(client_factory, blueprint_id, im_id)
     transform_id = _find_transform_id_for_speed(
         dp_ports, if_name, desired_value, desired_unit
@@ -693,8 +676,8 @@ def _speed_via_interface_transformation(
         available = _list_speeds_for_iface(dp_ports, if_name)
         module.fail_json(
             msg=(
-                f"Cannot find a transformation for interface '{if_name}' with "
-                f"speed {speed} on '{system_name}'. "
+                f"Speed {speed} is not valid for interface '{if_name}' on "
+                f"'{system_name}'. "
                 f"Available speeds: {available or 'none found in device profile'}"
             )
         )
@@ -703,45 +686,38 @@ def _speed_via_interface_transformation(
         return dict(
             changed=True,
             msg=(
-                f"Would change speed of '{if_name}' on '{system_name}' to {speed} "
-                f"(transformation_id={transform_id})"
+                f"Would change speed of '{if_name}' on '{system_name}' "
+                f"from {cur_speed or 'unknown'} to {speed}"
             ),
         )
 
-    client = _get_l3clos_client(client_factory)
-    payload = {
-        "interfaces": [
-            {
-                "system_id": node_id,
-                "if_name": if_name,
-                "transformation_id": transform_id,
-            }
-        ]
-    }
-    try:
-        client.blueprints[blueprint_id].interface_transformation.put(payload)
-    except Exception as exc:
-        exc_str = str(exc)
-        if "not synced with config" in exc_str.lower() or "staging" in exc_str.lower():
-            return _fix_im_setting_via_patch(
-                module,
-                client,
-                blueprint_id,
-                im_id,
-                system_name,
-                if_name,
-                desired_value,
-                desired_unit,
-                speed,
-                im_node,
-            )
-        module.fail_json(msg=f"interface-transformation failed: {exc_str}")
+    # ── PATCH the IM node — only update global.speed, preserve other keys ──
+    new_global = dict(cur_setting.get("global", {}))
+    new_global["speed"] = desired_speed_norm
+    new_setting = dict(cur_setting)
+    new_setting["global"] = new_global
 
+    updated_ifaces = []
+    for ifc in im_node.get("interfaces", []):
+        if (ifc.get("name") or ifc.get("if_name")) == if_name:
+            ni = dict(ifc)
+            ni["setting"] = {"param": json.dumps(new_setting)}
+            updated_ifaces.append(ni)
+        else:
+            updated_ifaces.append(ifc)
+
+    client = _get_l3clos_client(client_factory)
+    client.request(
+        f"/blueprints/{blueprint_id}/nodes/{im_id}",
+        method="PATCH",
+        data={"interfaces": updated_ifaces},
+        params={"allow_unsafe": "true"},
+    )
     return dict(
         changed=True,
         msg=(
             f"Speed of '{if_name}' on '{system_name}' changed to {speed} "
-            f"via interface-transformation (transformation_id={transform_id})"
+            f"(interface map setting updated)"
         ),
     )
 
@@ -828,10 +804,10 @@ def _handle_speed_updated(module, client_factory):
                 link_id, link_speed, link_role = null_name_candidates[0]
             elif len(null_name_candidates) > 1:
                 # Blueprint-local IM (Apstra v6.1.1): if_name is null in the
-                # cabling map for all physical port endpoints.  Fall back to
-                # interface-transformation — Apstra resolves (system_id, if_name)
-                # internally from the IM even when graph if_name is None.
-                return _speed_via_interface_transformation(
+                # cabling map for all physical port endpoints.  Backtrace from
+                # system_name + if_name directly to the IM node and patch the
+                # setting — no link_id needed.
+                return _speed_via_im_backtrace(
                     module,
                     client_factory,
                     blueprint_id,
@@ -839,7 +815,6 @@ def _handle_speed_updated(module, client_factory):
                     if_name,
                     desired_value,
                     desired_unit,
-                    desired_speed_str,
                     speed,
                 )
 
