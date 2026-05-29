@@ -198,6 +198,7 @@ system_node_id:
   returned: when state is speed_updated
 """
 
+import json
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
@@ -566,6 +567,69 @@ def _list_speeds_for_iface(dp_ports, if_name):
     return seen
 
 
+def _fix_im_setting_via_patch(
+    module,
+    client,
+    blueprint_id,
+    im_id,
+    system_name,
+    if_name,
+    desired_value,
+    desired_unit,
+    speed,
+    im_node,
+):
+    """Change IM interface speed via a direct node PATCH with allow_unsafe=true.
+
+    Called when ``interface-transformation`` returns a "staging not synced"
+    error.  Updating ``setting.global.speed`` on the IM node directly
+    bypasses that check, and Apstra automatically selects the matching
+    transform_id (``mapping[1]``) for the new speed.
+    """
+    im_ifaces = im_node.get("interfaces", [])
+    target_entry = next(
+        (i for i in im_ifaces if (i.get("name") or i.get("if_name")) == if_name),
+        None,
+    )
+    if target_entry is None:
+        module.fail_json(
+            msg=(
+                f"Interface '{if_name}' not found in interface map for "
+                f"'{system_name}'"
+            )
+        )
+
+    speed_str = f"{desired_value}{desired_unit.lower()}"
+    updated_ifaces = []
+    for ifc in im_ifaces:
+        if (ifc.get("name") or ifc.get("if_name")) == if_name:
+            ni = dict(ifc)
+            try:
+                setting = json.loads(ni.get("setting", {}).get("param", "{}"))
+            except (ValueError, TypeError):
+                setting = {}
+            setting.setdefault("global", {})["speed"] = speed_str
+            setting.setdefault("interface", {"speed": ""})
+            ni["setting"] = {"param": json.dumps(setting)}
+            updated_ifaces.append(ni)
+        else:
+            updated_ifaces.append(ifc)
+
+    client.request(
+        f"/blueprints/{blueprint_id}/nodes/{im_id}",
+        method="PATCH",
+        data={"interfaces": updated_ifaces},
+        params={"allow_unsafe": "true"},
+    )
+    return dict(
+        changed=True,
+        msg=(
+            f"Speed of '{if_name}' on '{system_name}' changed to {speed} "
+            f"(IM setting updated via direct node patch)"
+        ),
+    )
+
+
 def _speed_via_interface_transformation(
     module,
     client_factory,
@@ -659,14 +723,17 @@ def _speed_via_interface_transformation(
     except Exception as exc:
         exc_str = str(exc)
         if "not synced with config" in exc_str.lower() or "staging" in exc_str.lower():
-            module.fail_json(
-                msg=(
-                    f"Cannot change speed of '{if_name}' on '{system_name}': "
-                    f"the blueprint has staged changes that have not been deployed. "
-                    f"Deploy (commit) the blueprint in the Apstra UI or API to sync "
-                    f"staging with the device config, then retry this playbook. "
-                    f"Apstra error: {exc_str}"
-                )
+            return _fix_im_setting_via_patch(
+                module,
+                client,
+                blueprint_id,
+                im_id,
+                system_name,
+                if_name,
+                desired_value,
+                desired_unit,
+                speed,
+                im_node,
             )
         module.fail_json(msg=f"interface-transformation failed: {exc_str}")
 
