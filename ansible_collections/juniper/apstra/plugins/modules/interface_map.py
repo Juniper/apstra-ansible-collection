@@ -448,11 +448,14 @@ def _get_blueprint_im_node(client_factory, blueprint_id, im_id):
     (e.g. Apstra-created ``_v2`` variants) and is not in the design catalog.
     Returns an empty dict if not found.
     """
-    base = client_factory.get_base_client()
-    resp = base.raw_request(f"/blueprints/{blueprint_id}/nodes/{im_id}")
-    if resp.status_code == 200:
-        return resp.json()
-    return {}
+    client = _get_l3clos_client(client_factory)
+    try:
+        return (
+            client.request(f"/blueprints/{blueprint_id}/nodes/{im_id}", method="GET")
+            or {}
+        )
+    except Exception:
+        return {}
 
 
 def _normalize_speed(speed_str):
@@ -545,7 +548,7 @@ def _handle_speed_updated(module, client_factory):
     if speed is not None and transform_id is not None:
         module.fail_json(msg="body.speed and body.transform_id are mutually exclusive")
 
-    base = client_factory.get_base_client()
+    client = _get_l3clos_client(client_factory)
 
     # ── speed path: use set-physical-link-speed (same as Apstra WebUI) ────────
     if speed is not None:
@@ -556,12 +559,10 @@ def _handle_speed_updated(module, client_factory):
         desired_speed_str = f"{desired_value}{desired_unit}"
 
         # Fetch cabling map to find the link for this interface
-        resp = base.raw_request(f"/blueprints/{blueprint_id}/cabling-map")
-        if resp.status_code != 200:
-            module.fail_json(
-                msg=f"Failed to get cabling map [{resp.status_code}]: {resp.text[:200]}"
-            )
-        cabling = resp.json()
+        cabling = (
+            client.request(f"/blueprints/{blueprint_id}/cabling-map", method="GET")
+            or {}
+        )
 
         link_id = None
         link_speed = None
@@ -607,13 +608,8 @@ def _handle_speed_updated(module, client_factory):
                 ),
             )
 
-        # Access / generic-system links use a different endpoint
+        # Access / generic-system links use a different SDK method
         _SWITCH_SYS_ROLES = frozenset({"to_generic", "access_l3", "to_access_switch"})
-        endpoint = (
-            "set-switch-system-link-speed"
-            if link_role in _SWITCH_SYS_ROLES
-            else "set-physical-link-speed"
-        )
         payload = {
             "links": [
                 {
@@ -622,15 +618,10 @@ def _handle_speed_updated(module, client_factory):
                 }
             ]
         }
-        resp = base.raw_request(
-            f"/blueprints/{blueprint_id}/{endpoint}",
-            "PUT",
-            data=payload,
-        )
-        if resp.status_code not in (200, 202, 204):
-            module.fail_json(
-                msg=f"{endpoint} failed [{resp.status_code}]: {resp.text[:300]}"
-            )
+        if link_role in _SWITCH_SYS_ROLES:
+            client.blueprints[blueprint_id].set_switch_system_link_speed(payload)
+        else:
+            client.blueprints[blueprint_id].set_physical_link_speed(payload)
 
         return dict(
             changed=True,
@@ -687,18 +678,7 @@ def _handle_speed_updated(module, client_factory):
             }
         ]
     }
-    resp = base.raw_request(
-        f"/blueprints/{blueprint_id}/interface-transformation",
-        "PUT",
-        data=payload,
-    )
-    if resp.status_code not in (200, 202, 204):
-        module.fail_json(
-            msg=(
-                f"interface-transformation failed [{resp.status_code}]: "
-                f"{resp.text[:300]}"
-            )
-        )
+    client.blueprints[blueprint_id].interface_transformation.put(payload)
 
     return dict(
         changed=True,
