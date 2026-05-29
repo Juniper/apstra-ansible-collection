@@ -567,18 +567,41 @@ def _handle_speed_updated(module, client_factory):
         link_id = None
         link_speed = None
         link_role = None
+        # Links where endpoint matches system but if_name is None (Apstra v6.1.1
+        # blueprint-local IMs do not populate if_name in the cabling map).
+        null_name_candidates = []
         for link in cabling.get("links", []):
             for ep in link.get("endpoints", []):
-                if (
-                    ep.get("system", {}).get("label") == system_name
-                    and ep.get("interface", {}).get("if_name") == if_name
-                ):
-                    link_id = link["id"]
-                    link_speed = link.get("speed", "")
-                    link_role = link.get("role", "")
-                    break
+                if ep.get("system", {}).get("label") == system_name:
+                    ep_if_name = ep.get("interface", {}).get("if_name")
+                    if ep_if_name == if_name:
+                        # Exact match — primary path
+                        link_id = link["id"]
+                        link_speed = link.get("speed", "")
+                        link_role = link.get("role", "")
+                        break
+                    elif ep_if_name is None:
+                        null_name_candidates.append(
+                            (link["id"], link.get("speed", ""), link.get("role", ""))
+                        )
             if link_id:
                 break
+
+        # Fallback: blueprint-local IMs in Apstra v6.1.1 may leave if_name as
+        # null in the cabling map.  Accept the single candidate if unambiguous.
+        if not link_id:
+            if len(null_name_candidates) == 1:
+                link_id, link_speed, link_role = null_name_candidates[0]
+            elif len(null_name_candidates) > 1:
+                module.fail_json(
+                    msg=(
+                        f"Found {len(null_name_candidates)} physical links for "
+                        f"system '{system_name}' whose interface names are not "
+                        f"stored in the cabling map. Cannot determine which link "
+                        f"corresponds to '{if_name}'. Please ensure the blueprint "
+                        f"is committed and interface maps are resolved."
+                    )
+                )
 
         if not link_id:
             module.fail_json(
