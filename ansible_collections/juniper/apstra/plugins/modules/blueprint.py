@@ -23,7 +23,7 @@ description:
   - The QE query and node utilities are also available as importable
     helpers in C(module_utils/apstra/bp_query.py) and
     C(module_utils/apstra/bp_nodes.py) for use by other modules.
-version_added: "0.1.0"
+version_added: "1.0.9"
 author:
   - "Edwin Jacques (@edwinpjacques)"
   - "Vamsi Gavini (@vgavini)"
