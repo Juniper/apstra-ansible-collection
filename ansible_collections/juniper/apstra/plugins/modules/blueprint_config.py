@@ -231,9 +231,27 @@ def _get_config_rendering(base_client, blueprint_id, node_id, module):
     return response
 
 
+def _is_managed_node(node):
+    """
+    Check if a node is managed and can have rendered config.
+
+    Unmanaged nodes without a system_id (generic hosts, unprovisioned
+    remote gateways, etc.) will always return 422 from config-rendering.
+    """
+    mgmt = node.get("management_level", "")
+    sys_id = node.get("system_id")
+    # A node is renderable if it has full_control OR has a system_id assigned
+    return mgmt == "full_control" or (sys_id is not None and sys_id != "")
+
+
 def _filter_nodes(nodes, devices=None, role=None):
     """
     Filter nodes by device names or role.
+
+    When no explicit device list is provided, unmanaged nodes without a
+    system_id are automatically excluded because config-rendering always
+    fails for them.  When an explicit device list is given the filter is
+    applied as-is so the caller sees the expected warning.
 
     Args:
         nodes: List of node dicts.
@@ -249,13 +267,16 @@ def _filter_nodes(nodes, devices=None, role=None):
         node_role = node.get("role", "")
 
         if devices is not None:
+            # Explicit device list — include regardless of management state
             if hostname in devices:
                 filtered.append(node)
         elif role is not None:
-            if node_role == role:
+            if node_role == role and _is_managed_node(node):
                 filtered.append(node)
         else:
-            filtered.append(node)
+            # Default: only managed nodes that can have rendered configs
+            if _is_managed_node(node):
+                filtered.append(node)
     return filtered
 
 
@@ -342,7 +363,11 @@ def main():
 
         # Filter nodes based on devices or role
         target_nodes = _filter_nodes(all_nodes, devices=devices, role=role)
-        module.debug(f"Targeting {len(target_nodes)} nodes after filtering")
+        skipped_count = len(all_nodes) - len(target_nodes)
+        module.debug(
+            f"Targeting {len(target_nodes)} nodes after filtering "
+            f"({skipped_count} skipped)"
+        )
 
         if devices is not None:
             # Validate all requested devices were found
@@ -405,9 +430,11 @@ def main():
 
         result["configs"] = configs
         result["device_count"] = len(configs)
+        result["skipped_count"] = skipped_count
         result["msg"] = (
             f"Collected configs for {len(configs)} device(s) "
             f"from blueprint {blueprint_id}"
+            f" ({skipped_count} unmanaged node(s) skipped)"
         )
 
         if output_dir is not None:

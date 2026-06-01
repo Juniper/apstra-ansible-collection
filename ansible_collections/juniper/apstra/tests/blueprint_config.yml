@@ -103,9 +103,13 @@
         msg: "Collected {{ leaf_configs.device_count }} leaf device config(s)"
 
     # ── Test 4: Collect configs for specific device(s) ────────────────────────
-    - name: Pick first device hostname for targeted test
+    - name: Pick a managed device hostname for targeted test
       ansible.builtin.set_fact:
-        test_device: "{{ (all_configs.configs.keys() | list)[0] }}"
+        test_device: >-
+          {{ (all_configs.configs | dict2items
+              | selectattr('value.config', 'defined')
+              | selectattr('value.config', 'ne', None)
+              | map(attribute='key') | list)[0] }}
       when: all_configs.device_count > 0
 
     - name: "Test 4: Collect config for a specific device"
