@@ -1,0 +1,155 @@
+---
+- name: Test blueprint_health module
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_bp_health_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Setup: create a test blueprint ──────────────────────────────────────
+    - name: Create test blueprint
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # ── Test: Collect all health data (default scope) ───────────────────────
+    - name: Collect all health data
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        auth_token: "{{ auth.token }}"
+      register: health_all
+
+    - name: Show all health data
+      ansible.builtin.debug:
+        var: health_all
+
+    - name: Assert all health data returned
+      ansible.builtin.assert:
+        that:
+          - not health_all.changed
+          - health_all.anomalies is defined
+          - health_all.errors is defined
+          - health_all.anomalies.count is defined
+          - health_all.msg is defined
+
+    # ── Test: Collect anomalies only ────────────────────────────────────────
+    - name: Collect anomalies only
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        scope: anomalies
+        auth_token: "{{ auth.token }}"
+      register: health_anomalies
+
+    - name: Show anomalies
+      ansible.builtin.debug:
+        var: health_anomalies
+
+    - name: Assert anomalies only
+      ansible.builtin.assert:
+        that:
+          - not health_anomalies.changed
+          - health_anomalies.anomalies is defined
+          - health_anomalies.errors is not defined
+          - health_anomalies.anomalies.count is defined
+
+    # ── Test: Collect errors only ───────────────────────────────────────────
+    - name: Collect build errors only
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        scope: errors
+        auth_token: "{{ auth.token }}"
+      register: health_errors
+
+    - name: Show build errors
+      ansible.builtin.debug:
+        var: health_errors
+
+    - name: Assert errors only
+      ansible.builtin.assert:
+        that:
+          - not health_errors.changed
+          - health_errors.errors is defined
+          - health_errors.anomalies is not defined
+
+    # ── Test: Filter anomalies by severity ──────────────────────────────────
+    - name: Collect critical anomalies
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        scope: anomalies
+        severity: critical
+        auth_token: "{{ auth.token }}"
+      register: health_critical
+
+    - name: Show critical anomalies
+      ansible.builtin.debug:
+        var: health_critical
+
+    - name: Assert critical filter works
+      ansible.builtin.assert:
+        that:
+          - not health_critical.changed
+          - health_critical.anomalies is defined
+          - health_critical.anomalies.count is defined
+
+    # ── Test: Filter anomalies by node ──────────────────────────────────────
+    - name: Collect anomalies for a node filter
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        scope: anomalies
+        node_filter: "nonexistent_node"
+        auth_token: "{{ auth.token }}"
+      register: health_node
+
+    - name: Assert node filter returns zero
+      ansible.builtin.assert:
+        that:
+          - not health_node.changed
+          - health_node.anomalies.count == 0
+
+    # ── Test: Blueprint name resolution ─────────────────────────────────────
+    - name: Collect health using blueprint label
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ blueprint_name }}"
+        auth_token: "{{ auth.token }}"
+      register: health_by_name
+
+    - name: Assert name resolution works
+      ansible.builtin.assert:
+        that:
+          - not health_by_name.changed
+          - health_by_name.anomalies is defined
+          - health_by_name.errors is defined
+
+    # ── Cleanup ─────────────────────────────────────────────────────────────
+    - name: Delete test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
