@@ -1,0 +1,205 @@
+---
+# Test playbook for blueprint_config module
+# Usage:
+#   make test-blueprint_config BLUEPRINT_CONFIG_ID=<blueprint-id>
+#   OR
+#   pipenv run ansible-playbook tests/blueprint_config.yml -e blueprint_id=<blueprint-id>
+#
+# Requires a deployed blueprint with system nodes that have rendered configs.
+
+- name: Test blueprint_config module — collect rendered device configurations
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    test_output_dir: "/tmp/blueprint_config_test_{{ ansible_date_time.epoch | default('0') }}"
+  tasks:
+
+    # ── Authentication ────────────────────────────────────────────────────────
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Verify blueprint_id is provided
+      ansible.builtin.assert:
+        that:
+          - blueprint_id is defined
+          - blueprint_id | length > 0
+        fail_msg: "blueprint_id must be provided via -e blueprint_id=<id>"
+
+    # ── Test 1: Collect all device configs ────────────────────────────────────
+    - name: "Test 1: Collect rendered config for ALL devices"
+      juniper.apstra.blueprint_config:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        auth_token: "{{ auth.token }}"
+      register: all_configs
+
+    - name: Assert all configs collected successfully
+      ansible.builtin.assert:
+        that:
+          - all_configs is defined
+          - not all_configs.changed
+          - all_configs.device_count > 0
+          - all_configs.configs | length > 0
+        fail_msg: "Failed to collect configs for all devices"
+
+    - name: Display device count
+      ansible.builtin.debug:
+        msg: "Collected configs for {{ all_configs.device_count }} device(s)"
+
+    - name: Display collected device names
+      ansible.builtin.debug:
+        msg: "Devices: {{ all_configs.configs.keys() | list }}"
+
+    # ── Test 2: Collect configs filtered by role (spine) ──────────────────────
+    - name: "Test 2: Collect rendered config for spine devices only"
+      juniper.apstra.blueprint_config:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        role: spine
+        auth_token: "{{ auth.token }}"
+      register: spine_configs
+
+    - name: Assert spine configs collected
+      ansible.builtin.assert:
+        that:
+          - spine_configs is defined
+          - not spine_configs.changed
+          - spine_configs.configs | length >= 0
+        fail_msg: "Failed to collect spine configs"
+
+    - name: Display spine device count
+      ansible.builtin.debug:
+        msg: "Collected {{ spine_configs.device_count }} spine device config(s)"
+
+    - name: Verify spine roles
+      ansible.builtin.assert:
+        that:
+          - item.value.role == "spine"
+        fail_msg: "Device {{ item.key }} has role '{{ item.value.role }}' instead of 'spine'"
+      loop: "{{ spine_configs.configs | dict2items }}"
+      when: spine_configs.device_count > 0
+
+    # ── Test 3: Collect configs filtered by role (leaf) ───────────────────────
+    - name: "Test 3: Collect rendered config for leaf devices only"
+      juniper.apstra.blueprint_config:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        role: leaf
+        auth_token: "{{ auth.token }}"
+      register: leaf_configs
+
+    - name: Assert leaf configs collected
+      ansible.builtin.assert:
+        that:
+          - leaf_configs is defined
+          - not leaf_configs.changed
+        fail_msg: "Failed to collect leaf configs"
+
+    - name: Display leaf device count
+      ansible.builtin.debug:
+        msg: "Collected {{ leaf_configs.device_count }} leaf device config(s)"
+
+    # ── Test 4: Collect configs for specific device(s) ────────────────────────
+    - name: Pick first device hostname for targeted test
+      ansible.builtin.set_fact:
+        test_device: "{{ (all_configs.configs.keys() | list)[0] }}"
+      when: all_configs.device_count > 0
+
+    - name: "Test 4: Collect config for a specific device"
+      juniper.apstra.blueprint_config:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        devices:
+          - "{{ test_device }}"
+        auth_token: "{{ auth.token }}"
+      register: single_config
+      when: test_device is defined
+
+    - name: Assert single device config collected
+      ansible.builtin.assert:
+        that:
+          - single_config.device_count == 1
+          - test_device in single_config.configs
+          - single_config.configs[test_device].config is not none
+        fail_msg: "Failed to collect config for specific device {{ test_device }}"
+      when: test_device is defined
+
+    # ── Test 5: Save configs to files ─────────────────────────────────────────
+    - name: Set output directory with timestamp
+      ansible.builtin.set_fact:
+        test_output_dir: "/tmp/blueprint_config_test_{{ lookup('pipe', 'date +%s') }}"
+
+    - name: "Test 5: Collect and save configs to files"
+      juniper.apstra.blueprint_config:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        output_dir: "{{ test_output_dir }}"
+        filename_pattern: "{hostname}.conf"
+        auth_token: "{{ auth.token }}"
+      register: file_configs
+
+    - name: Assert files were written
+      ansible.builtin.assert:
+        that:
+          - file_configs.files_written is defined
+          - file_configs.files_written | length > 0
+        fail_msg: "No config files were written"
+
+    - name: Verify config files exist on disk
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: file_stat
+      loop: "{{ file_configs.files_written }}"
+
+    - name: Assert all files exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.size > 0
+        fail_msg: "Config file {{ item.item }} does not exist or is empty"
+      loop: "{{ file_stat.results }}"
+
+    - name: Display written files
+      ansible.builtin.debug:
+        msg: "Written files: {{ file_configs.files_written }}"
+
+    # ── Test 6: Idempotency — collect again, should not change ────────────────
+    - name: "Test 6: Collect again — verify no change"
+      juniper.apstra.blueprint_config:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        auth_token: "{{ auth.token }}"
+      register: idempotent_result
+
+    - name: Assert no change on repeated collection
+      ansible.builtin.assert:
+        that:
+          - not idempotent_result.changed
+        fail_msg: "Module reported changed=true on repeated collection"
+
+    # ── Test 7: Verify config content is non-empty ────────────────────────────
+    - name: "Test 7: Verify config content is present for each device"
+      ansible.builtin.assert:
+        that:
+          - item.value.config is not none
+          - item.value.config | length > 0
+        fail_msg: "Empty config for device {{ item.key }}"
+      loop: "{{ all_configs.configs | dict2items }}"
+      when: item.value.error is not defined
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+    - name: Clean up test output directory
+      ansible.builtin.file:
+        path: "{{ test_output_dir }}"
+        state: absent
+
+    - name: Test summary
+      ansible.builtin.debug:
+        msg: >
+          blueprint_config module tests completed successfully.
+          Total devices: {{ all_configs.device_count }},
+          Spine: {{ spine_configs.device_count }},
+          Leaf: {{ leaf_configs.device_count }}.
