@@ -155,7 +155,8 @@ install: build
 	test-interconnect_gateway \
 	test-cabling_map \
         test-virtual_infra_manager \
-        test-floating_ip
+        test-floating_ip \
+	test-blueprint_report
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -272,6 +273,9 @@ test-ztp_device: install
 
 test-iba_probes: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/iba_probes.yml
+
+test-blueprint_report: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_report.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
 
 test-name_resolution: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml

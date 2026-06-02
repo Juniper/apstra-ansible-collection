@@ -1,0 +1,383 @@
+---
+################################################################################
+# Blueprint Report Integration Tests
+#
+# Validates:
+# - Generating health reports
+# - Generating inventory reports
+# - Generating compliance reports
+# - Generating full reports
+# - Reports returned as structured data
+# - Optional file export (JSON and CSV)
+# - Error handling for invalid inputs
+#
+# Prerequisites:
+# - A deployed blueprint must exist in Apstra.
+#   Pass its ID via BLUEPRINT_ID variable or the test will auto-discover one.
+#
+# Test Flow:
+# - Test 1: Full Report
+# - Test 2: Health Report
+# - Test 3: Inventory Report
+# - Test 4: Compliance Report
+# - Test 5: JSON File Export
+# - Test 6: CSV File Export
+# - Test 7: Error Handling
+################################################################################
+
+- name: Blueprint Report Integration Tests
+  hosts: localhost
+  gather_facts: true
+  connection: local
+  vars:
+    test_timestamp: "{{ ansible_date_time.epoch }}"
+    test_results: []
+    blueprint_id: ""
+
+  tasks:
+    - name: Initialize test results tracker
+      ansible.builtin.set_fact:
+        test_results: []
+
+    - name: Authenticate to Apstra server
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    ############################################################################
+    # Setup: Discover or validate blueprint
+    ############################################################################
+
+    - name: Auto-discover blueprint
+      when: blueprint_id == ''
+      block:
+        - name: List all blueprints
+          juniper.apstra.apstra_facts:
+            gather_network_facts:
+              - blueprints
+            auth_token: "{{ auth.token }}"
+          register: all_bps
+
+        - name: Select first blueprint
+          ansible.builtin.set_fact:
+            blueprint_id: "{{ (all_bps.ansible_facts.apstra_facts.blueprints | dict2items | first).key }}"
+          when: all_bps.ansible_facts.apstra_facts.blueprints | length > 0
+
+    - name: Fail if no blueprint available
+      ansible.builtin.fail:
+        msg: "No blueprint found. Pass -e blueprint_id=<id> or ensure a blueprint exists."
+      when: blueprint_id == ''
+
+    - name: Display target blueprint
+      ansible.builtin.debug:
+        msg: "Testing with blueprint: {{ blueprint_id }}"
+
+    ############################################################################
+    # Test 1: Full Report
+    ############################################################################
+
+    - name: "Test 1: Generate full report"
+      block:
+        - name: Generate full report
+          juniper.apstra.blueprint_report:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            report_type: full
+            auth_token: "{{ auth.token }}"
+          register: full_report
+
+        - name: Assert full report structure
+          ansible.builtin.assert:
+            that:
+              - not full_report.changed
+              - full_report.report is defined
+              - full_report.report.report_type == 'full'
+              - full_report.report.blueprint_id is defined
+              - full_report.report.generated_at is defined
+              - full_report.report.summary is defined
+              - full_report.report.health is defined
+              - full_report.report.inventory is defined
+              - full_report.report.compliance is defined
+            fail_msg: "Full report structure is invalid"
+
+        - name: Assert summary has expected keys
+          ansible.builtin.assert:
+            that:
+              - full_report.report.summary.anomaly_count is defined
+              - full_report.report.summary.error_count is defined
+              - full_report.report.summary.node_count is defined
+            fail_msg: "Full report summary is missing expected keys"
+
+        - name: Record test 1 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 1 - Full report'] }}"
+
+      rescue:
+        - name: Record test 1 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 1 - Full report: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+    ############################################################################
+    # Test 2: Health Report
+    ############################################################################
+
+    - name: "Test 2: Generate health report"
+      block:
+        - name: Generate health report
+          juniper.apstra.blueprint_report:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            report_type: health
+            auth_token: "{{ auth.token }}"
+          register: health_report
+
+        - name: Assert health report structure
+          ansible.builtin.assert:
+            that:
+              - not health_report.changed
+              - health_report.report.report_type == 'health'
+              - health_report.report.health is defined
+              - health_report.report.health.anomalies is defined
+              - health_report.report.health.errors is defined
+              - health_report.report.health.iba_dashboards is defined
+              - health_report.report.inventory is not defined
+              - health_report.report.compliance is not defined
+            fail_msg: "Health report structure is invalid"
+
+        - name: Record test 2 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 2 - Health report'] }}"
+
+      rescue:
+        - name: Record test 2 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 2 - Health report: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+    ############################################################################
+    # Test 3: Inventory Report
+    ############################################################################
+
+    - name: "Test 3: Generate inventory report"
+      block:
+        - name: Generate inventory report
+          juniper.apstra.blueprint_report:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            report_type: inventory
+            auth_token: "{{ auth.token }}"
+          register: inventory_report
+
+        - name: Assert inventory report structure
+          ansible.builtin.assert:
+            that:
+              - not inventory_report.changed
+              - inventory_report.report.report_type == 'inventory'
+              - inventory_report.report.inventory is defined
+              - inventory_report.report.inventory.nodes is defined
+              - inventory_report.report.inventory.node_count is defined
+              - inventory_report.report.health is not defined
+              - inventory_report.report.compliance is not defined
+            fail_msg: "Inventory report structure is invalid"
+
+        - name: Record test 3 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 3 - Inventory report'] }}"
+
+      rescue:
+        - name: Record test 3 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 3 - Inventory report: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+    ############################################################################
+    # Test 4: Compliance Report
+    ############################################################################
+
+    - name: "Test 4: Generate compliance report"
+      block:
+        - name: Generate compliance report
+          juniper.apstra.blueprint_report:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            report_type: compliance
+            auth_token: "{{ auth.token }}"
+          register: compliance_report
+
+        - name: Assert compliance report structure
+          ansible.builtin.assert:
+            that:
+              - not compliance_report.changed
+              - compliance_report.report.report_type == 'compliance'
+              - compliance_report.report.compliance is defined
+              - compliance_report.report.compliance.config_drift is defined
+              - compliance_report.report.compliance.anomalies is defined
+              - compliance_report.report.health is not defined
+              - compliance_report.report.inventory is not defined
+            fail_msg: "Compliance report structure is invalid"
+
+        - name: Record test 4 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 4 - Compliance report'] }}"
+
+      rescue:
+        - name: Record test 4 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 4 - Compliance report: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+    ############################################################################
+    # Test 5: JSON File Export
+    ############################################################################
+
+    - name: "Test 5: JSON file export"
+      block:
+        - name: Generate report and save as JSON
+          juniper.apstra.blueprint_report:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            report_type: full
+            output_file: "/tmp/blueprint_report_test_{{ test_timestamp }}.json"
+            output_format: json
+            auth_token: "{{ auth.token }}"
+          register: json_export
+
+        - name: Assert JSON export result
+          ansible.builtin.assert:
+            that:
+              - json_export.output_file is defined
+              - json_export.report is defined
+            fail_msg: "JSON export did not return expected fields"
+
+        - name: Verify JSON file exists
+          ansible.builtin.stat:
+            path: "/tmp/blueprint_report_test_{{ test_timestamp }}.json"
+          register: json_file
+
+        - name: Assert JSON file was created
+          ansible.builtin.assert:
+            that:
+              - json_file.stat.exists
+              - json_file.stat.size > 0
+            fail_msg: "JSON file was not created or is empty"
+
+        - name: Read and validate JSON content
+          ansible.builtin.slurp:
+            src: "/tmp/blueprint_report_test_{{ test_timestamp }}.json"
+          register: json_content
+
+        - name: Parse JSON content
+          ansible.builtin.set_fact:
+            parsed_json: "{{ json_content.content | b64decode | from_json }}"
+
+        - name: Assert JSON content is valid report
+          ansible.builtin.assert:
+            that:
+              - parsed_json.blueprint_id is defined
+              - parsed_json.report_type == 'full'
+            fail_msg: "JSON file content is not a valid report"
+
+        - name: Record test 5 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 5 - JSON file export'] }}"
+
+      rescue:
+        - name: Record test 5 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 5 - JSON file export: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+      # always:
+      #   - name: Cleanup JSON file
+      #     ansible.builtin.file:
+      #       path: "/tmp/blueprint_report_test_{{ test_timestamp }}.json"
+      #       state: absent
+
+    ############################################################################
+    # Test 6: CSV File Export
+    ############################################################################
+
+    - name: "Test 6: CSV file export"
+      block:
+        - name: Generate report and save as CSV
+          juniper.apstra.blueprint_report:
+            id:
+              blueprint: "{{ blueprint_id }}"
+            report_type: full
+            output_file: "/tmp/blueprint_report_test_{{ test_timestamp }}.csv"
+            output_format: csv
+            auth_token: "{{ auth.token }}"
+          register: csv_export
+
+        - name: Assert CSV export result
+          ansible.builtin.assert:
+            that:
+              - csv_export.output_file is defined
+              - csv_export.report is defined
+            fail_msg: "CSV export did not return expected fields"
+
+        - name: Verify CSV file exists
+          ansible.builtin.stat:
+            path: "/tmp/blueprint_report_test_{{ test_timestamp }}.csv"
+          register: csv_file
+
+        - name: Assert CSV file was created
+          ansible.builtin.assert:
+            that:
+              - csv_file.stat.exists
+            fail_msg: "CSV file was not created"
+
+        - name: Record test 6 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 6 - CSV file export'] }}"
+
+      rescue:
+        - name: Record test 6 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 6 - CSV file export: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+      # always:
+      #   - name: Cleanup CSV file
+      #     ansible.builtin.file:
+      #       path: "/tmp/blueprint_report_test_{{ test_timestamp }}.csv"
+      #       state: absent
+
+    ############################################################################
+    # Test 7: Error Handling — missing blueprint
+    ############################################################################
+
+    - name: "Test 7: Error handling"
+      block:
+        - name: Attempt report with missing blueprint key
+          juniper.apstra.blueprint_report:
+            id: {}
+            report_type: health
+            auth_token: "{{ auth.token }}"
+          register: error_result
+          ignore_errors: true
+
+        - name: Assert error for missing blueprint
+          ansible.builtin.assert:
+            that:
+              - error_result.failed
+            fail_msg: "Should have failed with missing blueprint"
+
+        - name: Record test 7 passed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['PASS: Test 7 - Error handling'] }}"
+
+      rescue:
+        - name: Record test 7 failed
+          ansible.builtin.set_fact:
+            test_results: "{{ test_results + ['FAIL: Test 7 - Error handling: ' + ansible_failed_result.msg | default('unknown error')] }}"
+
+    ############################################################################
+    # Summary
+    ############################################################################
+
+    - name: Display test results
+      ansible.builtin.debug:
+        msg: "{{ test_results }}"
+
+    - name: Check for failures
+      ansible.builtin.assert:
+        that:
+          - test_results | select('match', '^FAIL') | list | length == 0
+        fail_msg: "Some tests failed — see results above"
+        success_msg: "All {{ test_results | length }} tests passed"
