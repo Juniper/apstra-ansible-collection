@@ -70,6 +70,13 @@ options:
             C(management_ip) is not specified in C(body).
         type: str
         required: false
+      management_ip:
+        description:
+          - Management IP address of the device.  Used by
+            C(state=host_key_updated) to locate the agent when
+            C(id.agent_id) is not known.
+        type: str
+        required: false
   body:
     description:
       - A dict containing the system agent specification.
@@ -158,6 +165,16 @@ options:
         type: int
         required: false
         default: 120
+      force_accept:
+        description:
+          - Used with C(state=host_key_updated).
+          - When C(true), the stored SSH authorized key is cleared so the
+            next connection re-validates the host key (accepts a changed key).
+          - When C(false) and the agent is already connected, the operation
+            is a no-op (idempotent).
+        type: bool
+        required: false
+        default: true
   state:
     description:
       - Desired state of the system agent.
@@ -178,9 +195,15 @@ options:
       - When C(state=acknowledged) and C(body.management_ip) is provided,
         only the device matching that IP will be acknowledged. Without
         C(management_ip), all unacknowledged devices are acknowledged.
+      - C(host_key_updated) clears the stored SSH authorized key on the agent
+        so Apstra re-validates the host key on the next connection attempt.
+        Useful after a device OS upgrade or key rotation changes the SSH
+        fingerprint.  Set C(body.force_accept=true) to perform the clear;
+        with C(body.force_accept=false) the operation is a no-op when the
+        agent is already connected (safe idempotency check).
     type: str
     required: false
-    choices: ["present", "absent", "gathered", "installed", "acknowledged"]
+    choices: ["present", "absent", "gathered", "installed", "acknowledged", "host_key_updated"]
     default: "present"
   uninstall_timeout:
     description:
@@ -303,6 +326,42 @@ EXAMPLES = """
       management_ip: "10.0.0.1"
     state: acknowledged
   register: ack_one
+
+# ── Clear host key (accept changed SSH fingerprint) ───────────
+
+- name: Clear stored host key by agent ID
+  juniper.apstra.system_agents:
+    id:
+      agent_id: "a1b2c3d4-0000-0000-0000-000000000001"
+    body:
+      force_accept: true
+    state: host_key_updated
+  register: hk_result
+
+- name: Clear stored host key by management IP
+  juniper.apstra.system_agents:
+    id:
+      management_ip: "10.0.0.1"
+    body:
+      force_accept: true
+    state: host_key_updated
+
+- name: Check whether host key would be cleared (check mode)
+  juniper.apstra.system_agents:
+    id:
+      agent_id: "a1b2c3d4-0000-0000-0000-000000000001"
+    body:
+      force_accept: true
+    state: host_key_updated
+  check_mode: true
+
+- name: No-op check — connected agent with force_accept=false
+  juniper.apstra.system_agents:
+    id:
+      agent_id: "a1b2c3d4-0000-0000-0000-000000000001"
+    body:
+      force_accept: false
+    state: host_key_updated
 """
 
 RETURN = """
@@ -364,6 +423,12 @@ acknowledged_systems:
   type: list
   elements: str
   returned: when state=acknowledged
+host_key_cleared:
+  description:
+    - True if the stored SSH authorized key was cleared.
+    - Only returned when C(state=host_key_updated).
+  type: bool
+  returned: when state=host_key_updated
 """
 
 import traceback
