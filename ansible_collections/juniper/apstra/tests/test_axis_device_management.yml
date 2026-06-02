@@ -1,0 +1,185 @@
+---
+################################################################################
+# AXIS Device Management Test — Reboot
+#
+# Phase 1: Discover connected agents via system_agents gathered (read-only)
+# Phase 2: Check mode reboot by agent_id (safe — reports would-reboot)
+# Phase 3: Check mode reboot by management IP (safe)
+# Phase 4: ACTUAL REBOOT (DISABLED by default)
+#
+# ⚠️  Phase 4 triggers a real device reboot.
+#     DO NOT enable without approval.
+#
+# Usage (safe — read-only + check mode):
+#   pipenv run ansible-playbook -v test_axis_device_management.yml
+#
+# Usage (with actual reboot — REQUIRES APPROVAL):
+#   pipenv run ansible-playbook -v test_axis_device_management.yml \
+#     -e run_reboot=true \
+#     -e reboot_agent_id="<agent-uuid>"
+#
+# Credentials: loaded automatically from .env (APSTRA_API_URL / USERNAME / PASSWORD)
+################################################################################
+
+- name: "AXIS Device Management Test — Reboot"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # Phase 4 — set these to enable an actual reboot
+    run_reboot: false
+    reboot_agent_id: ""
+    reboot_wait_for_online: true
+    reboot_timeout: 300
+
+  tasks:
+    ########################################################################
+    # Phase 1 — Discover agents via system_agents gathered
+    ########################################################################
+    - name: "Phase 1 — Gather all system agents"
+      juniper.apstra.system_agents:
+        state: gathered
+      register: p1
+
+    - name: "Phase 1 — Assert: gathered succeeds"
+      ansible.builtin.assert:
+        that:
+          - not p1.failed | default(false)
+          - not p1.changed
+          - p1.agents is defined
+          - p1.agents | length > 0
+        success_msg: >-
+          PASSED Phase 1: found {{ p1.agents | length }} agent(s).
+        fail_msg: "Phase 1 FAILED: no agents returned by state=gathered"
+
+    - name: "Phase 1 — Show agents"
+      ansible.builtin.debug:
+        msg: |
+          System agents ({{ p1.agents | length }}):
+          {% for a in p1.agents %}
+            id={{ a.agent_id }}  ip={{ a.management_ip | default('?') }}
+            state={{ a.connection_state | default('?') }}
+            mode={{ a.operation_mode | default('?') }}
+          {% endfor %}
+
+    - name: "Phase 1 — Pick first connected agent"
+      ansible.builtin.set_fact:
+        first_agent: >-
+          {{ p1.agents
+             | selectattr('connection_state', 'eq', 'connected')
+             | list | first }}
+
+    - name: "Phase 1 — Assert: at least one connected agent found"
+      ansible.builtin.assert:
+        that:
+          - first_agent is defined
+          - first_agent.agent_id is defined
+        success_msg: >-
+          PASSED Phase 1b: found connected agent {{ first_agent.agent_id }}.
+        fail_msg: "Phase 1b FAILED: no connected agents found"
+
+    ########################################################################
+    # Phase 2 — Check mode reboot by agent_id (SAFE — no actual reboot)
+    ########################################################################
+    - name: "Phase 2 — Check mode reboot by agent_id"
+      juniper.apstra.device_management:
+        id:
+          agent_id: "{{ first_agent.agent_id }}"
+        body:
+          force: false
+          wait_for_online: false
+        state: rebooted
+      check_mode: true
+      register: p2
+
+    - name: "Phase 2 — Assert: check mode reports would-reboot"
+      ansible.builtin.assert:
+        that:
+          - not p2.failed | default(false)
+          - p2.changed
+          - p2.agent_id == first_agent.agent_id
+          - "'check mode' in p2.msg | lower"
+        success_msg: >-
+          PASSED Phase 2: check mode correctly reports would-reboot for
+          agent {{ first_agent.agent_id }}.
+        fail_msg: "Phase 2 FAILED: {{ p2.msg | default('no msg') }}"
+
+    - name: "Phase 2 — Show check mode result"
+      ansible.builtin.debug:
+        msg: "Check mode result: {{ p2.msg }}"
+
+    ########################################################################
+    # Phase 3 — Check mode reboot by management IP (SAFE)
+    ########################################################################
+    - name: "Phase 3 — Check mode reboot by management IP"
+      juniper.apstra.device_management:
+        id:
+          hostname: "{{ first_agent.management_ip }}"
+        body:
+          force: false
+          wait_for_online: false
+        state: rebooted
+      check_mode: true
+      register: p3
+
+    - name: "Phase 3 — Assert: IP-based resolution works in check mode"
+      ansible.builtin.assert:
+        that:
+          - not p3.failed | default(false)
+          - p3.changed
+          - p3.agent_id == first_agent.agent_id
+        success_msg: >-
+          PASSED Phase 3: management IP {{ first_agent.management_ip }}
+          resolved to agent {{ p3.agent_id }}.
+        fail_msg: "Phase 3 FAILED: {{ p3.msg | default('no msg') }}"
+
+    - name: "Phase 3 — Show IP resolution result"
+      ansible.builtin.debug:
+        msg: >-
+          IP {{ first_agent.management_ip }} →
+          agent_id={{ p3.agent_id }}  msg={{ p3.msg }}
+
+    ########################################################################
+    # Phase 4 — ACTUAL REBOOT (disabled by default)
+    ########################################################################
+    - name: "Phase 4 — Reboot device (ACTUAL)"
+      juniper.apstra.device_management:
+        id:
+          agent_id: "{{ reboot_agent_id | default(first_agent.agent_id) }}"
+        body:
+          force: false
+          wait_for_online: "{{ reboot_wait_for_online }}"
+          timeout: "{{ reboot_timeout }}"
+        state: rebooted
+      register: p4
+      when:
+        - run_reboot | bool
+
+    - name: "Phase 4 — Show reboot result"
+      ansible.builtin.debug:
+        msg: |
+          Reboot result:
+            agent_id: {{ p4.agent_id | default('N/A') }}
+            msg: {{ p4.msg | default('N/A') }}
+            connection_state: {{ p4.connection_state | default('N/A') }}
+      when: run_reboot | bool and p4 is not skipped
+
+    - name: "Phase 4 — Skipped (not enabled)"
+      ansible.builtin.debug:
+        msg: >-
+          Phase 4 SKIPPED: set -e run_reboot=true to enable an actual reboot.
+          Target would be agent {{ first_agent.agent_id }}
+          ({{ first_agent.management_ip }}).
+      when: not run_reboot | bool
+
+    ########################################################################
+    # Summary
+    ########################################################################
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg:
+          - "Phase 1 (gathered):      PASSED — {{ p1.agents | length }} agent(s) found, first connected={{ first_agent.agent_id }}"
+          - "Phase 2 (check by id):   {{ 'PASSED' if not p2.failed | default(false) else 'FAILED' }}"
+          - "Phase 3 (check by ip):   {{ 'PASSED' if not p3.failed | default(false) else 'FAILED' }}"
+          - "Phase 4 (actual reboot): {{ 'PASSED' if run_reboot | bool and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}"

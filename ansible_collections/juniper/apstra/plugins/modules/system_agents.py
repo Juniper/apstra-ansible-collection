@@ -935,6 +935,135 @@ def _handle_acknowledged(module, client_factory):
     )
 
 
+def _handle_host_key_updated(module, client_factory):
+    """Handle state=host_key_updated — clear or accept a changed SSH host key.
+
+    When a device is re-imaged (or its host key changes for any reason),
+    the Apstra system agent stores the old key and may refuse to connect.
+    This state clears the stored ``authorized_key`` on the agent record so
+    that the next connection attempt accepts the new key.
+
+    With ``body.force_accept=true`` (default) the stored key is cleared
+    unconditionally.  With ``body.force_accept=false`` the module is a
+    no-op unless the agent is already in an error / disconnected state due
+    to a key mismatch.
+
+    Required: ``id.agent_id`` **or** ``id.management_ip``.
+    """
+    id_param = module.params.get("id") or {}
+    body = module.params.get("body") or {}
+    force_accept = body.get("force_accept", True)
+
+    base = _get_base_client(client_factory)
+
+    # ── Resolve agent_id ──────────────────────────────────────────────────
+    agent_id = id_param.get("agent_id")
+    mgmt_ip = id_param.get("management_ip")
+
+    if not agent_id:
+        if not mgmt_ip:
+            raise Exception(
+                "state=host_key_updated requires 'id.agent_id' or 'id.management_ip'."
+            )
+        # Find agent by management IP
+        resp = base.raw_request("/system-agents")
+        if resp.status_code != 200:
+            raise Exception(
+                f"GET /system-agents failed: {resp.status_code} {resp.text}"
+            )
+        try:
+            agents_data = resp.json()
+        except Exception:
+            agents_data = {}
+        all_agents = agents_data.get("items", [])
+        for ag in all_agents:
+            config = ag.get("config", {})
+            if config.get("management_ip") == mgmt_ip:
+                agent_id = ag.get("id")
+                break
+        if not agent_id:
+            raise Exception(
+                f"No system agent found with management_ip '{mgmt_ip}'."
+            )
+
+    # ── Fetch current agent record ────────────────────────────────────────
+    resp = base.raw_request(f"/system-agents/{agent_id}")
+    if resp.status_code != 200:
+        raise Exception(
+            f"GET /system-agents/{agent_id} failed: {resp.status_code} {resp.text}"
+        )
+    try:
+        agent = resp.json()
+    except Exception:
+        raise Exception(f"Failed to parse response for agent '{agent_id}'.")
+
+    config = agent.get("config", {})
+    status = agent.get("status", {})
+    connection_state = status.get("connection_state", "")
+    current_key = config.get("authorized_key", "")
+
+    # ── Idempotency check ─────────────────────────────────────────────────
+    if not force_accept and connection_state == "connected":
+        return dict(
+            changed=False,
+            msg=(
+                f"Agent '{agent_id}' is already connected "
+                f"and force_accept=false — no key update needed."
+            ),
+            agent_id=agent_id,
+            connection_state=connection_state,
+        )
+
+    if not force_accept and not current_key:
+        return dict(
+            changed=False,
+            msg=f"Agent '{agent_id}' has no stored host key — nothing to clear.",
+            agent_id=agent_id,
+            connection_state=connection_state,
+        )
+
+    # ── Check mode ────────────────────────────────────────────────────────
+    if module.check_mode:
+        return dict(
+            changed=True,
+            msg=(
+                f"Would clear host key for agent '{agent_id}' "
+                "(check mode — no action taken)."
+            ),
+            agent_id=agent_id,
+            connection_state=connection_state,
+        )
+
+    # ── Build PUT body — preserve existing config, clear authorized_key ──
+    put_body = {
+        "label": config.get("label", ""),
+        "operation_mode": config.get("operation_mode", ""),
+        "username": config.get("username", ""),
+        "platform": config.get("platform", ""),
+        "authorized_key": "",  # clear stored host key
+    }
+    # Include optional fields only when present (avoid schema rejection)
+    if config.get("open_options") is not None:
+        put_body["open_options"] = config["open_options"]
+    if config.get("force_package_install") is not None:
+        put_body["force_package_install"] = config["force_package_install"]
+
+    resp = base.raw_request(
+        f"/system-agents/{agent_id}", method="PUT", data=put_body
+    )
+    if resp.status_code not in (200, 201, 204):
+        raise Exception(
+            f"PUT /system-agents/{agent_id} failed: {resp.status_code} {resp.text}"
+        )
+
+    return dict(
+        changed=True,
+        msg=f"Host key cleared for agent '{agent_id}'. Device will re-authenticate on next connection.",
+        agent_id=agent_id,
+        connection_state=connection_state,
+    )
+
+
 def _handle_absent(module, client_factory):
     """Handle state=absent — uninstall container if running, then delete."""
     id_param = module.params.get("id") or {}
@@ -982,7 +1111,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent", "gathered", "installed", "acknowledged"],
+            choices=["present", "absent", "gathered", "installed", "acknowledged", "host_key_updated"],
             default="present",
         ),
         uninstall_timeout=dict(type="int", required=False, default=120),
@@ -1008,6 +1137,8 @@ def main():
             result = _handle_installed(module, client_factory)
         elif state == "acknowledged":
             result = _handle_acknowledged(module, client_factory)
+        elif state == "host_key_updated":
+            result = _handle_host_key_updated(module, client_factory)
 
     except Exception as e:
         tb = traceback.format_exc()
