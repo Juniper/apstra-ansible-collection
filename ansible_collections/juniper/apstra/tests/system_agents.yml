@@ -186,7 +186,107 @@
         fail_msg: "IP-based deletion failed"
         success_msg: "Test 6 PASSED: Agent deleted by management IP"
 
+    # ── Tests 7-10: state=host_key_updated ───────────────────────
+    - name: "Test 7 — state=gathered: discover connected agents"
+      juniper.apstra.system_agents:
+        auth_token: "{{ auth.token }}"
+        state: gathered
+      register: gathered_result
+
+    - name: "Test 7 — Verify gathered returns agents"
+      ansible.builtin.assert:
+        that:
+          - not gathered_result.failed | default(false)
+          - not gathered_result.changed
+          - gathered_result.agents is defined
+          - gathered_result.agents | length > 0
+        fail_msg: "Test 7 FAILED: state=gathered returned no agents"
+        success_msg: "Test 7 PASSED: gathered {{ gathered_result.agents | length }} agent(s)"
+
+    - name: "Test 7 — Collect connected agents"
+      ansible.builtin.set_fact:
+        hk_connected: "{{ gathered_result.agents | selectattr('connection_state', 'eq', 'connected') | list }}"
+
+    - name: "Test 7 — Set target connected agent"
+      ansible.builtin.set_fact:
+        hk_target: "{{ hk_connected[0] }}"
+      when: hk_connected | length > 0
+
+    - name: "Test 8 — host_key_updated force_accept=false on connected agent (no-op)"
+      juniper.apstra.system_agents:
+        id:
+          agent_id: "{{ hk_target.agent_id }}"
+        body:
+          force_accept: false
+        auth_token: "{{ auth.token }}"
+        state: host_key_updated
+      register: hk_noop
+      when: hk_connected | length > 0
+
+    - name: "Test 8 — Verify no-op (connected + force_accept=false)"
+      ansible.builtin.assert:
+        that:
+          - not hk_noop.failed | default(false)
+          - not hk_noop.changed
+        fail_msg: "Test 8 FAILED: {{ hk_noop.msg | default('no msg') }}"
+        success_msg: "Test 8 PASSED: force_accept=false is no-op for connected agent {{ hk_target.agent_id }}"
+      when: hk_connected | length > 0
+
+    - name: "Test 9 — host_key_updated check mode (force_accept=true)"
+      juniper.apstra.system_agents:
+        id:
+          agent_id: "{{ hk_target.agent_id }}"
+        body:
+          force_accept: true
+        auth_token: "{{ auth.token }}"
+        state: host_key_updated
+      check_mode: true
+      register: hk_check
+      when: hk_connected | length > 0
+
+    - name: "Test 9 — Verify check mode reports would-clear"
+      ansible.builtin.assert:
+        that:
+          - not hk_check.failed | default(false)
+          - hk_check.changed
+          - "'check mode' in hk_check.msg | lower"
+        fail_msg: "Test 9 FAILED: {{ hk_check.msg | default('no msg') }}"
+        success_msg: "Test 9 PASSED: check mode correctly reports would-clear host key"
+      when: hk_connected | length > 0
+
+    - name: "Test 10 — host_key_updated check mode by management_ip"
+      juniper.apstra.system_agents:
+        id:
+          management_ip: "{{ hk_target.management_ip }}"
+        body:
+          force_accept: true
+        auth_token: "{{ auth.token }}"
+        state: host_key_updated
+      check_mode: true
+      register: hk_check_ip
+      when: hk_connected | length > 0
+
+    - name: "Test 10 — Verify management_ip resolution"
+      ansible.builtin.assert:
+        that:
+          - not hk_check_ip.failed | default(false)
+          - hk_check_ip.changed
+          - hk_check_ip.agent_id == hk_target.agent_id
+        fail_msg: "Test 10 FAILED: {{ hk_check_ip.msg | default('no msg') }}"
+        success_msg: "Test 10 PASSED: management_ip {{ hk_target.management_ip }} resolved to agent {{ hk_check_ip.agent_id }}"
+      when: hk_connected | length > 0
+
     # ── Summary ───────────────────────────────────────────────────
     - name: All system_agents tests passed
       ansible.builtin.debug:
-        msg: "All 6 system_agents tests PASSED"
+        msg:
+          - "Test 1 (create):                   PASSED"
+          - "Test 2 (create idempotent):         PASSED"
+          - "Test 3 (update label):              PASSED"
+          - "Test 4 (delete by id):              PASSED"
+          - "Test 5 (delete idempotent):         PASSED"
+          - "Test 6 (delete by management_ip):   PASSED"
+          - "Test 7 (gathered):                  {{ 'PASSED — ' ~ gathered_result.agents | length ~ ' agent(s)' if not gathered_result.failed | default(false) else 'FAILED' }}"
+          - "Test 8 (host_key_updated no-op):    {{ 'PASSED' if hk_connected | length > 0 and not hk_noop.failed | default(false) else 'SKIPPED (no connected agent)' }}"
+          - "Test 9 (host_key_updated checkmode): {{ 'PASSED' if hk_connected | length > 0 and not hk_check.failed | default(false) else 'SKIPPED (no connected agent)' }}"
+          - "Test 10 (host_key_updated by ip):   {{ 'PASSED' if hk_connected | length > 0 and not hk_check_ip.failed | default(false) else 'SKIPPED (no connected agent)' }}"
