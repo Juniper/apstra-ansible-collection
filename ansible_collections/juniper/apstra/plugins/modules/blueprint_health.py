@@ -129,6 +129,15 @@ EXAMPLES = """
     scope: anomalies
     anomaly_type: "cabling"
   register: cabling_anomalies
+
+- name: Filter anomalies by type for a specific node
+  juniper.apstra.blueprint_health:
+    id:
+      blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+    scope: anomalies
+    node_filter: "leaf1"
+    anomaly_type: "cabling"
+  register: leaf1_cabling_anomalies
 """
 
 RETURN = """
@@ -213,25 +222,46 @@ def _filter_anomalies(
 
     if node_filter:
         node_lower = node_filter.lower()
-        items = [
-            a
-            for a in items
-            if node_lower in str(a.get("identity", {}).get("system_id", "")).lower()
-            or node_lower in str(a.get("identity", {}).get("hostname", "")).lower()
-            or node_lower in str(a.get("identity", {}).get("label", "")).lower()
-            or node_lower in str(a.get("expected", "")).lower()
-            or node_lower in str(a.get("actual", "")).lower()
-            or node_lower in str(a.get("role", "")).lower()
-        ]
+
+        def _node_matches(anomaly):
+            identity = anomaly.get("identity") or {}
+            node_candidates = [
+                identity.get("system_id", ""),
+                identity.get("hostname", ""),
+                identity.get("label", ""),
+                anomaly.get("node", ""),
+                anomaly.get("node_id", ""),
+                anomaly.get("node_label", ""),
+                anomaly.get("role", ""),
+            ]
+
+            return any(
+                node_lower in str(value).lower() for value in node_candidates
+            ) or (
+                node_lower in str(anomaly.get("expected", "")).lower()
+                or node_lower in str(anomaly.get("actual", "")).lower()
+            )
+
+        items = [a for a in items if _node_matches(a)]
 
     if anomaly_type:
         type_lower = anomaly_type.lower()
-        items = [
-            a
-            for a in items
-            if type_lower in str(a.get("anomaly_type", "")).lower()
-            or type_lower in str(a.get("type", "")).lower()
-        ]
+
+        def _type_matches(anomaly):
+            type_candidates = [
+                anomaly.get("anomaly_type", ""),
+                anomaly.get("type", ""),
+                anomaly.get("anomaly_kind", ""),
+                anomaly.get("kind", ""),
+                anomaly.get("category", ""),
+            ]
+            anomaly_types = anomaly.get("anomaly_types", [])
+
+            return any(
+                type_lower in str(value).lower() for value in type_candidates
+            ) or any(type_lower in str(value).lower() for value in anomaly_types)
+
+        items = [a for a in items if _type_matches(a)]
 
     return {
         "count": len(items),

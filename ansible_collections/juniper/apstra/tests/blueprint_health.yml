@@ -131,6 +131,56 @@
           - not health_node.changed
           - health_node.anomalies.count == 0
 
+    # ── Test: Filter anomalies by node + anomaly type ──────────────────────
+    - name: Set a sample anomaly for combined filtering
+      ansible.builtin.set_fact:
+        combined_sample_anomaly: "{{ health_all.anomalies.items[0] }}"
+      when: health_all.anomalies.count | int > 0
+
+    - name: Build combined node and type filters from sample anomaly
+      ansible.builtin.set_fact:
+        combined_node_filter: >-
+          {{
+            combined_sample_anomaly.get('identity', {}).get('system_id')
+            or combined_sample_anomaly.get('identity', {}).get('hostname')
+            or combined_sample_anomaly.get('identity', {}).get('label')
+            or combined_sample_anomaly.get('node_id')
+            or combined_sample_anomaly.get('node_label')
+            or combined_sample_anomaly.get('node')
+            or ''
+          }}
+        combined_anomaly_type: >-
+          {{
+            combined_sample_anomaly.get('anomaly_type')
+            or combined_sample_anomaly.get('type')
+            or (combined_sample_anomaly.get('anomaly_types', []) | first | default(''))
+          }}
+      when: health_all.anomalies.count | int > 0
+
+    - name: Collect anomalies using both node_filter and anomaly_type
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "{{ bp.id.blueprint }}"
+        scope: anomalies
+        node_filter: "{{ combined_node_filter }}"
+        anomaly_type: "{{ combined_anomaly_type }}"
+        auth_token: "{{ auth.token }}"
+      register: health_node_and_type
+      when:
+        - health_all.anomalies.count | int > 0
+        - combined_node_filter | length > 0
+        - combined_anomaly_type | length > 0
+
+    - name: Assert combined node and type filter works
+      ansible.builtin.assert:
+        that:
+          - not health_node_and_type.changed
+          - health_node_and_type.anomalies.count | int > 0
+      when:
+        - health_all.anomalies.count | int > 0
+        - combined_node_filter | length > 0
+        - combined_anomaly_type | length > 0
+
     # ── Test: Blueprint name resolution ─────────────────────────────────────
     - name: Collect health using blueprint label
       juniper.apstra.blueprint_health:

@@ -138,6 +138,28 @@ Examples
         scope: anomalies
         severity: critical
 
+    - name: Collect anomalies for a specific node
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        scope: anomalies
+        node_filter: "leaf1"
+
+    - name: Filter anomalies by type
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        scope: anomalies
+        anomaly_type: "cabling"
+
+    - name: Filter anomalies by type for a specific node
+      juniper.apstra.blueprint_health:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        scope: anomalies
+        node_filter: "leaf1"
+        anomaly_type: "cabling"
+
     - name: Collect build errors only
       juniper.apstra.blueprint_health:
         id:
