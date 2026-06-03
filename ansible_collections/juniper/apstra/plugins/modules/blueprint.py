@@ -96,8 +96,7 @@ options:
   rack_count:
     description:
       - Desired total number of racks of C(rack_type) to exist in the blueprint.
-      - Declarative/idempotent behavior: the module only adds missing racks until
-        the desired total is reached.
+      - "Declarative/idempotent behavior: the module only adds missing racks until the desired total is reached."
       - Mutually exclusive with C(racks_to_add).
       - Only used when C(state=rack_added).
     type: int
@@ -106,8 +105,7 @@ options:
   racks_to_add:
     description:
       - Number of racks to add in this run.
-      - Imperative/non-idempotent behavior (WebUI-style): each run adds this many
-        racks regardless of current count.
+      - "Imperative/non-idempotent behavior (WebUI-style): each run adds this many racks regardless of current count."
       - Mutually exclusive with C(rack_count).
       - Only used when C(state=rack_added).
     type: int
