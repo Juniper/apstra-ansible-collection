@@ -98,7 +98,7 @@ Parameters
       <tr>
           <td><b>host_reservations</b> (list)</td>
           <td></td>
-          <td>List of MAC-to-IP host reservations. Each entry: <code>hw-address</code>, <code>ip-address</code>, optional <code>hostname</code>.</td>
+          <td>List of MAC-to-IP host reservations. Each entry: <code>hw-address</code>, <code>ip-address</code>, optional <code>hostname</code>, optional <code>subnet</code> to target a specific subnet, and optional <code>pool-range-start</code>/<code>pool-range-end</code> to target a specific pool. Selector keys are resolved by the module and are not sent to the API.</td>
       </tr>
       <tr>
           <td><b>global_host_reservations</b> (list)</td>
@@ -191,6 +191,7 @@ Examples
               - "all"
 
     # Configure multiple DHCP subnets with separate pools
+    # New subnets are appended; existing unrelated subnets are preserved.
     - name: Configure multiple subnets
       juniper.apstra.ztp_config:
         scope: dhcp_configurator
@@ -207,16 +208,29 @@ Examples
               - range-start: "10.0.0.10"
                 range-end: "10.0.0.100"
 
-    # Add host-reservations to the first existing subnet
-    # When subnets are not provided, reservations merge into the first subnet
-    - name: Add host reservation
+    # Add a host-reservation to a specific pool in an existing subnet
+    - name: Add host reservation to a selected pool
       juniper.apstra.ztp_config:
         scope: dhcp_configurator
         state: present
         host_reservations:
-          - hw-address: "aa:bb:cc:dd:ee:03"
-            ip-address: "192.168.50.102"
+          - subnet: "192.168.50.0/24"
+            pool-range-start: "192.168.50.60"
+            pool-range-end: "192.168.50.80"
+            hw-address: "aa:bb:cc:dd:ee:03"
+            ip-address: "192.168.50.65"
             hostname: "switch3"
+
+    # Add a host-reservation to a specific subnet without replacing others
+    - name: Add host reservation to a selected subnet
+      juniper.apstra.ztp_config:
+        scope: dhcp_configurator
+        state: present
+        host_reservations:
+          - subnet: "10.0.0.0/24"
+            hw-address: "aa:bb:cc:dd:ee:04"
+            ip-address: "10.0.0.25"
+            hostname: "switch4"
 
     # Add global host reservations (outside any subnet)
     - name: Add global host reservation

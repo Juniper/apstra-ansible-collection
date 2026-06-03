@@ -112,6 +112,11 @@ options:
       - Each entry must include C(hw-address) (MAC address) and
         C(ip-address) (IP to assign).
       - Optional C(hostname) for the reservation.
+      - Optional C(subnet) to target a specific existing subnet instead of
+        using the first configured subnet.
+      - Optional C(pool-range-start) and C(pool-range-end) to target a
+        specific pool within the selected subnet. These selector keys are
+        used only by the module and are not sent to the ZTP API.
       - Used with C(scope=dhcp_configurator).
     type: list
     elements: dict
@@ -224,16 +229,29 @@ EXAMPLES = """
           - range-start: "10.0.0.10"
             range-end: "10.0.0.100"
 
-# Add host-reservations to the first existing subnet
-# When subnets are not provided, reservations merge into the first subnet
-- name: Add host reservation
+# Add a host-reservation to a specific pool in an existing subnet
+- name: Add host reservation to a selected pool
   juniper.apstra.ztp_config:
     scope: dhcp_configurator
     state: present
     host_reservations:
-      - hw-address: "aa:bb:cc:dd:ee:03"
-        ip-address: "192.168.50.102"
+      - subnet: "192.168.50.0/24"
+        pool-range-start: "192.168.50.60"
+        pool-range-end: "192.168.50.80"
+        hw-address: "aa:bb:cc:dd:ee:03"
+        ip-address: "192.168.50.65"
         hostname: "switch3"
+
+# Add a host-reservation to a specific subnet without replacing others
+- name: Add host reservation to a selected subnet
+  juniper.apstra.ztp_config:
+    scope: dhcp_configurator
+    state: present
+    host_reservations:
+      - subnet: "10.0.0.0/24"
+      - hw-address: "aa:bb:cc:dd:ee:03"
+        ip-address: "10.0.0.25"
+        hostname: "switch3-alt"
 
 # Add global host reservations (outside any subnet)
 - name: Add global host reservation
@@ -397,6 +415,7 @@ msg:
 """
 
 import copy
+import ipaddress
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
@@ -450,6 +469,176 @@ def _merge_host_reservations(existing_reservations, new_reservations):
     return list(reservation_map.values())
 
 
+def _pool_key(pool):
+    """Return a stable key for a DHCP pool range."""
+    return (pool.get("range-start"), pool.get("range-end"))
+
+
+def _merge_pools(existing_pools, new_pools):
+    """Merge pools by range so new pools append without replacing others."""
+    pool_map = {_pool_key(pool): copy.deepcopy(pool) for pool in existing_pools}
+    ordered_keys = [_pool_key(pool) for pool in existing_pools]
+
+    for pool in new_pools:
+        key = _pool_key(pool)
+        if key not in pool_map:
+            ordered_keys.append(key)
+        pool_map[key] = copy.deepcopy(pool)
+
+    return [pool_map[key] for key in ordered_keys]
+
+
+def _merge_subnets(existing_subnets, new_subnets):
+    """Merge subnets by CIDR so adding one subnet preserves unrelated entries."""
+    merged_subnets = [copy.deepcopy(subnet) for subnet in existing_subnets]
+    subnet_index = {
+        subnet.get("subnet"): index
+        for index, subnet in enumerate(merged_subnets)
+        if subnet.get("subnet")
+    }
+
+    for subnet in new_subnets:
+        subnet_cidr = subnet.get("subnet")
+        if subnet_cidr and subnet_cidr in subnet_index:
+            current_subnet = merged_subnets[subnet_index[subnet_cidr]]
+            updated_subnet = copy.deepcopy(current_subnet)
+
+            for key, value in subnet.items():
+                if key == "pools" and value is not None:
+                    updated_subnet["pools"] = _merge_pools(
+                        current_subnet.get("pools", []), value
+                    )
+                elif key == "host-reservations" and value is not None:
+                    updated_subnet["host-reservations"] = _merge_host_reservations(
+                        current_subnet.get("host-reservations", []), value
+                    )
+                else:
+                    updated_subnet[key] = copy.deepcopy(value)
+
+            merged_subnets[subnet_index[subnet_cidr]] = updated_subnet
+        else:
+            merged_subnets.append(copy.deepcopy(subnet))
+            if subnet_cidr:
+                subnet_index[subnet_cidr] = len(merged_subnets) - 1
+
+    return merged_subnets
+
+
+def _reservation_payload(reservation):
+    """Strip module-only subnet/pool selectors from reservation payloads."""
+    payload = copy.deepcopy(reservation)
+    payload.pop("subnet", None)
+    payload.pop("pool-range-start", None)
+    payload.pop("pool-range-end", None)
+    return payload
+
+
+def _find_subnet_by_pool(subnets, pool_start, pool_end):
+    """Find a subnet index by exact pool range."""
+    matches = []
+    for index, subnet in enumerate(subnets):
+        for pool in subnet.get("pools", []):
+            if _pool_key(pool) == (pool_start, pool_end):
+                matches.append(index)
+                break
+    return matches
+
+
+def _validate_reservation_pool(reservation, pool_start, pool_end):
+    """Ensure the reservation IP is inside the selected pool range."""
+    ip_address = reservation.get("ip-address")
+    if not ip_address:
+        return
+
+    reservation_ip = ipaddress.ip_address(ip_address)
+    start_ip = ipaddress.ip_address(pool_start)
+    end_ip = ipaddress.ip_address(pool_end)
+    if not start_ip <= reservation_ip <= end_ip:
+        raise ValueError(
+            "Reservation IP '{0}' is outside the selected pool range "
+            "'{1}'-'{2}'".format(ip_address, pool_start, pool_end)
+        )
+
+
+def _select_subnet_for_reservation(subnets, reservation):
+    """Resolve which subnet receives a host reservation."""
+    subnet_cidr = reservation.get("subnet")
+    pool_start = reservation.get("pool-range-start")
+    pool_end = reservation.get("pool-range-end")
+
+    if bool(pool_start) != bool(pool_end):
+        raise ValueError(
+            "Both 'pool-range-start' and 'pool-range-end' are required when "
+            "targeting a specific pool"
+        )
+
+    if subnet_cidr:
+        for index, subnet in enumerate(subnets):
+            if subnet.get("subnet") == subnet_cidr:
+                if pool_start and pool_end:
+                    pools = subnet.get("pools", [])
+                    if _pool_key(
+                        {"range-start": pool_start, "range-end": pool_end}
+                    ) not in {_pool_key(pool) for pool in pools}:
+                        raise ValueError(
+                            "Pool '{0}'-'{1}' was not found in subnet '{2}'".format(
+                                pool_start, pool_end, subnet_cidr
+                            )
+                        )
+                    _validate_reservation_pool(reservation, pool_start, pool_end)
+                return index
+        raise ValueError("Subnet '{0}' was not found".format(subnet_cidr))
+
+    if pool_start and pool_end:
+        matches = _find_subnet_by_pool(subnets, pool_start, pool_end)
+        if not matches:
+            raise ValueError(
+                "Pool '{0}'-'{1}' was not found in the current DHCP configuration".format(
+                    pool_start, pool_end
+                )
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                "Pool '{0}'-'{1}' exists in multiple subnets; specify 'subnet' "
+                "to disambiguate the target".format(pool_start, pool_end)
+            )
+        _validate_reservation_pool(reservation, pool_start, pool_end)
+        return matches[0]
+
+    if subnets:
+        return 0
+
+    raise ValueError(
+        "No subnets are configured. Provide 'subnets' first or include a new subnet "
+        "definition in the same task."
+    )
+
+
+def _merge_targeted_host_reservations(desired_config, host_reservations):
+    """Merge host reservations into the requested subnet without replacing others."""
+    existing_subnets = desired_config.get("subnets", [])
+    if not existing_subnets:
+        raise ValueError(
+            "No DHCP subnets are configured. Configure at least one subnet before "
+            "adding host reservations."
+        )
+
+    reservations_by_subnet = {}
+    for reservation in host_reservations:
+        subnet_index = _select_subnet_for_reservation(existing_subnets, reservation)
+        reservations_by_subnet.setdefault(subnet_index, []).append(
+            _reservation_payload(reservation)
+        )
+
+    for subnet_index, reservations in reservations_by_subnet.items():
+        existing_reservations = existing_subnets[subnet_index].get(
+            "host-reservations", []
+        )
+        existing_subnets[subnet_index]["host-reservations"] = _merge_host_reservations(
+            existing_reservations, reservations
+        )
+
+
 def _remove_host_reservations(existing_reservations, reservations_to_remove):
     """
     Remove host reservations by hw-address from the existing list.
@@ -489,7 +678,9 @@ def _handle_dhcp_configurator_present(module, client, result):
     # Apply subnets if provided
     subnets = module.params.get("subnets")
     if subnets is not None:
-        desired_config["subnets"] = subnets
+        desired_config["subnets"] = _merge_subnets(
+            desired_config.get("subnets", []), subnets
+        )
 
     # Apply global host reservations if provided
     global_host_reservations = module.params.get("global_host_reservations")
@@ -499,17 +690,10 @@ def _handle_dhcp_configurator_present(module, client, result):
             existing_global, global_host_reservations
         )
 
-    # Apply host_reservations — merge into existing subnet(s)
+    # Apply host_reservations — merge into the selected subnet or pool
     host_reservations = module.params.get("host_reservations")
-    if host_reservations is not None and subnets is None:
-        # When no subnets are explicitly provided, merge reservations
-        # into the first existing subnet
-        existing_subnets = desired_config.get("subnets", [])
-        if existing_subnets:
-            existing_res = existing_subnets[0].get("host-reservations", [])
-            existing_subnets[0]["host-reservations"] = _merge_host_reservations(
-                existing_res, host_reservations
-            )
+    if host_reservations is not None:
+        _merge_targeted_host_reservations(desired_config, host_reservations)
 
     # Compare and apply
     changes = _deep_diff(current_config, desired_config)

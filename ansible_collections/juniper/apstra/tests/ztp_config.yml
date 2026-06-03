@@ -69,7 +69,7 @@
     # =====================================================================
     # 2. DHCP CONFIGURATOR — UPDATE (PRESENT)
     # =====================================================================
-    - name: "[DHCP] Configure DHCP subnets and options"
+    - name: "[DHCP] Configure primary DHCP subnet and options"
       juniper.apstra.ztp_config:
         ztp_url: "{{ ztp_url }}"
         ztp_username: "{{ ztp_username }}"
@@ -90,18 +90,17 @@
             pools:
               - range-start: "192.168.50.10"
                 range-end: "192.168.50.50"
+              - range-start: "192.168.50.60"
+                range-end: "192.168.50.80"
             host-reservations: []
             reservation-mode: []
       register: dhcp_update
 
-    - name: "[DHCP] Show DHCP update result"
+    - name: "[DHCP] Show primary subnet update result"
       ansible.builtin.debug:
         var: dhcp_update
 
-    # =====================================================================
-    # 3. DHCP CONFIGURATOR — IDEMPOTENCY CHECK
-    # =====================================================================
-    - name: "[DHCP] Re-apply same DHCP config (idempotency test)"
+    - name: "[DHCP] Add a second subnet without replacing the existing one"
       juniper.apstra.ztp_config:
         ztp_url: "{{ ztp_url }}"
         ztp_username: "{{ ztp_username }}"
@@ -109,19 +108,57 @@
         ztp_verify_certificates: false
         scope: dhcp_configurator
         state: present
-        options:
-          domain-name: "ztplab.local"
-          domain-search: "ztplab.local"
-          domain-name-servers:
-            - "8.8.8.8"
-            - "8.8.4.4"
-          tftp-server-name: "192.168.50.2"
         subnets:
-          - subnet: "192.168.50.0/24"
-            router: "192.168.50.1"
+          - subnet: "10.10.10.0/24"
+            router: "10.10.10.1"
             pools:
-              - range-start: "192.168.50.10"
-                range-end: "192.168.50.50"
+              - range-start: "10.10.10.10"
+                range-end: "10.10.10.40"
+            host-reservations: []
+            reservation-mode: []
+      register: dhcp_add_second_subnet
+
+    - name: "[DHCP] Query config after adding second subnet"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: query
+      register: dhcp_after_second_subnet
+
+    - name: "[DHCP] Cache primary and secondary subnet details"
+      ansible.builtin.set_fact:
+        dhcp_primary_subnet: "{{ dhcp_after_second_subnet.config.subnets | selectattr('subnet', 'equalto', '192.168.50.0/24') | list | first }}"
+        dhcp_secondary_subnet: "{{ dhcp_after_second_subnet.config.subnets | selectattr('subnet', 'equalto', '10.10.10.0/24') | list | first }}"
+
+    - name: "[DHCP] Verify second subnet was appended and primary subnet was preserved"
+      ansible.builtin.assert:
+        that:
+          - dhcp_primary_subnet is defined
+          - dhcp_secondary_subnet is defined
+          - dhcp_primary_subnet.pools | length >= 2
+          - dhcp_secondary_subnet.router == '10.10.10.1'
+        fail_msg: "Second subnet was not appended correctly or the original subnet was modified unexpectedly"
+
+    # =====================================================================
+    # 3. DHCP CONFIGURATOR — IDEMPOTENCY CHECK
+    # =====================================================================
+    - name: "[DHCP] Re-apply the second subnet only (idempotency test)"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: present
+        subnets:
+          - subnet: "10.10.10.0/24"
+            router: "10.10.10.1"
+            pools:
+              - range-start: "10.10.10.10"
+                range-end: "10.10.10.40"
             host-reservations: []
             reservation-mode: []
       register: dhcp_idempotent
@@ -135,7 +172,7 @@
     # =====================================================================
     # 4. DHCP CONFIGURATOR — ADD HOST RESERVATION
     # =====================================================================
-    - name: "[DHCP] Add a host reservation"
+    - name: "[DHCP] Add a host reservation to the second pool in the primary subnet"
       juniper.apstra.ztp_config:
         ztp_url: "{{ ztp_url }}"
         ztp_username: "{{ ztp_username }}"
@@ -144,25 +181,64 @@
         scope: dhcp_configurator
         state: present
         host_reservations:
-          - hw-address: "aa:bb:cc:dd:ee:01"
-            ip-address: "192.168.50.100"
-            hostname: "test-switch-1"
-      register: dhcp_add_res
+          - subnet: "192.168.50.0/24"
+            pool-range-start: "192.168.50.60"
+            pool-range-end: "192.168.50.80"
+            hw-address: "aa:bb:cc:dd:ee:01"
+            ip-address: "192.168.50.65"
+            hostname: "test-switch-pool-2"
+      register: dhcp_add_primary_pool_res
 
-    - name: "[DHCP] Verify reservation was added"
+    - name: "[DHCP] Add a host reservation to the second subnet"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: present
+        host_reservations:
+          - subnet: "10.10.10.0/24"
+            hw-address: "aa:bb:cc:dd:ee:02"
+            ip-address: "10.10.10.20"
+            hostname: "test-switch-subnet-2"
+      register: dhcp_add_secondary_subnet_res
+
+    - name: "[DHCP] Verify targeted reservations were added"
       ansible.builtin.assert:
         that:
-          - dhcp_add_res.changed
-        fail_msg: "Host reservation was not added"
+          - dhcp_add_primary_pool_res.changed
+          - dhcp_add_secondary_subnet_res.changed
+        fail_msg: "Targeted host reservations were not added"
 
-    - name: "[DHCP] Show config after adding reservation"
-      ansible.builtin.debug:
-        var: dhcp_add_res.config
+    - name: "[DHCP] Query config after targeted reservations"
+      juniper.apstra.ztp_config:
+        ztp_url: "{{ ztp_url }}"
+        ztp_username: "{{ ztp_username }}"
+        ztp_password: "{{ ztp_password }}"
+        ztp_verify_certificates: false
+        scope: dhcp_configurator
+        state: query
+      register: dhcp_after_targeted_reservations
+
+    - name: "[DHCP] Refresh subnet facts after targeted reservations"
+      ansible.builtin.set_fact:
+        dhcp_primary_subnet: "{{ dhcp_after_targeted_reservations.config.subnets | selectattr('subnet', 'equalto', '192.168.50.0/24') | list | first }}"
+        dhcp_secondary_subnet: "{{ dhcp_after_targeted_reservations.config.subnets | selectattr('subnet', 'equalto', '10.10.10.0/24') | list | first }}"
+
+    - name: "[DHCP] Verify targeted reservations landed in the requested subnet/pool"
+      ansible.builtin.assert:
+        that:
+          - dhcp_primary_subnet['host-reservations'] | selectattr('hw-address', 'equalto', 'aa:bb:cc:dd:ee:01') | list | length == 1
+          - dhcp_primary_subnet['host-reservations'] | selectattr('ip-address', 'equalto', '192.168.50.65') | list | length == 1
+          - dhcp_secondary_subnet['host-reservations'] | selectattr('hw-address', 'equalto', 'aa:bb:cc:dd:ee:02') | list | length == 1
+          - dhcp_secondary_subnet['host-reservations'] | selectattr('ip-address', 'equalto', '10.10.10.20') | list | length == 1
+        fail_msg: "Host reservations were not attached to the requested subnet/pool"
 
     # =====================================================================
     # 5. DHCP CONFIGURATOR — REMOVE HOST RESERVATION
     # =====================================================================
-    - name: "[DHCP] Remove the host reservation"
+    - name: "[DHCP] Remove the targeted host reservations"
       juniper.apstra.ztp_config:
         ztp_url: "{{ ztp_url }}"
         ztp_username: "{{ ztp_username }}"
@@ -172,7 +248,9 @@
         state: absent
         host_reservations:
           - hw-address: "aa:bb:cc:dd:ee:01"
-            ip-address: "192.168.50.100"
+            ip-address: "192.168.50.65"
+          - hw-address: "aa:bb:cc:dd:ee:02"
+            ip-address: "10.10.10.20"
       register: dhcp_remove_res
 
     - name: "[DHCP] Verify reservation was removed"
@@ -191,11 +269,16 @@
         state: query
       register: dhcp_after_remove
 
-    - name: "[DHCP] Verify no reservations remain in first subnet"
+    - name: "[DHCP] Verify targeted reservations are gone from all subnets"
+      ansible.builtin.set_fact:
+        dhcp_all_reservations: "{{ dhcp_after_remove.config.subnets | map(attribute='host-reservations') | flatten }}"
+
+    - name: "[DHCP] Assert targeted reservations were removed"
       ansible.builtin.assert:
         that:
-          - dhcp_after_remove.config.subnets[0]['host-reservations'] | length == 0
-        fail_msg: "Host reservations still present after removal"
+          - dhcp_all_reservations | selectattr('hw-address', 'equalto', 'aa:bb:cc:dd:ee:01') | list | length == 0
+          - dhcp_all_reservations | selectattr('hw-address', 'equalto', 'aa:bb:cc:dd:ee:02') | list | length == 0
+        fail_msg: "Targeted host reservations still present after removal"
 
     # =====================================================================
     # 6. ZTP CONFIG — QUERY
