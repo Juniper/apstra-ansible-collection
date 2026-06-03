@@ -47,6 +47,7 @@ Synopsis
 .. Description
 
 - This module allows you to create, lock, unlock, and delete Apstra blueprints.
+- It also supports dry-run commit validation using ``state: commit_check`` to collect errors, warnings, and deploy diagnostics.
 
 
 .. Aliases
@@ -413,6 +414,11 @@ Parameters
       - :ansible-option-choices-entry-default:`"present"` :ansible-option-choices-default-mark:`← (default)`
       - :ansible-option-choices-entry:`"committed"`
       - :ansible-option-choices-entry:`"absent"`
+      - :ansible-option-choices-entry:`"queried"`
+      - :ansible-option-choices-entry:`"node_updated"`
+      - :ansible-option-choices-entry:`"rack_added"`
+      - :ansible-option-choices-entry:`"rack_deleted"`
+      - :ansible-option-choices-entry:`"commit_check"`
 
 
       .. raw:: html
@@ -452,6 +458,48 @@ Parameters
       .. rst-class:: ansible-option-line
 
       :ansible-option-default-bold:`Default:` :ansible-option-default:`"APSTRA\_USERNAME environment variable"`
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-include_warnings"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__parameter-include_warnings:
+
+      .. rst-class:: ansible-option-title
+
+      **include_warnings**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-include_warnings" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`boolean`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Include warnings in commit check output. Only used when ``state`` is ``commit_check``.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-choices:`Choices:`
+
+      - :ansible-option-choices-entry:`false`
+      - :ansible-option-choices-entry-default:`true` :ansible-option-choices-default-mark:`← (default)`
+
 
       .. raw:: html
 
@@ -516,35 +564,55 @@ Examples
 
 .. code-block:: yaml+jinja
 
-    # Create a new blueprint
-    - name: Create blueprint (or get update it if the label exists)
-      blueprint:
-        response:
-          name: example_blueprint
-          design: two_stage_l3clos
-        state: present
-
-    # Delete a blueprint
-    - name: Delete blueprint
-      blueprint:
+    # Run commit checks (dry-run validation) before deploying
+    - name: Validate blueprint before deploying
+      juniper.apstra.blueprint:
         id:
-          blueprint: blueprint-123
-        state: absent
+          blueprint: "{{ blueprint_id }}"
+        include_warnings: true
+        state: commit_check
+      register: check_result
 
-    # Lock a blueprint
-    - name: Lock blueprint
-      blueprint:
-        id:
-          blueprint: blueprint-123
-        state: present
+    - name: Verify commit check output fields
+      ansible.builtin.assert:
+        that:
+          - check_result.changed == false
+          - check_result.errors is defined
+          - check_result.errors_count is defined
+          - check_result.warnings_count is defined
+          - check_result.commit_warnings is defined
+          - check_result.deploy_ready is defined
+          - check_result.diagnostics is defined
 
-    # Unlock a blueprint
-    - name: Unlock blueprint
-      blueprint:
+    # Run commit checks without warnings
+    - name: Check for errors only (no warnings)
+      juniper.apstra.blueprint:
         id:
-          blueprint: blueprint-123
-        lock_state: unlocked
-        state: present
+          blueprint: "{{ blueprint_id }}"
+        state: commit_check
+        include_warnings: false
+      register: check_errors_only
+
+    - name: Verify warnings are excluded
+      ansible.builtin.assert:
+        that:
+          - check_errors_only.commit_warnings is not defined
+          - check_errors_only.errors is defined
+          - check_errors_only.deploy_ready is defined
+
+    # Commit check is read-only/idempotent
+    - name: Run commit check again (default include_warnings=true)
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ blueprint_id }}"
+        state: commit_check
+      register: check_again
+
+    - name: Verify commit check remains read-only
+      ansible.builtin.assert:
+        that:
+          - check_again.changed == false
+          - check_again.commit_warnings is defined
 
 
 
@@ -793,6 +861,240 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
         </div>
 
 
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-errors"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__return-errors:
+
+      .. rst-class:: ansible-option-title
+
+      **errors**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-errors" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`list`
+        :ansible-option-elements:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      List of categorized build errors from commit check.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when using ``state=commit_check``
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-commit_warnings"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__return-commit_warnings:
+
+      .. rst-class:: ansible-option-title
+
+      **commit_warnings**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-commit_warnings" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`list`
+        :ansible-option-elements:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      List of categorized warnings from commit check.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when ``include_warnings=true`` with ``state=commit_check``
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-deploy_ready"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__return-deploy_ready:
+
+      .. rst-class:: ansible-option-title
+
+      **deploy_ready**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-deploy_ready" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`boolean`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Whether the blueprint is deploy-ready according to commit check.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when using ``state=commit_check``
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-errors_count"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__return-errors_count:
+
+      .. rst-class:: ansible-option-title
+
+      **errors_count**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-errors_count" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`integer`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Total number of errors reported by commit check.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when using ``state=commit_check``
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-warnings_count"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__return-warnings_count:
+
+      .. rst-class:: ansible-option-title
+
+      **warnings_count**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-warnings_count" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`integer`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Total number of warnings reported by commit check.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when using ``state=commit_check``
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-diagnostics"></div>
+
+      .. _ansible_collections.juniper.apstra.blueprint_module__return-diagnostics:
+
+      .. rst-class:: ansible-option-title
+
+      **diagnostics**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-diagnostics" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Raw deploy diagnostics payload returned by commit check.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when using ``state=commit_check``
+
+      .. raw:: html
+
+        </div>
 
 ..  Status (Presently only deprecated)
 

@@ -82,6 +82,8 @@ options:
         from the design interface-maps catalog.
       - Values may be C(null) or an empty string to clear an assignment.
       - "Example: C(assignments: {spine1: Juniper_vJunos-switch_vJunos})"
+      - When C(state=speed_updated): must contain C(system_name),
+        C(interface_name), and either C(speed) or C(transform_id).
     type: dict
     required: true
   state:
@@ -90,9 +92,14 @@ options:
       - C(present) assigns the specified interface maps to nodes.
       - C(absent) clears the interface map assignments for the
         specified nodes (sets them to null).
+      - C(speed_updated) changes the speed or transform of a specific
+        interface on a system by selecting the appropriate interface map
+        from the design catalog. Requires C(body.system_name),
+        C(body.interface_name), and either C(body.speed) (e.g. C("25G"),
+        C("100G")) or C(body.transform_id) (integer).
     type: str
     required: false
-    choices: ["present", "absent"]
+    choices: ["present", "absent", "speed_updated"]
     default: "present"
 """
 
@@ -141,6 +148,28 @@ EXAMPLES = """
       assignments:
         "{{ node_id }}": null
     state: absent
+
+# ── Change interface speed / breakout ────────────────────────────
+
+- name: Set spine1 et-0/0/0 to 100G
+  juniper.apstra.interface_map:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      system_name: "spine1"
+      interface_name: "et-0/0/0"
+      speed: "100G"
+    state: speed_updated
+
+- name: Set leaf1 xe-0/0/0 breakout to 4x25G (by transform_id)
+  juniper.apstra.interface_map:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    body:
+      system_name: "leaf1"
+      interface_name: "xe-0/0/0"
+      transform_id: 2
+    state: speed_updated
 """
 
 RETURN = """
@@ -159,6 +188,14 @@ msg:
   description: The output message that the module generates.
   type: str
   returned: always
+interface_map_id:
+  description: The interface map ID assigned after a C(speed_updated) operation.
+  type: str
+  returned: when state is speed_updated and changed is true
+system_node_id:
+  description: The blueprint node UUID of the system targeted by C(speed_updated).
+  type: str
+  returned: when state is speed_updated
 """
 
 import traceback
@@ -168,7 +205,14 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     apstra_client_module_args,
     ApstraClientFactory,
 )
-
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interface_speed import (
+    SpeedChangeError,
+    normalize_speed,
+    change_interface_speed,
+    get_im_for_system,
+    get_effective_im_node,
+    im_has_transform_id,
+)
 
 # ──────────────────────────────────────────────────────────────────
 #  SDK helpers
@@ -395,6 +439,118 @@ def _handle_absent(module, client_factory):
 
 
 # ──────────────────────────────────────────────────────────────────
+#  Feature 1: Interface speed / breakout (state=speed_updated)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _handle_speed_updated(module, client_factory):
+    """Handle state=speed_updated — change a link's speed.
+
+    Delegates to ``bp_interface_speed.change_interface_speed`` for the
+    ``speed`` parameter path and uses ``interface-transformation`` for
+    ``transform_id``.
+    """
+    p = module.params
+    id_param = p["id"] or {}
+    blueprint_id = id_param.get("blueprint")
+    if blueprint_id:
+        blueprint_id = client_factory.resolve_blueprint_id(blueprint_id)
+        id_param["blueprint"] = blueprint_id
+    body = p["body"] or {}
+
+    system_name = body.get("system_name")
+    if_name = body.get("interface_name")
+    speed = body.get("speed")
+    transform_id = body.get("transform_id")
+
+    if not system_name:
+        module.fail_json(msg="body.system_name is required when state=speed_updated")
+    if not if_name:
+        module.fail_json(msg="body.interface_name is required when state=speed_updated")
+    if speed is None and transform_id is None:
+        module.fail_json(
+            msg="Either body.speed or body.transform_id is required when state=speed_updated"
+        )
+    if speed is not None and transform_id is not None:
+        module.fail_json(msg="body.speed and body.transform_id are mutually exclusive")
+
+    # ── speed path: delegate to bp_interface_speed ─────────────────────────
+    if speed is not None:
+        try:
+            desired_value, desired_unit = normalize_speed(str(speed))
+        except SpeedChangeError as exc:
+            module.fail_json(msg=str(exc))
+
+        try:
+            return change_interface_speed(
+                client_factory,
+                blueprint_id,
+                system_name,
+                if_name,
+                desired_value,
+                desired_unit,
+                str(speed),
+                module.check_mode,
+            )
+        except SpeedChangeError as exc:
+            module.fail_json(msg=str(exc))
+
+    # ── transform_id path: use interface-transformation ────────────────────
+    try:
+        system_node_id, im_id = get_im_for_system(
+            client_factory, blueprint_id, system_name
+        )
+    except SpeedChangeError as exc:
+        module.fail_json(msg=str(exc))
+
+    try:
+        im_node = get_effective_im_node(client_factory, blueprint_id, im_id)
+    except SpeedChangeError as exc:
+        module.fail_json(msg=str(exc))
+
+    if im_has_transform_id(im_node, if_name, transform_id):
+        return dict(
+            changed=False,
+            system_node_id=system_node_id,
+            msg=(
+                f"Interface '{if_name}' on '{system_name}' already uses "
+                f"transform_id={transform_id} (no change)"
+            ),
+        )
+
+    if module.check_mode:
+        return dict(
+            changed=True,
+            system_node_id=system_node_id,
+            msg=(
+                f"Would apply transformation_id={transform_id} to "
+                f"interface '{if_name}' on '{system_name}'"
+            ),
+        )
+
+    client = _get_l3clos_client(client_factory)
+    payload = {
+        "interfaces": [
+            {
+                "system_id": system_node_id,
+                "if_name": if_name,
+                "transformation_id": transform_id,
+            }
+        ]
+    }
+    client.blueprints[blueprint_id].interface_transformation.put(payload)
+
+    return dict(
+        changed=True,
+        system_node_id=system_node_id,
+        msg=(
+            f"Applied transformation_id={transform_id} to "
+            f"interface '{if_name}' on '{system_name}'"
+        ),
+    )
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Module entry point
 # ──────────────────────────────────────────────────────────────────
 
@@ -406,7 +562,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent"],
+            choices=["present", "absent", "speed_updated"],
             default="present",
         ),
     )
@@ -425,6 +581,8 @@ def main():
             result = _handle_present(module, client_factory)
         elif state == "absent":
             result = _handle_absent(module, client_factory)
+        elif state == "speed_updated":
+            result = _handle_speed_updated(module, client_factory)
 
     except Exception as e:
         tb = traceback.format_exc()

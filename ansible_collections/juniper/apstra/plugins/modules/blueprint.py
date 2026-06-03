@@ -18,10 +18,12 @@ description:
     a blueprint using C(state=queried).
   - Patch individual node properties such as system_id and deploy_mode
     using C(state=node_updated).
+  - Run commit checks (dry-run validation) and collect build errors
+    and deploy diagnostics using C(state=commit_check).
   - The QE query and node utilities are also available as importable
     helpers in C(module_utils/apstra/bp_query.py) and
     C(module_utils/apstra/bp_nodes.py) for use by other modules.
-version_added: "0.1.0"
+version_added: "1.0.9"
 author:
   - "Edwin Jacques (@edwinpjacques)"
   - "Vamsi Gavini (@vgavini)"
@@ -143,10 +145,92 @@ options:
       - C(rack_added) adds racks of a rack type using either C(rack_count)
         (desired total, idempotent) or C(racks_to_add) (delta, non-idempotent).
       - C(rack_deleted) deletes rack(s) by C(rack_id) / C(node_id).
+      - C(commit_check) runs a dry-run validation and collects build
+        errors and deploy diagnostics without deploying (read-only).
+      - C(interface_updated) sets the admin state (shut/no-shut) of a
+        blueprint interface node. Use C(system_name), C(interface_name),
+        and C(admin_state) to target and configure the interface.
+      - C(interface_tagged) adds or removes tags on a blueprint interface
+        node. Use C(system_name), C(interface_name), C(tags), and
+        C(state=interface_tagged) with C(tag_state=present/absent).
+      - C(lag_updated) sets C(lag_mode) (and optionally C(port_channel_id))
+        on a port-channel interface of a managed switch.
     required: false
     type: str
-    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted"]
+    choices: ["present", "committed", "absent", "queried", "node_updated", "rack_added", "rack_deleted", "commit_check", "interface_updated", "interface_tagged", "lag_updated"]
     default: "present"
+  include_warnings:
+    description:
+      - Include warnings in the commit check output.
+      - Only used when C(state=commit_check).
+    type: bool
+    required: false
+    default: true
+  system_name:
+    description:
+      - The label of the system (switch/server) node in the blueprint.
+      - Required when C(state=interface_updated), C(state=interface_tagged),
+        or C(state=lag_updated).
+    type: str
+    required: false
+  interface_name:
+    description:
+      - The interface name on the system (e.g. C(ge-0/0/0), C(ae4)).
+      - Required when C(state=interface_updated), C(state=interface_tagged),
+        or C(state=lag_updated).
+    type: str
+    required: false
+  admin_state:
+    description:
+      - Desired administrative state of the interface.
+      - C(up) enables the interface (no-shut).
+      - C(down) disables the interface (shut).
+      - Only used when C(state=interface_updated) in single-interface mode.
+    type: str
+    required: false
+    choices: ["up", "down"]
+  interfaces:
+    description:
+      - List of interfaces to update in a single task (batch mode).
+      - Only used when C(state=interface_updated).
+      - Each entry must have C(system_name), C(interface_name), and C(admin_state).
+      - Mutually exclusive with single-interface mode (C(system_name) / C(interface_name) / C(admin_state)).
+    type: list
+    elements: dict
+    required: false
+  tags:
+    description:
+      - List of tag labels to add or remove on the interface node.
+      - Only used when C(state=interface_tagged).
+      - Combined with C(tag_state) to determine whether tags are added
+        or removed.
+    type: list
+    elements: str
+    required: false
+  tag_state:
+    description:
+      - Whether to add or remove the specified C(tags) on the interface.
+      - C(present) ensures the tags exist on the interface node.
+      - C(absent) removes the tags from the interface node.
+      - Only used when C(state=interface_tagged).
+    type: str
+    required: false
+    choices: ["present", "absent"]
+    default: "present"
+  lag_mode:
+    description:
+      - LAG mode to set on a port-channel interface of a managed switch.
+      - Only used when C(state=lag_updated).
+    type: str
+    required: false
+    choices: ["lacp_active", "lacp_passive", "static_lag", "none"]
+  port_channel_id:
+    description:
+      - Optional port-channel interface number (e.g. C(4) for C(ae4)).
+      - When set, updates the C(port_channel_id) field alongside C(lag_mode).
+      - Only used when C(state=lag_updated).
+    type: int
+    required: false
   query:
     description:
       - A raw QE query string.
@@ -514,6 +598,129 @@ EXAMPLES = """
       blueprint: "{{ blueprint_id }}"
     rack_id: "da_rack_001"
     state: rack_deleted
+
+# Run commit checks (dry-run validation) before deploying
+- name: Validate blueprint before deploying
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    include_warnings: true
+    state: commit_check
+  register: check_result
+
+- name: Verify commit check output fields
+  ansible.builtin.assert:
+    that:
+      - check_result.changed == false
+      - check_result.errors is defined
+      - check_result.errors_count is defined
+      - check_result.warnings_count is defined
+      - check_result.commit_warnings is defined
+      - check_result.deploy_ready is defined
+      - check_result.diagnostics is defined
+
+# Run commit checks without warnings
+- name: Check for errors only (no warnings)
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    state: commit_check
+    include_warnings: false
+  register: check_errors_only
+
+- name: Verify warnings are excluded
+  ansible.builtin.assert:
+    that:
+      - check_errors_only.commit_warnings is not defined
+      - check_errors_only.errors is defined
+      - check_errors_only.deploy_ready is defined
+
+# Commit check is read-only/idempotent
+- name: Run commit check again (default include_warnings=true)
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    state: commit_check
+  register: check_again
+
+- name: Verify commit check remains read-only
+  ansible.builtin.assert:
+    that:
+      - check_again.changed == false
+      - check_again.commit_warnings is defined
+
+# Shut down an interface (admin down)
+- name: Shut leaf1 ge-0/0/0 interface
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    admin_state: "down"
+    state: interface_updated
+  register: intf_shut
+
+# Re-enable a shut-down interface
+- name: No-shut leaf1 ge-0/0/0
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    admin_state: "up"
+    state: interface_updated
+
+# Batch shut multiple interfaces in one task
+- name: Shut down multiple spine interfaces
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    interfaces:
+      - system_name: "spine1"
+        interface_name: "et-0/0/0"
+        admin_state: "down"
+      - system_name: "spine1"
+        interface_name: "et-0/0/1"
+        admin_state: "down"
+      - system_name: "spine2"
+        interface_name: "et-0/0/0"
+        admin_state: "up"
+    state: interface_updated
+
+# Add tags to an ethernet interface
+- name: Tag leaf1 ge-0/0/0 as 'uplink' and 'production'
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    tags:
+      - uplink
+      - production
+    tag_state: present
+    state: interface_tagged
+
+# Remove a tag from an interface
+- name: Remove 'uplink' tag from leaf1 ge-0/0/0
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ge-0/0/0"
+    tags:
+      - uplink
+    tag_state: absent
+    state: interface_tagged
+
+# Change LAG mode on a port-channel interface
+- name: Set leaf1 ae4 to lacp_passive
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    system_name: "leaf1"
+    interface_name: "ae4"
+    lag_mode: "lacp_passive"
+    state: lag_updated
 """
 
 RETURN = """
@@ -627,6 +834,87 @@ racks_deleted:
     returned: when racks were deleted
     type: list
     elements: str
+errors:
+    description:
+        - List of categorized build error dicts.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: list
+    elements: dict
+    sample:
+        - type: "config_error"
+          severity: "error"
+          message: "BGP session failed"
+          node: "spine1"
+commit_warnings:
+    description:
+        - List of categorized warning dicts.
+        - Returned by C(state=commit_check) when C(include_warnings=true).
+    returned: when using commit_check with include_warnings
+    type: list
+    elements: dict
+deploy_ready:
+    description:
+        - Whether the blueprint is ready for deployment.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: bool
+    sample: true
+errors_count:
+    description:
+        - Total number of errors found.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: int
+warnings_count:
+    description:
+        - Total number of warnings found.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: int
+diagnostics:
+    description:
+        - Raw deploy diagnostics data from the Apstra API.
+        - Returned by C(state=commit_check).
+    returned: when using commit_check
+    type: dict
+
+interface_node_id:
+    description:
+        - The blueprint node UUID of the interface that was targeted.
+        - Returned by C(state=interface_updated), C(state=interface_tagged),
+          and C(state=lag_updated).
+    returned: when using interface management states
+    type: str
+admin_state:
+    description:
+        - The resolved admin state of the interface after the operation.
+        - Returned by C(state=interface_updated).
+    returned: when using interface_updated
+    type: str
+    sample: "down"
+operation_state:
+    description:
+        - The raw Apstra C(operation_state) value on the interface node.
+        - C("up") means enabled; C("admin_down") means shut.
+        - Returned by C(state=interface_updated).
+    returned: when using interface_updated
+    type: str
+    sample: "admin_down"
+interface_tags:
+    description:
+        - Final list of tag labels on the interface node after the operation.
+        - Returned by C(state=interface_tagged).
+    returned: when using interface_tagged
+    type: list
+    elements: str
+lag_mode:
+    description:
+        - The final C(lag_mode) on the interface node after the operation.
+        - Returned by C(state=lag_updated).
+    returned: when using lag_updated
+    type: str
+    sample: "lacp_passive"
 """
 
 from time import sleep
@@ -656,6 +944,10 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes imp
     assign_nodes_by_label,
 )
 
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_dci import (
+    get_blueprint_errors,
+)
+
 
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
     resolve_template_id as _resolve_template_id,
@@ -664,7 +956,12 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
     resolve_rack_node_id,
     resolve_system_node_id,
 )
-
+from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_interface import (
+    find_interface_node,
+    set_operation_state,
+    set_interface_tags,
+    set_lag_mode,
+)
 
 # ──────────────────────────────────────────────────────────────────
 #  Rack management helpers
@@ -874,6 +1171,304 @@ def _handle_rack_deleted(module, client_factory, blueprint_id):
         racks_deleted=deleted,
         msg=f"Deleted {n} rack(s) from blueprint",
     )
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Commit check handler (state=commit_check)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _get_deploy_diagnostics(client_factory, blueprint_id):
+    """Retrieve deploy readiness diagnostics for a blueprint.
+
+    Calls ``GET /api/blueprints/{bp_id}/deploy-diagnostics``.
+
+    Returns:
+        dict: The diagnostics payload or empty dict on failure.
+    """
+    base = client_factory.get_base_client()
+    resp = base.raw_request(f"/blueprints/{blueprint_id}/deploy-diagnostics")
+    if resp.status_code == 200:
+        return resp.json()
+    return {}
+
+
+def _handle_commit_check(module, client_factory, blueprint_id):
+    """Handle state=commit_check -- dry-run validation without deploying.
+
+    Collects build errors via GET /api/blueprints/{id}/errors and
+    deploy diagnostics via GET /api/blueprints/{id}/deploy-diagnostics.
+    Returns structured output with categorized errors, warnings, and
+    deploy readiness status.  This is a read-only operation with no
+    side effects on the blueprint.
+    """
+    include_warnings = module.params.get("include_warnings", True)
+
+    # Collect build errors
+    raw_errors = get_blueprint_errors(client_factory, blueprint_id)
+
+    errors_list = []
+    warnings_list = []
+    metadata_keys = {"version", "errors_count", "warnings_count"}
+
+    for category, items in raw_errors.items():
+        if category in metadata_keys:
+            continue
+        if not items:
+            continue
+        # items may be a dict (keyed by node/relationship id) or a list
+        if isinstance(items, dict):
+            entries = items.values()
+        elif isinstance(items, list):
+            entries = items
+        else:
+            continue
+
+        for entry in entries:
+            if isinstance(entry, dict):
+                severity = entry.get("severity", "error")
+                record = dict(
+                    type=category,
+                    severity=severity,
+                    message=entry.get("message", entry.get("error", str(entry))),
+                    node=entry.get("node", entry.get("identity", "")),
+                )
+                if severity == "warning":
+                    warnings_list.append(record)
+                else:
+                    errors_list.append(record)
+            elif isinstance(entry, list):
+                # Nested list of error dicts
+                for sub in entry:
+                    if isinstance(sub, dict):
+                        severity = sub.get("severity", "error")
+                        record = dict(
+                            type=category,
+                            severity=severity,
+                            message=sub.get("message", sub.get("error", str(sub))),
+                            node=sub.get("node", sub.get("identity", "")),
+                        )
+                        if severity == "warning":
+                            warnings_list.append(record)
+                        else:
+                            errors_list.append(record)
+
+    # Collect deploy diagnostics
+    diagnostics = _get_deploy_diagnostics(client_factory, blueprint_id)
+
+    # Determine deploy readiness
+    deploy_ready = len(errors_list) == 0 and not diagnostics.get("has_errors", False)
+
+    errors_count = raw_errors.get("errors_count", len(errors_list))
+    warnings_count = raw_errors.get("warnings_count", len(warnings_list))
+
+    result = dict(
+        changed=False,
+        errors=errors_list,
+        errors_count=errors_count,
+        warnings_count=warnings_count,
+        deploy_ready=deploy_ready,
+        diagnostics=diagnostics,
+    )
+
+    if include_warnings:
+        result["commit_warnings"] = warnings_list
+
+    if errors_list:
+        result["msg"] = (
+            f"Commit check found {errors_count} error(s) and "
+            f"{warnings_count} warning(s) - blueprint is NOT deploy-ready"
+        )
+    else:
+        result["msg"] = (
+            f"Commit check passed with {warnings_count} warning(s) - "
+            f"blueprint is deploy-ready"
+        )
+
+    return result
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Interface management handlers (Features 2, 3, 4)
+# ──────────────────────────────────────────────────────────────────
+
+
+def _resolve_interface_node_id(module, client_factory, blueprint_id):
+    """Resolve system_name + interface_name to an interface node UUID.
+
+    Fails the module with a descriptive error if either the system or the
+    interface cannot be found.
+
+    Returns:
+        str: The interface node UUID.
+    """
+    system_name = module.params.get("system_name")
+    interface_name = module.params.get("interface_name")
+
+    if not system_name:
+        module.fail_json(msg="system_name is required for interface management states")
+    if not interface_name:
+        module.fail_json(
+            msg="interface_name is required for interface management states"
+        )
+
+    iface = find_interface_node(
+        client_factory, blueprint_id, system_name, interface_name
+    )
+    if iface is None:
+        module.fail_json(
+            msg=(
+                f"Interface '{interface_name}' not found on system '{system_name}' "
+                f"in blueprint '{blueprint_id}'"
+            )
+        )
+    return iface["id"]
+
+
+def _handle_interface_updated(module, client_factory, blueprint_id):
+    """Handle state=interface_updated - set admin state (shut/no-shut).
+
+    Supports both single-interface mode (system_name + interface_name + admin_state)
+    and batch mode (interfaces list of {system_name, interface_name, admin_state}).
+    """
+    interfaces = module.params.get("interfaces")
+
+    if interfaces:
+        # Batch mode: iterate over the list
+        results = []
+        any_changed = False
+        for entry in interfaces:
+            sys_name = entry.get("system_name")
+            if_name = entry.get("interface_name")
+            adm_state = entry.get("admin_state")
+            if not sys_name or not if_name or not adm_state:
+                module.fail_json(
+                    msg=(
+                        "Each entry in 'interfaces' must have "
+                        "system_name, interface_name, and admin_state"
+                    )
+                )
+            iface = find_interface_node(client_factory, blueprint_id, sys_name, if_name)
+            if iface is None:
+                module.fail_json(
+                    msg=(
+                        f"Interface '{if_name}' not found on system '{sys_name}' "
+                        f"in blueprint '{blueprint_id}'"
+                    )
+                )
+            r = set_operation_state(
+                client_factory, blueprint_id, iface["id"], adm_state
+            )
+            if r.get("changed"):
+                any_changed = True
+            results.append(
+                {
+                    "system_name": sys_name,
+                    "interface_name": if_name,
+                    "admin_state": adm_state,
+                    "changed": r.get("changed", False),
+                    "interface_node_id": r.get("node_id", iface["id"]),
+                }
+            )
+        return dict(
+            changed=any_changed,
+            interfaces=results,
+            msg=f"Updated {len(interfaces)} interface(s)",
+        )
+
+    # Single-interface mode (backward compatible)
+    admin_state = module.params.get("admin_state")
+    if not admin_state:
+        module.fail_json(msg="admin_state is required when state=interface_updated")
+    iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
+    result = set_operation_state(client_factory, blueprint_id, iface_id, admin_state)
+    result["interface_node_id"] = result.pop("node_id", iface_id)
+    return result
+
+
+def _handle_interface_tagged(module, client_factory, blueprint_id):
+    """Handle state=interface_tagged — add or remove tags on an interface.
+
+    Supports both single-interface mode (system_name + interface_name + tags)
+    and batch mode (interfaces list of {system_name, interface_name} with
+    shared tags / tag_state params).
+    """
+    tags = module.params.get("tags")
+    if not tags:
+        module.fail_json(msg="tags is required when state=interface_tagged")
+
+    tag_state = module.params.get("tag_state") or "present"
+    interfaces = module.params.get("interfaces")
+
+    if interfaces:
+        # Batch mode: apply same tags/tag_state to all listed interfaces
+        results = []
+        any_changed = False
+        for entry in interfaces:
+            sys_name = entry.get("system_name")
+            if_name = entry.get("interface_name")
+            if not sys_name or not if_name:
+                module.fail_json(
+                    msg=(
+                        "Each entry in 'interfaces' must have "
+                        "system_name and interface_name"
+                    )
+                )
+            iface = find_interface_node(client_factory, blueprint_id, sys_name, if_name)
+            if iface is None:
+                module.fail_json(
+                    msg=(
+                        f"Interface '{if_name}' not found on system '{sys_name}' "
+                        f"in blueprint '{blueprint_id}'"
+                    )
+                )
+            r = set_interface_tags(
+                client_factory, blueprint_id, iface["id"], tags, state=tag_state
+            )
+            if r.get("changed"):
+                any_changed = True
+            results.append(
+                {
+                    "system_name": sys_name,
+                    "interface_name": if_name,
+                    "changed": r.get("changed", False),
+                    "interface_node_id": r.get("node_id", iface["id"]),
+                    "interface_tags": r.get("tags", []),
+                }
+            )
+        return dict(
+            changed=any_changed,
+            interfaces=results,
+            msg=f"Tagged {len(interfaces)} interface(s)",
+        )
+
+    # Single-interface mode (backward compatible)
+    iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
+    result = set_interface_tags(
+        client_factory, blueprint_id, iface_id, tags, state=tag_state
+    )
+    result["interface_node_id"] = result.pop("node_id", iface_id)
+    result["interface_tags"] = result.pop("tags", [])
+    return result
+
+
+def _handle_lag_updated(module, client_factory, blueprint_id):
+    """Handle state=lag_updated — set lag_mode on a port-channel interface."""
+    lag_mode = module.params.get("lag_mode")
+    if not lag_mode:
+        module.fail_json(msg="lag_mode is required when state=lag_updated")
+
+    port_channel_id = module.params.get("port_channel_id")
+    iface_id = _resolve_interface_node_id(module, client_factory, blueprint_id)
+    result = set_lag_mode(
+        client_factory,
+        blueprint_id,
+        iface_id,
+        lag_mode,
+        port_channel_id=port_channel_id,
+    )
+    result["interface_node_id"] = result.pop("node_id", iface_id)
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1261,6 +1856,10 @@ def main():
                 "node_updated",
                 "rack_added",
                 "rack_deleted",
+                "commit_check",
+                "interface_updated",
+                "interface_tagged",
+                "lag_updated",
             ],
             default="present",
         ),
@@ -1302,6 +1901,23 @@ def main():
         hostname=dict(type="str", required=False),
         node_label=dict(type="str", required=False, aliases=["rack_label"]),
         node_properties=dict(type="dict", required=False),
+        # Commit check params (state=commit_check)
+        include_warnings=dict(type="bool", required=False, default=True),
+        # Interface management params (state=interface_updated / interface_tagged / lag_updated)
+        system_name=dict(type="str", required=False),
+        interface_name=dict(type="str", required=False),
+        admin_state=dict(type="str", required=False, choices=["up", "down"]),
+        interfaces=dict(type="list", elements="dict", required=False),
+        tags=dict(type="list", elements="str", required=False),
+        tag_state=dict(
+            type="str", required=False, choices=["present", "absent"], default="present"
+        ),
+        lag_mode=dict(
+            type="str",
+            required=False,
+            choices=["lacp_active", "lacp_passive", "static_lag", "none"],
+        ),
+        port_channel_id=dict(type="int", required=False),
     )
     client_module_args = apstra_client_module_args()
     module_args = client_module_args | blueprint_module_args
@@ -1366,6 +1982,40 @@ def main():
             if not blueprint_id:
                 module.fail_json(msg="id.blueprint is required when state=rack_deleted")
             result = _handle_rack_deleted(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=commit_check ────────────────────────────────────
+        if state == "commit_check":
+            if not blueprint_id:
+                module.fail_json(msg="id.blueprint is required when state=commit_check")
+            result = _handle_commit_check(module, client_factory, blueprint_id)
+
+        # ── state=interface_updated ───────────────────────────────
+        if state == "interface_updated":
+            if not blueprint_id:
+                module.fail_json(
+                    msg="id.blueprint is required when state=interface_updated"
+                )
+            result = _handle_interface_updated(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=interface_tagged ────────────────────────────────
+        if state == "interface_tagged":
+            if not blueprint_id:
+                module.fail_json(
+                    msg="id.blueprint is required when state=interface_tagged"
+                )
+            result = _handle_interface_tagged(module, client_factory, blueprint_id)
+            module.exit_json(**result)
+            return
+
+        # ── state=lag_updated ─────────────────────────────────────
+        if state == "lag_updated":
+            if not blueprint_id:
+                module.fail_json(msg="id.blueprint is required when state=lag_updated")
+            result = _handle_lag_updated(module, client_factory, blueprint_id)
             module.exit_json(**result)
             return
 

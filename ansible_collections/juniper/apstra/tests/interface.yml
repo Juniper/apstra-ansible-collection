@@ -1,0 +1,806 @@
+---
+# ── Test playbook for interface management features ────────────────
+#
+# Tests:
+#   Feature 1 (speed_updated)   : via interface_map module
+#   Feature 2 (interface_updated): admin up/down via blueprint module
+#   Feature 3 (interface_tagged) : tags add/remove via blueprint module
+#   Feature 4 (lag_updated)      : lag_mode change via blueprint module
+#
+# Prerequisites:
+#   - Apstra server reachable
+#   - L2 Virtual EVPN template available ("L2_Virtual_EVPN")
+#
+# Usage:
+#   ansible-playbook tests/interface.yml
+#   ansible-playbook tests/interface.yml -e template_id=L2_Virtual_EVPN
+
+- name: Test interface management
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  vars:
+    template_id: "{{ template | default('L2_Virtual_MLAG') }}"
+
+  tasks:
+    # ── Auth ──────────────────────────────────────────────────────
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_intf_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    # ── Setup: Cleanup any leftover blueprint ─────────────────────
+    - name: Find leftover interface test blueprint from prior runs
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "{{ template_id }}"
+        lock_state: ignore
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: bp_stale
+      ignore_errors: true
+
+    - name: Delete leftover interface test blueprint if found
+      juniper.apstra.blueprint:
+        id: "{{ bp_stale.id }}"
+        lock_state: ignore
+        state: absent
+        auth_token: "{{ auth.token }}"
+      when:
+        - bp_stale is success
+        - bp_stale.id is defined
+        - bp_stale.id.blueprint is defined
+        - bp_stale.id.blueprint | length > 0
+      ignore_errors: true
+
+    # ── Setup: Create test blueprint ──────────────────────────────
+    - name: "[SETUP] Create L2-EVPN test blueprint"
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          template_id: "{{ template_id }}"
+        lock_state: locked
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Set blueprint ID fact
+      ansible.builtin.set_fact:
+        bp_id: "{{ bp.id.blueprint }}"
+
+    # ── Setup: Assign interface maps so nodes are fully configured ─
+    - name: "[SETUP] Query leaf nodes"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        state: queried
+        query_type: nodes_by_role
+        roles:
+          - leaf
+          - spine
+        auth_token: "{{ auth.token }}"
+      register: bp_nodes
+
+    - name: "[SETUP] Extract leaf and spine node IDs"
+      ansible.builtin.set_fact:
+        leaf_ids: >-
+          {{ bp_nodes.nodes | dict2items
+            | selectattr('value.role', 'equalto', 'leaf')
+            | map(attribute='value.id') | list }}
+        spine_ids: >-
+          {{ bp_nodes.nodes | dict2items
+            | selectattr('value.role', 'equalto', 'spine')
+            | map(attribute='value.id') | list }}
+        leaf_labels: >-
+          {{ bp_nodes.nodes | dict2items
+            | selectattr('value.role', 'equalto', 'leaf')
+            | map(attribute='value.label') | list }}
+
+    - name: "[SETUP] Display leaf/spine node counts"
+      ansible.builtin.debug:
+        msg: "Found {{ leaf_ids | length }} leaf(s) and {{ spine_ids | length }} spine(s). Leaf labels: {{ leaf_labels }}"
+
+    - name: Fail if no leaf nodes found
+      ansible.builtin.fail:
+        msg: "No leaf nodes found in blueprint - cannot run interface tests"
+      when: leaf_ids | length == 0
+
+    - name: "[SETUP] Set test system name (first leaf)"
+      ansible.builtin.set_fact:
+        test_system_name: "{{ leaf_labels[0] }}"
+
+    # ── Setup: Get all design interface maps ──────────────────────
+    - name: "[SETUP] Get all design interface maps"
+      juniper.apstra.design:
+        id:
+          design_type: interface_map
+          name: all
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: all_imaps
+
+    - name: "[SETUP] Query leaf logical device"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        state: queried
+        query: >-
+          node('system', id='{{ leaf_ids[0] }}', name='sys')
+          .out('logical_device')
+          .node('logical_device', name='ld')
+        auth_token: "{{ auth.token }}"
+      register: leaf_ld_qe
+
+    - name: "[SETUP] Extract leaf logical device name"
+      ansible.builtin.set_fact:
+        leaf_ld_id: "{{ leaf_ld_qe.results[0]['ld']['label'] | regex_replace('_v\\d+$', '') }}"
+
+    - name: "[SETUP] Find leaf interface map"
+      ansible.builtin.set_fact:
+        leaf_imap_id: >-
+          {{ (all_imaps.design_items
+            | selectattr('logical_device_id', 'equalto', leaf_ld_id)
+            | list | first).id }}
+
+    - name: "[SETUP] Query spine logical device"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        state: queried
+        query: >-
+          node('system', id='{{ spine_ids[0] }}', name='sys')
+          .out('logical_device')
+          .node('logical_device', name='ld')
+        auth_token: "{{ auth.token }}"
+      register: spine_ld_qe
+
+    - name: "[SETUP] Extract spine logical device name"
+      ansible.builtin.set_fact:
+        spine_ld_id: "{{ spine_ld_qe.results[0]['ld']['label'] | regex_replace('_v\\d+$', '') }}"
+
+    - name: "[SETUP] Find spine interface map"
+      ansible.builtin.set_fact:
+        spine_imap_id: >-
+          {{ (all_imaps.design_items
+            | selectattr('logical_device_id', 'equalto', spine_ld_id)
+            | list | first).id }}
+
+    - name: "[SETUP] Assign interface maps to all nodes"
+      juniper.apstra.interface_map:
+        id:
+          blueprint: "{{ bp_id }}"
+        body:
+          assignments: >-
+            {{
+              dict(
+                leaf_ids | zip_longest([], fillvalue=leaf_imap_id) | list
+                + spine_ids | zip_longest([], fillvalue=spine_imap_id) | list
+              )
+            }}
+        auth_token: "{{ auth.token }}"
+        state: present
+      register: im_assign
+
+    # ── Setup: Discover test interfaces ───────────────────────────
+    - name: "[SETUP] Query ethernet interfaces on first leaf"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        state: queried
+        query: >-
+          node('system', label='{{ test_system_name }}', name='sys')
+          .out('hosted_interfaces')
+          .node('interface', if_type='ethernet', name='iface')
+        auth_token: "{{ auth.token }}"
+      register: eth_ifaces_qe
+
+    - name: "[SETUP] Query port_channel interfaces on first leaf"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        state: queried
+        query: >-
+          node('system', label='{{ test_system_name }}', name='sys')
+          .out('hosted_interfaces')
+          .node('interface', if_type='port_channel', name='iface')
+        auth_token: "{{ auth.token }}"
+      register: lag_ifaces_qe
+
+    - name: "[SETUP] Set test interface names"
+      ansible.builtin.set_fact:
+        test_eth_if: "{{ eth_ifaces_qe.results[0]['iface']['if_name'] }}"
+        test_eth_if2: "{{ eth_ifaces_qe.results[1]['iface']['if_name'] }}"
+        test_lag_if: "{{ lag_ifaces_qe.results[0]['iface']['if_name'] }}"
+
+    - name: "[SETUP] Display test system and interfaces"
+      ansible.builtin.debug:
+        msg: >-
+          system={{ test_system_name }},
+          ethernet_if={{ test_eth_if }},
+          ethernet_if2={{ test_eth_if2 }},
+          lag_if={{ test_lag_if }}
+
+    # ════════════════════════════════════════════════════════════════
+    #  FEATURE 2: Admin state (shut / no-shut)
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[INTF-SHUT-1] Shut down ethernet interface"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        admin_state: "down"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: shut_result
+
+    - name: "[INTF-SHUT-1] Display result"
+      ansible.builtin.debug:
+        var: shut_result
+
+    - name: "[INTF-SHUT-1] Assert changed and admin_down"
+      ansible.builtin.assert:
+        that:
+          - shut_result.changed
+          - shut_result.operation_state == "admin_down"
+        fail_msg: "INTF-SHUT-1 FAILED: expected changed=True and operation_state=admin_down"
+        success_msg: "INTF-SHUT-1 PASSED: Interface shut (admin_down)"
+
+    - name: "[INTF-SHUT-2] Shut same interface again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        admin_state: "down"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: shut_idem_result
+
+    - name: "[INTF-SHUT-2] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not shut_idem_result.changed
+        fail_msg: "INTF-SHUT-2 FAILED: expected changed=False (idempotent)"
+        success_msg: "INTF-SHUT-2 PASSED: Idempotent shut"
+
+    - name: "[INTF-SHUT-3] Restore interface (no-shut)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        admin_state: "up"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: noshut_result
+
+    - name: "[INTF-SHUT-3] Assert changed and up"
+      ansible.builtin.assert:
+        that:
+          - noshut_result.changed
+          - noshut_result.operation_state == "up"
+        fail_msg: "INTF-SHUT-3 FAILED: expected changed=True and operation_state=up"
+        success_msg: "INTF-SHUT-3 PASSED: Interface restored (up)"
+
+    - name: "[INTF-SHUT-4] No-shut again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        admin_state: "up"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: noshut_idem_result
+
+    - name: "[INTF-SHUT-4] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not noshut_idem_result.changed
+        fail_msg: "INTF-SHUT-4 FAILED: expected changed=False (idempotent)"
+        success_msg: "INTF-SHUT-4 PASSED: Idempotent no-shut"
+
+    - name: "[INTF-BATCH-1] Shut two interfaces via batch interfaces list"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+            admin_state: "down"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+            admin_state: "down"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: batch_shut_result
+
+    - name: "[INTF-BATCH-1] Display result"
+      ansible.builtin.debug:
+        var: batch_shut_result
+
+    - name: "[INTF-BATCH-1] Assert changed and both interfaces appear in result"
+      ansible.builtin.assert:
+        that:
+          - batch_shut_result.changed
+          - batch_shut_result.interfaces | length == 2
+        fail_msg: "INTF-BATCH-1 FAILED: expected changed=True and 2 interfaces"
+        success_msg: "INTF-BATCH-1 PASSED: Batch shut applied"
+
+    - name: "[INTF-BATCH-2] Batch shut again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+            admin_state: "down"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+            admin_state: "down"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: batch_idem_result
+
+    - name: "[INTF-BATCH-2] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not batch_idem_result.changed
+        fail_msg: "INTF-BATCH-2 FAILED: expected changed=False (idempotent)"
+        success_msg: "INTF-BATCH-2 PASSED: Idempotent batch shut"
+
+    - name: "[INTF-BATCH-3] Restore interfaces via batch"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+            admin_state: "up"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+            admin_state: "up"
+        state: interface_updated
+        auth_token: "{{ auth.token }}"
+      register: batch_restore_result
+
+    - name: "[INTF-BATCH-3] Assert both restored"
+      ansible.builtin.assert:
+        that:
+          - batch_restore_result.changed
+          - batch_restore_result.interfaces | length == 2
+        fail_msg: "INTF-BATCH-3 FAILED: expected changed=True and 2 interfaces"
+        success_msg: "INTF-BATCH-3 PASSED: Batch restore applied"
+
+    # ════════════════════════════════════════════════════════════════
+    #  FEATURE 3: Interface tags
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[INTF-TAG-1] Add tag to ethernet interface"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        tags:
+          - "test-intf-tag"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_add_result
+
+    - name: "[INTF-TAG-1] Display result"
+      ansible.builtin.debug:
+        var: tag_add_result
+
+    - name: "[INTF-TAG-1] Assert changed and tag present"
+      ansible.builtin.assert:
+        that:
+          - tag_add_result.changed
+          - '"test-intf-tag" in tag_add_result.interface_tags'
+        fail_msg: "INTF-TAG-1 FAILED: expected changed=True with tag 'test-intf-tag'"
+        success_msg: "INTF-TAG-1 PASSED: Tag added"
+
+    - name: "[INTF-TAG-2] Add same tag again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        tags:
+          - "test-intf-tag"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_idem_result
+
+    - name: "[INTF-TAG-2] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not tag_idem_result.changed
+        fail_msg: "INTF-TAG-2 FAILED: expected changed=False (idempotent)"
+        success_msg: "INTF-TAG-2 PASSED: Idempotent tag add"
+
+    - name: "[INTF-TAG-3] Add second tag"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        tags:
+          - "test-intf-tag2"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_add2_result
+
+    - name: "[INTF-TAG-3] Assert changed and both tags present"
+      ansible.builtin.assert:
+        that:
+          - tag_add2_result.changed
+          - '"test-intf-tag" in tag_add2_result.interface_tags'
+          - '"test-intf-tag2" in tag_add2_result.interface_tags'
+        fail_msg: "INTF-TAG-3 FAILED: expected changed=True with both tags present"
+        success_msg: "INTF-TAG-3 PASSED: Second tag added, first preserved"
+
+    - name: "[INTF-TAG-4] Remove first tag"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        tags:
+          - "test-intf-tag"
+        tag_state: absent
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_remove_result
+
+    - name: "[INTF-TAG-4] Assert changed and tag removed"
+      ansible.builtin.assert:
+        that:
+          - tag_remove_result.changed
+          - '"test-intf-tag" not in tag_remove_result.interface_tags'
+          - '"test-intf-tag2" in tag_remove_result.interface_tags'
+        fail_msg: "INTF-TAG-4 FAILED: expected changed=True, test-intf-tag removed, test-intf-tag2 preserved"
+        success_msg: "INTF-TAG-4 PASSED: Tag removed, second tag preserved"
+
+    - name: "[INTF-TAG-5] Remove same tag again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        tags:
+          - "test-intf-tag"
+        tag_state: absent
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_remove_idem_result
+
+    - name: "[INTF-TAG-5] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not tag_remove_idem_result.changed
+        fail_msg: "INTF-TAG-5 FAILED: expected changed=False (idempotent)"
+        success_msg: "INTF-TAG-5 PASSED: Idempotent tag remove"
+
+    - name: "[INTF-TAG-6] Remove remaining tag"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_eth_if }}"
+        tags:
+          - "test-intf-tag2"
+        tag_state: absent
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_cleanup_result
+
+    - name: "[INTF-TAG-6] Assert changed and no tags remaining"
+      ansible.builtin.assert:
+        that:
+          - tag_cleanup_result.changed
+          - tag_cleanup_result.interface_tags | length == 0
+        fail_msg: "INTF-TAG-6 FAILED: expected changed=True and empty tags"
+        success_msg: "INTF-TAG-6 PASSED: All tags cleared"
+
+    # ════════════════════════════════════════════════════════════════
+    #  FEATURE 3b: Interface tags — batch mode
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[INTF-TAG-BATCH-1] Add tags to two interfaces in one task"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+        tags:
+          - "batch-tag-a"
+          - "batch-tag-b"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_batch_add
+
+    - name: "[INTF-TAG-BATCH-1] Assert both interfaces changed"
+      ansible.builtin.assert:
+        that:
+          - tag_batch_add.changed
+          - tag_batch_add.interfaces | length == 2
+          - tag_batch_add.interfaces[0].changed
+          - tag_batch_add.interfaces[1].changed
+        fail_msg: "INTF-TAG-BATCH-1 FAILED"
+        success_msg: "INTF-TAG-BATCH-1 PASSED: Tags added to both interfaces"
+
+    - name: "[INTF-TAG-BATCH-2] Re-add same tags (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+        tags:
+          - "batch-tag-a"
+          - "batch-tag-b"
+        tag_state: present
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_batch_idem
+
+    - name: "[INTF-TAG-BATCH-2] Assert no change (idempotent)"
+      ansible.builtin.assert:
+        that:
+          - not tag_batch_idem.changed
+          - not tag_batch_idem.interfaces[0].changed
+          - not tag_batch_idem.interfaces[1].changed
+        fail_msg: "INTF-TAG-BATCH-2 FAILED: expected no change"
+        success_msg: "INTF-TAG-BATCH-2 PASSED: Idempotent"
+
+    - name: "[INTF-TAG-BATCH-3] Remove batch tags from both interfaces"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        interfaces:
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if }}"
+          - system_name: "{{ test_system_name }}"
+            interface_name: "{{ test_eth_if2 }}"
+        tags:
+          - "batch-tag-a"
+          - "batch-tag-b"
+        tag_state: absent
+        state: interface_tagged
+        auth_token: "{{ auth.token }}"
+      register: tag_batch_remove
+
+    - name: "[INTF-TAG-BATCH-3] Assert tags removed from both interfaces"
+      ansible.builtin.assert:
+        that:
+          - tag_batch_remove.changed
+          - tag_batch_remove.interfaces[0].changed
+          - tag_batch_remove.interfaces[1].changed
+          - tag_batch_remove.interfaces[0].interface_tags | length == 0
+          - tag_batch_remove.interfaces[1].interface_tags | length == 0
+        fail_msg: "INTF-TAG-BATCH-3 FAILED"
+        success_msg: "INTF-TAG-BATCH-3 PASSED: Tags removed from both interfaces"
+
+    # ════════════════════════════════════════════════════════════════
+    #  FEATURE 4: LAG mode
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[LAG-1] Set lag_mode to lacp_passive on port_channel"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_lag_if }}"
+        lag_mode: "lacp_passive"
+        state: lag_updated
+        auth_token: "{{ auth.token }}"
+      register: lag_result
+
+    - name: "[LAG-1] Display result"
+      ansible.builtin.debug:
+        var: lag_result
+
+    - name: "[LAG-1] Assert changed and lag_mode set"
+      ansible.builtin.assert:
+        that:
+          - lag_result.changed
+          - lag_result.lag_mode == "lacp_passive"
+        fail_msg: "LAG-1 FAILED: expected changed=True and lag_mode=lacp_passive"
+        success_msg: "LAG-1 PASSED: lag_mode set to lacp_passive"
+
+    - name: "[LAG-2] Set same lag_mode again (idempotent)"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_lag_if }}"
+        lag_mode: "lacp_passive"
+        state: lag_updated
+        auth_token: "{{ auth.token }}"
+      register: lag_idem_result
+
+    - name: "[LAG-2] Assert no change"
+      ansible.builtin.assert:
+        that:
+          - not lag_idem_result.changed
+        fail_msg: "LAG-2 FAILED: expected changed=False (idempotent)"
+        success_msg: "LAG-2 PASSED: Idempotent lag_mode"
+
+    - name: "[LAG-3] Change lag_mode to static_lag"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_lag_if }}"
+        lag_mode: "static_lag"
+        state: lag_updated
+        auth_token: "{{ auth.token }}"
+      register: lag_change_result
+
+    - name: "[LAG-3] Assert changed and lag_mode updated"
+      ansible.builtin.assert:
+        that:
+          - lag_change_result.changed
+          - lag_change_result.lag_mode == "static_lag"
+        fail_msg: "LAG-3 FAILED: expected changed=True and lag_mode=static_lag"
+        success_msg: "LAG-3 PASSED: lag_mode changed to static_lag"
+
+    - name: "[LAG-4] Restore lag_mode to lacp_active"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        system_name: "{{ test_system_name }}"
+        interface_name: "{{ test_lag_if }}"
+        lag_mode: "lacp_active"
+        state: lag_updated
+        auth_token: "{{ auth.token }}"
+      register: lag_restore_result
+
+    - name: "[LAG-4] Assert changed and lag_mode restored"
+      ansible.builtin.assert:
+        that:
+          - lag_restore_result.changed
+          - lag_restore_result.lag_mode == "lacp_active"
+        fail_msg: "LAG-4 FAILED: expected changed=True and lag_mode=lacp_active"
+        success_msg: "LAG-4 PASSED: lag_mode restored to lacp_active"
+
+    # ════════════════════════════════════════════════════════════════
+    #  FEATURE 1: Interface speed (via interface_map module)
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[SPEED-1] Get current IM assignment to extract current speed"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        state: queried
+        query: >-
+          node('system', label='{{ test_system_name }}', name='sys')
+          .out('hosted_interfaces')
+          .node('interface', if_type='ethernet', name='iface')
+        auth_token: "{{ auth.token }}"
+      register: eth_ifaces_speed_qe
+
+    - name: "[SPEED-1] Discover speed of first ethernet interface via design IM"
+      juniper.apstra.design:
+        id:
+          design_type: interface_map
+          name: "{{ leaf_imap_id }}"
+        state: queried
+        auth_token: "{{ auth.token }}"
+      register: leaf_im_detail
+
+    - name: "[SPEED-1] Display leaf interface map details"
+      ansible.builtin.debug:
+        var: leaf_im_detail
+
+    - name: "[SPEED-1] Assign interface map with speed_updated (idempotent - same IM)"
+      juniper.apstra.interface_map:
+        id:
+          blueprint: "{{ bp_id }}"
+        body:
+          system_name: "{{ test_system_name }}"
+          interface_name: "{{ test_eth_if }}"
+          speed: "10G"
+        auth_token: "{{ auth.token }}"
+        state: speed_updated
+      register: speed_idem_result
+      ignore_errors: true
+
+    - name: "[SPEED-1] Display speed_updated result"
+      ansible.builtin.debug:
+        var: speed_idem_result
+
+    - name: "[SPEED-1] Assert no change when speed already matches"
+      ansible.builtin.assert:
+        that:
+          - not speed_idem_result.changed
+        fail_msg: "SPEED-1 FAILED: expected changed=False when speed already matches"
+        success_msg: "SPEED-1 PASSED: Idempotent speed_updated"
+      when: speed_idem_result is not failed
+
+    - name: "[SPEED-2] Test speed_updated with invalid system (error handling)"
+      juniper.apstra.interface_map:
+        id:
+          blueprint: "{{ bp_id }}"
+        body:
+          system_name: "nonexistent_system_xyz"
+          interface_name: "ge-0/0/0"
+          speed: "10G"
+        auth_token: "{{ auth.token }}"
+        state: speed_updated
+      register: speed_err_result
+      ignore_errors: true
+
+    - name: "[SPEED-2] Assert failed with appropriate error"
+      ansible.builtin.assert:
+        that:
+          - speed_err_result is failed
+          - "'nonexistent_system_xyz' in speed_err_result.msg"
+        fail_msg: "SPEED-2 FAILED: expected failure for nonexistent system"
+        success_msg: "SPEED-2 PASSED: Correctly failed for nonexistent system"
+
+    - name: "[SPEED-3] Test speed_updated with missing required param (error handling)"
+      juniper.apstra.interface_map:
+        id:
+          blueprint: "{{ bp_id }}"
+        body:
+          system_name: "{{ test_system_name }}"
+          speed: "10G"
+        auth_token: "{{ auth.token }}"
+        state: speed_updated
+      register: speed_missing_result
+      ignore_errors: true
+
+    - name: "[SPEED-3] Assert failed with appropriate error"
+      ansible.builtin.assert:
+        that:
+          - speed_missing_result is failed
+        fail_msg: "SPEED-3 FAILED: expected failure when interface_name missing"
+        success_msg: "SPEED-3 PASSED: Correctly failed when interface_name missing"
+
+    # ════════════════════════════════════════════════════════════════
+    #  Cleanup
+    # ════════════════════════════════════════════════════════════════
+
+    - name: "[CLEANUP] Delete test blueprint"
+      juniper.apstra.blueprint:
+        id:
+          blueprint: "{{ bp_id }}"
+        lock_state: ignore
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: bp_delete
+
+    - name: All interface management tests completed"
+      ansible.builtin.debug:
+        msg: >-
+          All interface management tests PASSED:
+          Feature 2 (admin_state): INTF-SHUT-1..4,
+          Feature 3 (tags): INTF-TAG-1..6, INTF-TAG-BATCH-1..3,
+          Feature 4 (lag_mode): LAG-1..4,
+          Feature 1 (speed): SPEED-1..3

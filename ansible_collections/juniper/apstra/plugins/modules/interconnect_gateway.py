@@ -546,6 +546,23 @@ def _run_domain(module, client_factory, result):
                     get_interconnect_domain(client_factory, blueprint_id, domain_id)
                     or {}
                 )
+
+                # Merge user-specified VNs/security-zones with existing
+                # ones so that a PATCH for new entries does not remove
+                # previously configured entries.  User-specified values
+                # override existing ones for the same key.
+                _MERGE_KEYS = (
+                    "interconnect_virtual_networks",
+                    "interconnect_security_zones",
+                )
+                for mk in _MERGE_KEYS:
+                    if mk in patch_payload and isinstance(patch_payload[mk], dict):
+                        existing = cur.get(mk, {})
+                        if isinstance(existing, dict):
+                            merged = dict(existing)
+                            merged.update(patch_payload[mk])
+                            patch_payload[mk] = merged
+
                 needs_patch = False
                 for k, desired in patch_payload.items():
                     current = cur.get(k, {})
