@@ -13,8 +13,8 @@
 
 .. Title
 
-juniper.apstra.security_zone module -- Manage security zones in Apstra
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+juniper.apstra.security_zone module -- Manage security zones and tenants in Apstra
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 .. Collection note
 
@@ -47,6 +47,9 @@ Synopsis
 .. Description
 
 - This module allows you to create, update, and delete security zones in Apstra.
+- Supports managing Tenant objects that group routing zones (security zones) under a label.
+- Supports bulk tenant operations via the ``tenants`` parameter.
+- Supports tenant-centric parameter aliases (``tenant_label``, ``tenant_description``) for VRF management.
 
 
 .. Aliases
@@ -178,7 +181,75 @@ Parameters
 
         <div class="ansible-option-cell">
 
-      Dictionary containing the security zone object details.
+      Dictionary containing the security zone object details. Tenant-centric aliases are supported (e.g. ``tenant_label`` maps to ``label``, ``tenant_description`` maps to ``vrf_description``).
+
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-tenant"></div>
+
+      .. _ansible_collections.juniper.apstra.security_zone_module__parameter-tenant:
+
+      .. rst-class:: ansible-option-title
+
+      **tenant**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-tenant" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      A single tenant definition for managing an Apstra Tenant object. A Tenant groups routing zones (security zones) under a label. Required key: ``label``. Optional key: ``routing_zones`` (list of security zone IDs or labels to assign). Mutually exclusive with ``body`` and ``tenants``.
+
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-tenants"></div>
+
+      .. _ansible_collections.juniper.apstra.security_zone_module__parameter-tenants:
+
+      .. rst-class:: ansible-option-title
+
+      **tenants**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-tenants" title="Permalink to this option"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`list` / :ansible-option-elements:`elements=dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      List of tenant definitions for bulk operations. Each entry is a dict with ``label`` and optional ``routing_zones``. A per-tenant ``state`` key (present/absent) can override the top-level ``state``. Mutually exclusive with ``body`` and ``tenant``.
 
 
       .. raw:: html
@@ -284,7 +355,7 @@ Parameters
 
         <div class="ansible-option-cell">
 
-      Desired state of the security zone.
+      Desired state of the security zone or tenant. Use ``list`` to enumerate all security zones and tenants.
 
 
       .. rst-class:: ansible-option-line
@@ -293,6 +364,7 @@ Parameters
 
       - :ansible-option-choices-entry-default:`"present"` :ansible-option-choices-default-mark:`← (default)`
       - :ansible-option-choices-entry:`"absent"`
+      - :ansible-option-choices-entry:`"list"`
 
 
       .. raw:: html
@@ -465,6 +537,58 @@ Examples
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
           security_zone: "AjAuUuVLylXCUgAqaQ"
         state: absent
+
+    - name: Create a security zone using tenant-centric aliases
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        body:
+          tenant_label: "web-tier"
+          tenant_description: "Web tier VRF"
+          vni_id: 10001
+          sz_type: "evpn"
+        state: present
+
+    - name: List all security zones and tenants in a blueprint
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        state: list
+
+    - name: Create a single tenant with routing zones
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        tenant:
+          label: "production"
+          routing_zones:
+            - "web-tier"
+            - "app-tier"
+        state: present
+
+    - name: Delete a tenant
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        tenant:
+          label: "production"
+        state: absent
+
+    - name: Bulk create/update/delete tenants
+      juniper.apstra.security_zone:
+        id:
+          blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
+        tenants:
+          - label: "production"
+            routing_zones:
+              - "web-tier"
+              - "app-tier"
+          - label: "staging"
+            routing_zones:
+              - "db-tier"
+          - label: "old-tenant"
+            state: absent
+        state: present
 
 
 
@@ -776,6 +900,136 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
       .. rst-class:: ansible-option-sample
 
       :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`["red", "blue"]`
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-security_zones"></div>
+
+      .. _ansible_collections.juniper.apstra.security_zone_module__return-security_zones:
+
+      .. rst-class:: ansible-option-title
+
+      **security_zones**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-security_zones" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`list` / :ansible-option-elements:`elements=dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      List of all security zones in the blueprint.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when state is list
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-tenants"></div>
+
+      .. _ansible_collections.juniper.apstra.security_zone_module__return-tenants:
+
+      .. rst-class:: ansible-option-title
+
+      **tenants**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-tenants" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`list` / :ansible-option-elements:`elements=dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Results of bulk tenant operations, or list of all tenants when state is list.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when tenants/tenant parameter is used, or state is list
+
+      .. rst-class:: ansible-option-line
+      .. rst-class:: ansible-option-sample
+
+      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`[{"id": "abc123", "label": "production", "application_node_ids": ["sz1", "sz2"]}]`
+
+
+      .. raw:: html
+
+        </div>
+
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="return-tenant"></div>
+
+      .. _ansible_collections.juniper.apstra.security_zone_module__return-tenant:
+
+      .. rst-class:: ansible-option-title
+
+      **tenant**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#return-tenant" title="Permalink to this return value"></a>
+
+      .. ansible-option-type-line::
+
+        :ansible-option-type:`dictionary`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      The tenant object details after single tenant create or update.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-returned-bold:`Returned:` when tenant parameter is used with state present
+
+      .. rst-class:: ansible-option-line
+      .. rst-class:: ansible-option-sample
+
+      :ansible-option-sample-bold:`Sample:` :ansible-rv-sample-value:`{"id": "abc123", "label": "production", "application_node_ids": ["sz1", "sz2"], "lowercased": "production"}`
 
 
       .. raw:: html
