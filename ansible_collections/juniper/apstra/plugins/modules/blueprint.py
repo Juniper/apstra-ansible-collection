@@ -531,8 +531,20 @@ EXAMPLES = """
   juniper.apstra.blueprint:
     id:
       blueprint: "{{ blueprint_id }}"
+    include_warnings: true
     state: commit_check
   register: check_result
+
+- name: Verify commit check output fields
+  ansible.builtin.assert:
+    that:
+      - check_result.changed == false
+      - check_result.errors is defined
+      - check_result.errors_count is defined
+      - check_result.warnings_count is defined
+      - check_result.commit_warnings is defined
+      - check_result.deploy_ready is defined
+      - check_result.diagnostics is defined
 
 # Run commit checks without warnings
 - name: Check for errors only (no warnings)
@@ -541,7 +553,28 @@ EXAMPLES = """
       blueprint: "{{ blueprint_id }}"
     state: commit_check
     include_warnings: false
-  register: check_result
+  register: check_errors_only
+
+- name: Verify warnings are excluded
+  ansible.builtin.assert:
+    that:
+      - check_errors_only.commit_warnings is not defined
+      - check_errors_only.errors is defined
+      - check_errors_only.deploy_ready is defined
+
+# Commit check is read-only/idempotent
+- name: Run commit check again (default include_warnings=true)
+  juniper.apstra.blueprint:
+    id:
+      blueprint: "{{ blueprint_id }}"
+    state: commit_check
+  register: check_again
+
+- name: Verify commit check remains read-only
+  ansible.builtin.assert:
+    that:
+      - check_again.changed == false
+      - check_again.commit_warnings is defined
 """
 
 RETURN = """

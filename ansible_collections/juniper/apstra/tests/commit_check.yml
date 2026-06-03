@@ -53,6 +53,7 @@
           - commit_check_result.errors is defined
           - commit_check_result.errors_count is defined
           - commit_check_result.warnings_count is defined
+          - commit_check_result.commit_warnings is defined
           - commit_check_result.deploy_ready is defined
           - commit_check_result.diagnostics is defined
           - commit_check_result.msg is defined
@@ -77,6 +78,7 @@
         that:
           - commit_check_no_warn.commit_warnings is not defined
           - commit_check_no_warn.errors is defined
+          - commit_check_no_warn.warnings_count is defined
           - commit_check_no_warn.deploy_ready is defined
         fail_msg: "Commit check should not include warnings when include_warnings=false"
 
@@ -93,6 +95,7 @@
       ansible.builtin.assert:
         that:
           - commit_check_again.changed == false
+          - commit_check_again.commit_warnings is defined
         fail_msg: "Commit check should never report changed=true"
 
     # ── Cleanup ───────────────────────────────────────────────────
@@ -107,3 +110,8 @@
     - name: Show delete result
       ansible.builtin.debug:
         var: blueprint_delete
+
+    - name: Logout from Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
