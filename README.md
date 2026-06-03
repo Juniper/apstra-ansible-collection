@@ -193,6 +193,8 @@ The following tools are recommended for development of this collection:
 2. [pipenv](https://pipenv.pypa.io/en/latest/)
 3. [pre-commit](https://github.com/pre-commit/pre-commit)
 
+> **CPU Instruction Set Requirement:** The Ansible Execution Environment image requires a host CPU that supports the **x86-64-v2** microarchitecture level or higher (Intel Nehalem / AMD Bulldozer and later). Attempting to run the image on an older CPU will result in the error: `Fatal glibc error: CPU does not support x86-64-v2`.
+
 ### Setup
 
 #### Mac OS X
