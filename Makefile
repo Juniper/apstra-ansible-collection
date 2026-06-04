@@ -154,9 +154,12 @@ install: build
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
-        test-virtual_infra_manager \
-        test-floating_ip \
-        test-blueprint_config
+  test-blueprint_config \
+  test-virtual_infra_manager \
+  test-floating_ip \
+  test-blueprint_health \
+  test-tenant_management
+  
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -266,6 +269,12 @@ BLUEPRINT_CONFIG_ID ?=
 test-blueprint_config: install
 	@if [ -z "$(BLUEPRINT_CONFIG_ID)" ]; then echo "ERROR: BLUEPRINT_CONFIG_ID is required. Usage: make test-blueprint_config BLUEPRINT_CONFIG_ID=<id>"; exit 1; fi
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_config.yml -e blueprint_id=$(BLUEPRINT_CONFIG_ID)
+  
+test-blueprint_health: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_health.yml
+  
+test-tenant_management: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
 
 test-interconnect_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml
