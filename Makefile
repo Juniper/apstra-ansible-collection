@@ -154,9 +154,11 @@ install: build
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
-        test-virtual_infra_manager \
-        test-floating_ip \
-        test-tenant_management
+  test-virtual_infra_manager \
+  test-floating_ip \
+  test-blueprint_health \
+  test-tenant_management
+  
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -262,6 +264,9 @@ test-virtual_infra_manager: install
 test-floating_ip: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/floating_ip.yml
 
+test-blueprint_health: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_health.yml
+  
 test-tenant_management: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
 
