@@ -154,6 +154,7 @@ install: build
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
+  test-blueprint_config \
   test-virtual_infra_manager \
   test-floating_ip \
   test-blueprint_health \
@@ -264,6 +265,11 @@ test-virtual_infra_manager: install
 test-floating_ip: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/floating_ip.yml
 
+BLUEPRINT_CONFIG_ID ?=
+test-blueprint_config: install
+	@if [ -z "$(BLUEPRINT_CONFIG_ID)" ]; then echo "ERROR: BLUEPRINT_CONFIG_ID is required. Usage: make test-blueprint_config BLUEPRINT_CONFIG_ID=<id>"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_config.yml -e blueprint_id=$(BLUEPRINT_CONFIG_ID)
+  
 test-blueprint_health: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_health.yml
   
