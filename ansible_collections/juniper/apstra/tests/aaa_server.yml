@@ -1,0 +1,190 @@
+---
+- name: Test create/update/delete aaa_server
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_aaa_server_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint
+      juniper.apstra.blueprint:
+        body:
+          template_id: "L2_Virtual_EVPN"
+          design: "two_stage_l3clos"
+          init_type: "template_reference"
+          label: "{{ blueprint_name }}"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp
+
+    - name: Show created blueprint
+      ansible.builtin.debug:
+        var: bp
+
+    # --- Create (radius_dot1x) ---
+    - name: Create a RADIUS 802.1x AAA server
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-1"
+          hostname: "10.1.1.10"
+          key: "topsecret"
+          server_type: "radius_dot1x"
+          auth_port: 1812
+          acct_port: 1813
+        auth_token: "{{ auth.token }}"
+      register: created
+
+    - name: Assert create changed
+      ansible.builtin.assert:
+        that:
+          - created.changed
+          - created.id.aaa_server is defined
+          - created.aaa_server.label == "radius-1"
+          - created.aaa_server.hostname == "10.1.1.10"
+          - "'key' not in created.aaa_server"
+
+    # --- Idempotency: create again with same params ---
+    - name: Create the same AAA server again (no change)
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-1"
+          hostname: "10.1.1.10"
+          key: "topsecret"
+          server_type: "radius_dot1x"
+          auth_port: 1812
+          acct_port: 1813
+        auth_token: "{{ auth.token }}"
+      register: again
+
+    - name: Assert no change on repeat create
+      ansible.builtin.assert:
+        that:
+          - not again.changed
+
+    # --- Update (by label) ---
+    - name: Update the AAA server hostname
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-1"
+          hostname: "10.1.1.11"
+        auth_token: "{{ auth.token }}"
+      register: updated
+
+    - name: Assert update changed
+      ansible.builtin.assert:
+        that:
+          - updated.changed
+          - updated.aaa_server.hostname == "10.1.1.11"
+
+    # --- Update idempotency ---
+    - name: Update the AAA server hostname again (no change)
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-1"
+          hostname: "10.1.1.11"
+        auth_token: "{{ auth.token }}"
+      register: updated_again
+
+    - name: Assert no change on repeat update
+      ansible.builtin.assert:
+        that:
+          - not updated_again.changed
+
+    # --- Create a second server (radius_coa) ---
+    - name: Create a RADIUS CoA AAA server
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-coa-1"
+          hostname: "10.1.1.20"
+          key: "coasecret"
+          server_type: "radius_coa"
+        auth_token: "{{ auth.token }}"
+      register: coa
+
+    - name: Assert CoA server created
+      ansible.builtin.assert:
+        that:
+          - coa.changed
+          - coa.aaa_server.server_type == "radius_coa"
+
+    # --- List ---
+    - name: List all AAA servers
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        state: list
+        auth_token: "{{ auth.token }}"
+      register: listed
+
+    - name: Assert both servers are listed
+      ansible.builtin.assert:
+        that:
+          - listed.aaa_servers | length == 2
+          - listed.aaa_servers | map(attribute='label') | list | sort == ["radius-1", "radius-coa-1"]
+
+    # --- Delete (by label) ---
+    - name: Delete the RADIUS 802.1x server by label
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-1"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: deleted
+
+    - name: Assert delete changed
+      ansible.builtin.assert:
+        that:
+          - deleted.changed
+
+    # --- Delete idempotency ---
+    - name: Delete the same server again (no change)
+      juniper.apstra.aaa_server:
+        id: "{{ bp.id }}"
+        body:
+          label: "radius-1"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: deleted_again
+
+    - name: Assert no change on repeat delete
+      ansible.builtin.assert:
+        that:
+          - not deleted_again.changed
+
+    # --- Delete by ID ---
+    - name: Delete the CoA server by ID
+      juniper.apstra.aaa_server:
+        id: "{{ coa.id }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: deleted_coa
+
+    - name: Assert CoA delete changed
+      ansible.builtin.assert:
+        that:
+          - deleted_coa.changed
+
+    # --- Cleanup ---
+    - name: Delete test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp.id }}"
+        state: absent
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"

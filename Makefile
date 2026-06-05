@@ -129,6 +129,7 @@ install: build
 
 .PHONY: test \
 	test-apstra_facts \
+	test-aaa_server \
 	test-blueprint \
 	test-virtual_network \
 	test-routing_policy \
@@ -159,7 +160,7 @@ install: build
   test-floating_ip \
   test-blueprint_health \
   test-tenant_management
-  
+
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -168,6 +169,9 @@ ANSIBLE_FLAGS ?= -v
 
 test-apstra_facts: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/apstra_facts.yml
+
+test-aaa_server: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/aaa_server.yml
 
 test-blueprint: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint.yml
@@ -269,10 +273,10 @@ BLUEPRINT_CONFIG_ID ?=
 test-blueprint_config: install
 	@if [ -z "$(BLUEPRINT_CONFIG_ID)" ]; then echo "ERROR: BLUEPRINT_CONFIG_ID is required. Usage: make test-blueprint_config BLUEPRINT_CONFIG_ID=<id>"; exit 1; fi
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_config.yml -e blueprint_id=$(BLUEPRINT_CONFIG_ID)
-  
+
 test-blueprint_health: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_health.yml
-  
+
 test-tenant_management: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
 
@@ -362,7 +366,7 @@ delete-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager test-floating_ip
+test: test-apstra_facts test-aaa_server test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager test-floating_ip
 
 # Integration Tests
 .PHONY: test-integration-property_set
