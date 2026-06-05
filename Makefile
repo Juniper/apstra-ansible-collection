@@ -156,7 +156,8 @@ install: build
 	test-cabling_map \
         test-virtual_infra_manager \
         test-floating_ip \
-        test-tenant_management
+        test-tenant_management \
+        test-rbac_user
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -264,6 +265,16 @@ test-floating_ip: install
 
 test-tenant_management: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
+
+# ── rbac_user — platform user CRUD + role assignment ──────────────────────────
+# Full lifecycle test: create → idempotent re-run → update → role replace →
+# password rotation → check-mode delete → delete → no-op delete → admin guard.
+# Credentials come from APSTRA_* env vars (see .env or the authenticate module).
+#
+# Usage:
+#   make test-rbac_user
+test-rbac_user: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_user.yml
 
 test-interconnect_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml
