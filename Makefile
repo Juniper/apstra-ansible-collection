@@ -156,8 +156,8 @@ install: build
 	test-cabling_map \
         test-virtual_infra_manager \
         test-floating_ip \
-        test-tenant_management \
-        test-rbac_user
+	    test-rbac_user \
+	    test-rbac_roles
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -275,6 +275,15 @@ test-tenant_management: install
 #   make test-rbac_user
 test-rbac_user: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_user.yml
+
+# ── rbac_roles — platform role CRUD + user assignment ─────────────────────────
+# Full lifecycle test: create custom role with global/granular/tenant permissions
+# (seeded from built-in role), idempotent re-run, assign role to user, update role,
+# cleanup user and role.
+# Usage:
+#   make test-rbac_roles
+test-rbac_roles: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_roles.yml
 
 test-interconnect_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml

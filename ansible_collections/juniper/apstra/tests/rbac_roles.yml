@@ -1,0 +1,313 @@
+---
+# rbac_roles test for Apstra schema where:
+# - global roles use: permissions: [ ... ]
+# - granular roles use: granular_permissions: [ {scope, permissions:[...]} ]
+
+- name: rbac_roles module CRUD + user assignment test
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    probe_password: "Probe!Pass123"
+
+  tasks:
+    - name: Get local hostname
+      ansible.builtin.command: hostname
+      register: local_hostname
+      changed_when: false
+
+    - name: Set blueprint name fact
+      ansible.builtin.set_fact:
+        blueprint_name: "test_rbac_roles_{{ local_hostname.stdout }}"
+
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Create blueprint for testing
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp_create
+
+    - name: Pick unique role/user names
+      ansible.builtin.set_fact:
+        role_global_name: "ansible_role_global"
+        role_granular_name: "ansible_role_granular"
+        role_user_name: "ansible_role_user"
+        role_scope_blueprint_id: "{{ bp_create.id.blueprint }}"
+
+    # -------------------------
+    # GLOBAL ROLE CRUD
+    # -------------------------
+    - name: Create global role (read only)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+          type: "global"
+          label: "{{ role_global_name }}"
+          description: "global role create"
+          permissions:
+            - "core.blueprints.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: g_create
+
+    - name: Assert global role created
+      ansible.builtin.assert:
+        that:
+          - g_create.changed
+          - g_create.role.role == role_global_name
+          - "'core.blueprints.read' in g_create.role.permissions"
+
+    - name: Re-run global role create body (idempotent)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+          type: "global"
+          label: "{{ role_global_name }}"
+          description: "global role create"
+          permissions:
+            - "core.blueprints.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: g_noop
+
+    - name: Assert global role idempotent
+      ansible.builtin.assert:
+        that:
+          - not g_noop.changed
+
+    - name: Update global role options (add write)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+          type: "global"
+          description: "global role update"
+          permissions:
+            - "core.blueprints.read"
+            - "core.blueprints.write"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: g_update
+
+    - name: Assert global role updated
+      ansible.builtin.assert:
+        that:
+          - g_update.changed
+          - "'core.blueprints.write' in g_update.role.permissions"
+
+    # -------------------------
+    # GRANULAR ROLE CRUD
+    # -------------------------
+    - name: Create granular role (all blueprints read)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+          type: "granular"
+          label: "{{ role_granular_name }}"
+          description: "granular role create"
+          granular_permissions:
+            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+              permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_create
+
+    - name: Assert granular role created
+      ansible.builtin.assert:
+        that:
+          - gr_create.changed
+          - gr_create.role.role == role_granular_name
+          - gr_create.role.granular_permissions | length > 0
+          - role_scope_blueprint_id in gr_create.role.granular_permissions[0].scope
+
+    - name: Re-run granular role create body (idempotent)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+          type: "granular"
+          granular_permissions:
+            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+              permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_noop
+
+    - name: Assert granular role idempotent
+      ansible.builtin.assert:
+        that:
+          - not gr_noop.changed
+
+    - name: Update granular role options (add write)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+          type: "granular"
+          description: "granular role update"
+          granular_permissions:
+            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+              permissions:
+                - "rbac.blueprint.read"
+                - "rbac.blueprint.write"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_update
+
+    - name: Assert granular role updated
+      ansible.builtin.assert:
+        that:
+          - gr_update.changed
+          - gr_update.role.granular_permissions | length > 0
+          - "'rbac.blueprint.write' in gr_update.role.granular_permissions[0].permissions"
+
+    # -------------------------
+    # USER ROLE ASSIGNMENT
+    # -------------------------
+    - name: Create user with global role
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ role_user_name }}"
+          password: "{{ probe_password }}"
+          roles:
+            - "{{ role_global_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: u_create
+
+    - name: Assert user created and role assigned
+      ansible.builtin.assert:
+        that:
+          - u_create.changed
+          - u_create.user.username == role_user_name
+          - role_global_name in u_create.user.roles
+
+    - name: Move user to granular role
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ role_user_name }}"
+          roles:
+            - "{{ role_granular_name }}"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: u_update
+
+    - name: Assert user role updated
+      ansible.builtin.assert:
+        that:
+          - u_update.changed
+          - role_granular_name in u_update.user.roles
+
+    # -------------------------
+    # DELETE + IDEMPOTENCY
+    # -------------------------
+    - name: Delete test user
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ role_user_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: u_delete
+
+    - name: Assert user deleted
+      ansible.builtin.assert:
+        that:
+          - u_delete.changed
+
+    - name: Delete global role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: g_delete
+
+    - name: Assert global role deleted
+      ansible.builtin.assert:
+        that:
+          - g_delete.changed
+
+    - name: Re-run global role delete (idempotent)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: g_delete_noop
+
+    - name: Assert global role delete idempotent
+      ansible.builtin.assert:
+        that:
+          - not g_delete_noop.changed
+
+    - name: Delete granular role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gr_delete
+
+    - name: Assert granular role deleted
+      ansible.builtin.assert:
+        that:
+          - gr_delete.changed
+
+    - name: Re-run granular role delete (idempotent)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gr_delete_noop
+
+    - name: Assert granular role delete idempotent
+      ansible.builtin.assert:
+        that:
+          - not gr_delete_noop.changed
+
+  post_tasks:
+    - name: Cleanup test user
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ role_user_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup global role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup granular role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_create.id }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Logout of Apstra
+      juniper.apstra.authenticate:
+        logout: true
+        auth_token: "{{ auth.token }}"
+      failed_when: false
