@@ -102,7 +102,6 @@ options:
       - Only used when C(state=rack_added).
     type: int
     required: false
-    default: 1
   racks_to_add:
     description:
       - Number of racks to add in this run.
