@@ -14,7 +14,7 @@ module: security_zone
 
 short_description: Manage security zones (tenants/VRFs) and tenants in Apstra
 
-version_added: "1.0.9"
+version_added: "1.1.0"
 
 author:
   - "Edwin Jacques (@edwinpjacques)"
