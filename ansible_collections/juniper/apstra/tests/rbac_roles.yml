@@ -39,6 +39,7 @@
       ansible.builtin.set_fact:
         role_global_name: "ansible_role_global"
         role_granular_name: "ansible_role_granular"
+        role_tenant_name: "tenant-vn-only"
         role_user_name: "ansible_role_user"
         role_scope_blueprint_id: "{{ bp_create.id.blueprint }}"
 
@@ -169,6 +170,58 @@
           - "'rbac.blueprint.write' in gr_update.role.granular_permissions[0].permissions"
 
     # -------------------------
+    # TENANT-SCOPED GRANULAR ROLE CRUD
+    # -------------------------
+    # This role is scoped to "tenant-name" tenant and the test user will be assigned this role to verify that the scope is applied correctly on the user.
+    #Currently we do not create a tenant as it is out of scope for this module. 
+    #The test is commented just for reference.
+
+    - name: Create tenant-scoped granular role (vn write only)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_name }}"
+          label: "tenant-vn-only"
+          type: "granular"
+          description: "Virtual network access for tenant-name only"
+          permissions: null
+          granular_permissions:
+            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"] and tenant in [\"tenant-name\"]"
+              permissions:
+                - "two_stage_l3clos.virtual_networks.write"
+                - "two_stage_l3clos.virtual_network_endpoints.write"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: t_create
+
+    - name: Assert tenant-scoped granular role created
+      ansible.builtin.assert:
+        that:
+          - t_create.changed
+          - t_create.role.role == role_tenant_name
+          - t_create.role.granular_permissions | length > 0
+          - "'two_stage_l3clos.virtual_networks.write' in t_create.role.granular_permissions[0].permissions"
+          - "'two_stage_l3clos.virtual_network_endpoints.write' in t_create.role.granular_permissions[0].permissions"
+
+    - name: Re-run tenant-scoped granular role create body (idempotent)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_name }}"
+          type: "granular"
+          granular_permissions:
+            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"] and tenant in [\"tenant-name\"]"
+              permissions:
+                - "two_stage_l3clos.virtual_networks.write"
+                - "two_stage_l3clos.virtual_network_endpoints.write"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: t_noop
+
+    - name: Assert tenant-scoped granular role idempotent
+      ansible.builtin.assert:
+        that:
+          - not t_noop.changed
+
+    # -------------------------
     # USER ROLE ASSIGNMENT
     # -------------------------
     - name: Create user with global role
@@ -273,6 +326,19 @@
         that:
           - not gr_delete_noop.changed
 
+    - name: Delete tenant role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: t_delete
+
+    - name: Assert tenant role deleted
+      ansible.builtin.assert:
+        that:
+          - t_delete.changed
+
   post_tasks:
     - name: Cleanup test user
       juniper.apstra.rbac_user:
@@ -294,6 +360,14 @@
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_granular_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup tenant role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_name }}"
         state: absent
         auth_token: "{{ auth.token }}"
       failed_when: false
