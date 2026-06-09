@@ -12,7 +12,7 @@ DOCUMENTATION = """
 ---
 module: blueprint_config
 short_description: Collect rendered device configurations from an Apstra blueprint
-version_added: "1.0.9"
+version_added: "1.1.0"
 author:
   - "Prabhanjan KV (@kvp_jnpr)"
 description:
