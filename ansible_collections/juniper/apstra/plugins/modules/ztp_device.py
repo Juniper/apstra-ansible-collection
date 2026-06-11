@@ -14,10 +14,10 @@ module: ztp_device
 
 short_description: Manage ZTP (Zero Touch Provisioning) devices in Apstra
 
-version_added: "0.1.0"
+version_added: "1.1.0"
 
 author:
-  - "Prabhanjan KV (@kvp_jnpr)"
+  - "Prabhanjan KV (@kvp-hpe)"
 
 description:
   - This module allows you to create, delete, and check the status of
