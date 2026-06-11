@@ -161,6 +161,7 @@ install: build
   test-floating_ip \
   test-blueprint_health \
   test-tenant_management \
+  test-blueprint_report \
   test-rbac_user \
   test-rbac_roles
 # Ignore warnings about localhost from ansible-playbook
