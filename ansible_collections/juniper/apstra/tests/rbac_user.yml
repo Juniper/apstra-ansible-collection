@@ -1,0 +1,149 @@
+---
+# rbac_user - CRUD + change_password test playbook.
+# Requires APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD env vars.
+# A unique probe user is created and torn down on every run.
+
+- name: rbac_user module CRUD test
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    probe_password: "Probe!Pass123"
+    probe_password_new: "Probe!Pass456"
+
+  tasks:
+
+    - name: Pick a unique probe username (compute ONCE)
+      ansible.builtin.set_fact:
+        probe_username: "_ansible_rbac_probe_{{ 99999999 | random }}"
+
+    - name: Show test target
+      ansible.builtin.debug:
+        msg:
+          - "APSTRA_API_URL = {{ lookup('env', 'APSTRA_API_URL') }}"
+          - "probe username = {{ probe_username }}"
+
+    # 1. CREATE
+    - name: 1. Create probe user with role viewer
+      juniper.apstra.rbac_user:
+        body:
+          username:   "{{ probe_username }}"
+          password:   "{{ probe_password }}"
+          first_name: "Probe"
+          last_name:  "User"
+          email:      "{{ probe_username }}@example.invalid"
+          roles:      ["viewer"]
+        state: present
+      register: r_create
+
+    - name: 1.assert
+      ansible.builtin.assert:
+        that:
+          - r_create.changed
+          - r_create.id.user is defined
+          - r_create.user.username == probe_username
+          - r_create.user.roles == ["viewer"]
+          - r_create.user.first_name == "Probe"
+
+    # 2. IDEMPOTENT RE-RUN
+    - name: 2. Re-run same create body (expect no-op)
+      juniper.apstra.rbac_user:
+        body:
+          username:   "{{ probe_username }}"
+          first_name: "Probe"
+          last_name:  "User"
+          email:      "{{ probe_username }}@example.invalid"
+          roles:      ["viewer"]
+        state: present
+      register: r_noop
+
+    - name: 2.assert
+      ansible.builtin.assert:
+        that:
+          - not r_noop.changed
+          - r_noop.user.username == probe_username
+
+    # 3. UPDATE profile field
+    - name: 3. Update first_name only
+      juniper.apstra.rbac_user:
+        body:
+          username:   "{{ probe_username }}"
+          first_name: "Probe-Renamed"
+        state: present
+      register: r_rename
+
+    - name: 3.assert
+      ansible.builtin.assert:
+        that:
+          - r_rename.changed
+          - r_rename.user.first_name == "Probe-Renamed"
+          - r_rename.changes.first_name == "Probe-Renamed"
+          - "'roles' not in r_rename.changes"
+
+    # 4. CHANGE ROLES
+    - name: 4. Replace roles with administrator
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ probe_username }}"
+          roles:    ["administrator"]
+        state: present
+      register: r_roles
+
+    - name: 4.assert
+      ansible.builtin.assert:
+        that:
+          - r_roles.changed
+          - r_roles.user.roles == ["administrator"]
+          - r_roles.changes.roles == ["administrator"]
+
+    # 5. CHANGE PASSWORD
+    - name: 5. Rotate password
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ probe_username }}"
+          change_password:
+            old: "{{ probe_password }}"
+            new: "{{ probe_password_new }}"
+        state: present
+      register: r_pw
+
+    - name: 5.assert
+      ansible.builtin.assert:
+        that:
+          - r_pw.changed
+          - r_pw.changes.password == "<changed>"
+
+    # 6. DELETE
+    - name: 6. Delete probe user
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ probe_username }}"
+        state: absent
+      register: r_del
+
+    - name: 6.assert
+      ansible.builtin.assert:
+        that:
+          - r_del.changed
+
+    # 7. IDEMPOTENT DELETE
+    - name: 7. Re-run delete (expect no-op)
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ probe_username }}"
+        state: absent
+      register: r_del2
+
+    - name: 7.assert
+      ansible.builtin.assert:
+        that:
+          - not r_del2.changed
+
+  # Safety net - cleanup probe user even if a task above failed.
+  post_tasks:
+    - name: Cleanup probe user (safety net)
+      juniper.apstra.rbac_user:
+        body:
+          username: "{{ probe_username }}"
+        state: absent
+      failed_when: false
