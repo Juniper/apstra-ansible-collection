@@ -12,7 +12,7 @@ DOCUMENTATION = """
 ---
 module: blueprint_health
 short_description: Collect anomalies and build errors from an Apstra blueprint
-version_added: "1.0.9"
+version_added: "1.1.0"
 author:
   - "Prabhanjan KV (@kvp_jnpr)"
 description:
