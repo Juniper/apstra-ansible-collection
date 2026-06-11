@@ -30,7 +30,7 @@ juniper.apstra.ztp_config module -- Manage ZTP VM configuration
 
 .. rst-class:: ansible-version-added
 
-New in juniper.apstra 0.1.0
+New in juniper.apstra 1.1.0
 
 .. contents::
    :local:

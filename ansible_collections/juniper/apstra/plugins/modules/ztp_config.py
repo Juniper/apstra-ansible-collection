@@ -14,10 +14,10 @@ module: ztp_config
 
 short_description: Manage ZTP VM configuration (DHCP, firmware, passwords)
 
-version_added: "1.0.9"
+version_added: "1.1.0"
 
 author:
-  - "Prabhanjan KV (@kvp_jnpr)"
+  - "Prabhanjan KV (@kvp-hpe)"
 
 description:
   - This module manages the Apstra ZTP VM configuration including DHCP
