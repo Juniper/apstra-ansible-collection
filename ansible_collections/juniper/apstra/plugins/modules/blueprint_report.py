@@ -14,10 +14,10 @@ module: blueprint_report
 
 short_description: Generate reports from Apstra blueprint data
 
-version_added: "1.0.9"
+version_added: "1.1.0"
 
 author:
-  - "Juniper Networks"
+  - "Prabhanjan KV (@kvp-hpe)"
 
 description:
   - This module generates reports from Apstra blueprint data by aggregating
