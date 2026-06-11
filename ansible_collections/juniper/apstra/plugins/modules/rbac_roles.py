@@ -14,7 +14,7 @@ module: rbac_roles
 short_description: Manage platform RBAC roles in Apstra
 version_added: "1.1.0"
 author:
-  - "Juniper Networks"
+  - "Shirish Ranoji (@sranoji)"
 description:
   - Manage platform (controller-level) RBAC roles in Apstra.
   - Maps to C(/api/aaa/roles).

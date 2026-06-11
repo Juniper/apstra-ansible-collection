@@ -14,7 +14,7 @@ module: rbac_user
 short_description: Manage platform RBAC users in Apstra
 version_added: "1.1.0"
 author:
-  - "Juniper Networks"
+  - "Shirish Ranoji (@sranoji)"
 description:
   - Manage platform (controller-level) users in Apstra.
   - Maps to C(/api/aaa/users) and C(/api/aaa/users/{id}/roles).
