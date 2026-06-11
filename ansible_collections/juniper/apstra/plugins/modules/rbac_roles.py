@@ -12,7 +12,7 @@ DOCUMENTATION = """
 ---
 module: rbac_roles
 short_description: Manage platform RBAC roles in Apstra
-version_added: "1.0.9"
+version_added: "1.1.0"
 author:
   - "Juniper Networks"
 description:

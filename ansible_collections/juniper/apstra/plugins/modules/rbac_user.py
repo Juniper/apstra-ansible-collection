@@ -12,7 +12,7 @@ DOCUMENTATION = """
 ---
 module: rbac_user
 short_description: Manage platform RBAC users in Apstra
-version_added: "1.0.9"
+version_added: "1.1.0"
 author:
   - "Juniper Networks"
 description:

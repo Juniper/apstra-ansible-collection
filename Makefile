@@ -151,6 +151,8 @@ install: build
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
+	test-ztp_config \
+	test-ztp_onboarding \
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
@@ -277,22 +279,9 @@ test-blueprint_health: install
 test-tenant_management: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
 
-# ── rbac_user — platform user CRUD + role assignment ──────────────────────────
-# Full lifecycle test: create → idempotent re-run → update → role replace →
-# password rotation → check-mode delete → delete → no-op delete → admin guard.
-# Credentials come from APSTRA_* env vars (see .env or the authenticate module).
-#
-# Usage:
-#   make test-rbac_user
 test-rbac_user: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_user.yml
 
-# ── rbac_roles — platform role CRUD + user assignment ─────────────────────────
-# Full lifecycle test: create custom role with global/granular/tenant permissions
-# (seeded from built-in role), idempotent re-run, assign role to user, update role,
-# cleanup user and role.
-# Usage:
-#   make test-rbac_roles
 test-rbac_roles: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_roles.yml
 
@@ -305,8 +294,17 @@ test-rollback: install
 test-ztp_device: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
 
+test-ztp_config: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_config.yml
+
+test-ztp_onboarding: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_onboarding.yml
+
 test-iba_probes: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/iba_probes.yml
+
+test-blueprint_report: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_report.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
 
 test-name_resolution: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml
