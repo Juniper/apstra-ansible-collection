@@ -160,7 +160,8 @@ install: build
   test-virtual_infra_manager \
   test-floating_ip \
   test-blueprint_health \
-  test-tenant_management
+  test-tenant_management \
+  test-blueprint_report
   
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -295,6 +296,9 @@ test-ztp_onboarding: install
 
 test-iba_probes: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/iba_probes.yml
+
+test-blueprint_report: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_report.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
 
 test-name_resolution: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml
