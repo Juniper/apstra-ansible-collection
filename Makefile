@@ -151,13 +151,20 @@ install: build
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
+	test-ztp_config \
+	test-ztp_onboarding \
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
-        test-virtual_infra_manager \
-        test-floating_ip \
+  test-virtual_infra_manager \
+  test-floating_ip \
 	test-device_management \
-	test-os_images
+	test-os_images \
+  test-blueprint_config \
+  test-tenant_management \
+  test-blueprint_report \
+  test-rbac_user \
+  test-rbac_roles
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
 export ANSIBLE_INVENTORY_UNPARSED_WARNING=False
@@ -269,6 +276,23 @@ test-device_management: install
 test-os_images: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/os_images.yml
 
+BLUEPRINT_CONFIG_ID ?=
+test-blueprint_config: install
+	@if [ -z "$(BLUEPRINT_CONFIG_ID)" ]; then echo "ERROR: BLUEPRINT_CONFIG_ID is required. Usage: make test-blueprint_config BLUEPRINT_CONFIG_ID=<id>"; exit 1; fi
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_config.yml -e blueprint_id=$(BLUEPRINT_CONFIG_ID)
+  
+test-blueprint_health: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_health.yml
+  
+test-tenant_management: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
+
+test-rbac_user: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_user.yml
+
+test-rbac_roles: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_roles.yml
+
 test-interconnect_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml
 
@@ -278,8 +302,17 @@ test-rollback: install
 test-ztp_device: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
 
+test-ztp_config: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_config.yml
+
+test-ztp_onboarding: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_onboarding.yml
+
 test-iba_probes: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/iba_probes.yml
+
+test-blueprint_report: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_report.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
 
 test-name_resolution: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml

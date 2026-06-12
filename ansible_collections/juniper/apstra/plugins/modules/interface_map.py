@@ -82,7 +82,7 @@ options:
         from the design interface-maps catalog.
       - Values may be C(null) or an empty string to clear an assignment.
       - "Example: C(assignments: {spine1: Juniper_vJunos-switch_vJunos})"
-      - When C(state=speed_updated): must contain C(system_name),
+      - When C(state=speed_updated) must contain C(system_name),
         C(interface_name), and either C(speed) or C(transform_id).
     type: dict
     required: true

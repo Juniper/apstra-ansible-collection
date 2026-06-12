@@ -487,7 +487,7 @@ def _manage_catalog_configlet(module, client_factory):
                     # Catalog configlets use PUT (update) and need the full body
                     update_body = {
                         k: v
-                        for k, v in current_object.items()
+                        for k, v in compare_current.items()
                         if k not in CATALOG_READ_ONLY_FIELDS
                     }
                     updated_object = client_factory.object_request(
@@ -607,7 +607,7 @@ def _manage_blueprint_configlet(module, client_factory):
                 changes = {}
                 if client_factory.compare_and_update(compare_current, body, changes):
                     # Build full update body (without id)
-                    update_body = {k: v for k, v in current_object.items() if k != "id"}
+                    update_body = {k: v for k, v in compare_current.items() if k != "id"}
                     update_blueprint_configlet(
                         client_factory, blueprint_id, configlet_id, update_body
                     )
