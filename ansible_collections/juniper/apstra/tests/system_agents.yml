@@ -244,14 +244,14 @@
       register: hk_check
       when: hk_connected | length > 0
 
-    - name: "Test 9 — Verify check mode reports would-clear"
+    - name: "Test 9 — Verify check mode reports would-update"
       ansible.builtin.assert:
         that:
           - not hk_check.failed | default(false)
           - hk_check.changed
           - "'check mode' in hk_check.msg | lower"
         fail_msg: "Test 9 FAILED: {{ hk_check.msg | default('no msg') }}"
-        success_msg: "Test 9 PASSED: check mode correctly reports would-clear host key"
+        success_msg: "Test 9 PASSED: check mode correctly reports would-update host key"
       when: hk_connected | length > 0
 
     - name: "Test 10 — host_key_updated check mode by management_ip"
@@ -276,17 +276,41 @@
         success_msg: "Test 10 PASSED: management_ip {{ hk_target.management_ip }} resolved to agent {{ hk_check_ip.agent_id }}"
       when: hk_connected | length > 0
 
+    - name: "Test 11 — host_key_updated check mode by management_ips list"
+      juniper.apstra.system_agents:
+        id:
+          management_ips: "{{ hk_connected[:2] | map(attribute='management_ip') | list }}"
+        body:
+          force_accept: true
+        auth_token: "{{ auth.token }}"
+        state: host_key_updated
+      check_mode: true
+      register: hk_check_multi
+      when: hk_connected | length >= 2
+
+    - name: "Test 11 — Verify multi-IP check mode returns results list"
+      ansible.builtin.assert:
+        that:
+          - not hk_check_multi.failed | default(false)
+          - hk_check_multi.changed
+          - hk_check_multi.results is defined
+          - hk_check_multi.results | length == 2
+        fail_msg: "Test 11 FAILED: {{ hk_check_multi.msg | default('no msg') }}"
+        success_msg: "Test 11 PASSED: multi-IP check mode returned {{ hk_check_multi.results | length }} results"
+      when: hk_connected | length >= 2
+
     # ── Summary ───────────────────────────────────────────────────
     - name: All system_agents tests passed
       ansible.builtin.debug:
         msg:
-          - "Test 1 (create):                   PASSED"
-          - "Test 2 (create idempotent):         PASSED"
-          - "Test 3 (update label):              PASSED"
-          - "Test 4 (delete by id):              PASSED"
-          - "Test 5 (delete idempotent):         PASSED"
-          - "Test 6 (delete by management_ip):   PASSED"
-          - "Test 7 (gathered):                  {{ 'PASSED — ' ~ gathered_result.agents | length ~ ' agent(s)' if not gathered_result.failed | default(false) else 'FAILED' }}"
-          - "Test 8 (host_key_updated no-op):    {{ 'PASSED' if hk_connected | length > 0 and not hk_noop.failed | default(false) else 'SKIPPED (no connected agent)' }}"
-          - "Test 9 (host_key_updated checkmode): {{ 'PASSED' if hk_connected | length > 0 and not hk_check.failed | default(false) else 'SKIPPED (no connected agent)' }}"
-          - "Test 10 (host_key_updated by ip):   {{ 'PASSED' if hk_connected | length > 0 and not hk_check_ip.failed | default(false) else 'SKIPPED (no connected agent)' }}"
+          - "Test 1  (create):                    PASSED"
+          - "Test 2  (create idempotent):          PASSED"
+          - "Test 3  (update label):               PASSED"
+          - "Test 4  (delete by id):               PASSED"
+          - "Test 5  (delete idempotent):          PASSED"
+          - "Test 6  (delete by management_ip):    PASSED"
+          - "Test 7  (gathered):                   {{ 'PASSED — ' ~ gathered_result.agents | length ~ ' agent(s)' if not gathered_result.failed | default(false) else 'FAILED' }}"
+          - "Test 8  (host_key_updated no-op):     {{ 'PASSED' if hk_connected | length > 0 and not hk_noop.failed | default(false) else 'SKIPPED (no connected agent)' }}"
+          - "Test 9  (host_key_updated checkmode): {{ 'PASSED' if hk_connected | length > 0 and not hk_check.failed | default(false) else 'SKIPPED (no connected agent)' }}"
+          - "Test 10 (host_key_updated by ip):     {{ 'PASSED' if hk_connected | length > 0 and not hk_check_ip.failed | default(false) else 'SKIPPED (no connected agent)' }}"
+          - "Test 11 (host_key_updated multi-ip):  {{ 'PASSED' if hk_connected | length >= 2 and not hk_check_multi.failed | default(false) else 'SKIPPED (need 2+ connected agents)' }}"

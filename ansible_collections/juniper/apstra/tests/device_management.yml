@@ -110,6 +110,46 @@
         msg: "Check mode result: {{ p2.msg }}"
 
     ########################################################################
+    # Phase 2b — Check mode multi-device reboot via agent_ids (SAFE)
+    ########################################################################
+    - name: "Phase 2b — Pick second connected agent (for multi-device test)"
+      ansible.builtin.set_fact:
+        two_agents: >-
+          {{ p1.agents
+             | selectattr('connection_state', 'eq', 'connected')
+             | map(attribute='agent_id') | list | unique }}
+
+    - name: "Phase 2b — Check mode reboot of multiple agents via agent_ids"
+      juniper.apstra.device_management:
+        id:
+          agent_ids: "{{ two_agents[:2] }}"
+        body:
+          force: false
+        state: rebooted
+      check_mode: true
+      register: p2b
+      when: two_agents | length >= 2
+
+    - name: "Phase 2b — Assert: multi-device check mode returns results list"
+      ansible.builtin.assert:
+        that:
+          - not p2b.failed | default(false)
+          - p2b.changed
+          - p2b.results is defined
+          - p2b.results | length == 2
+          - p2b.results | selectattr('changed') | list | length == 2
+        success_msg: >-
+          PASSED Phase 2b: multi-device check mode returned
+          {{ p2b.results | length }} results.
+        fail_msg: "Phase 2b FAILED: {{ p2b.msg | default('no msg') }}"
+      when: two_agents | length >= 2
+
+    - name: "Phase 2b — Show multi-device check mode result"
+      ansible.builtin.debug:
+        msg: "Multi-device check mode: {{ p2b.msg | default('N/A') }}"
+      when: two_agents | length >= 2
+
+    ########################################################################
     # Phase 3 — Check mode reboot by management IP (SAFE)
     ########################################################################
     - name: "Phase 3 — Check mode reboot by management IP"
@@ -179,7 +219,8 @@
     - name: "Summary"
       ansible.builtin.debug:
         msg:
-          - "Phase 1 (gathered):      PASSED — {{ p1.agents | length }} agent(s) found, first connected={{ first_agent.agent_id }}"
-          - "Phase 2 (check by id):   {{ 'PASSED' if not p2.failed | default(false) else 'FAILED' }}"
-          - "Phase 3 (check by ip):   {{ 'PASSED' if not p3.failed | default(false) else 'FAILED' }}"
-          - "Phase 4 (actual reboot): {{ 'PASSED' if run_reboot | bool and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}"
+          - "Phase 1  (gathered):           PASSED — {{ p1.agents | length }} agent(s), first connected={{ first_agent.agent_id }}"
+          - "Phase 2  (check by id):        {{ 'PASSED' if not p2.failed | default(false) else 'FAILED' }}"
+          - "Phase 2b (check multi-device): {{ 'PASSED' if two_agents | length >= 2 and not p2b.failed | default(false) else 'SKIPPED (need 2+ agents)' }}"
+          - "Phase 3  (check by ip):        {{ 'PASSED' if not p3.failed | default(false) else 'FAILED' }}"
+          - "Phase 4  (actual reboot):      {{ 'PASSED' if run_reboot | bool and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}"

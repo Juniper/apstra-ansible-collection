@@ -15,30 +15,49 @@ version_added: "1.0.0"
 description:
   - Provides lifecycle operations for devices managed by Apstra.
   - C(state=rebooted) — Triggers a device reboot via the system agent.
-    Optionally waits for the device to reconnect after the reboot.
+    Accepts a single device or a list of devices.
+    Optionally waits for each device to reconnect after the reboot.
 options:
   id:
     description:
-      - Identifies the target device.
+      - Identifies the target device(s).
+      - For a single device use C(agent_id), C(system_name), or C(hostname).
+      - For multiple devices use C(agent_ids), C(system_names), or C(hostnames).
     type: dict
     suboptions:
-      system_name:
-        description:
-          - The label of the system in a blueprint (requires C(id.blueprint)).
-        type: str
-      blueprint:
-        description:
-          - Blueprint name or UUID (required when using C(id.system_name)).
-        type: str
       agent_id:
         description:
-          - Global system-agent UUID.  Takes precedence over C(system_name).
+          - Global system-agent UUID (single device).
+        type: str
+      agent_ids:
+        description:
+          - List of global system-agent UUIDs (multiple devices).
+        type: list
+        elements: str
+      system_name:
+        description:
+          - Blueprint node label for a single device (requires C(id.blueprint)).
+        type: str
+      system_names:
+        description:
+          - List of blueprint node labels (requires C(id.blueprint)).
+        type: list
+        elements: str
+      blueprint:
+        description:
+          - Blueprint name or UUID (required when using C(id.system_name) or
+            C(id.system_names)).
         type: str
       hostname:
         description:
-          - Management IP or hostname of the device.  Used for lookup when
-            neither C(agent_id) nor C(system_name) is provided.
+          - Management IP or hostname of a single device.  Used for lookup
+            when neither C(agent_id) nor C(system_name) is provided.
         type: str
+      hostnames:
+        description:
+          - List of management IPs or hostnames (multiple devices).
+        type: list
+        elements: str
   body:
     description:
       - Operation-specific parameters.
@@ -52,13 +71,13 @@ options:
         default: false
       wait_for_online:
         description:
-          - Wait for the device agent to reconnect after the reboot before
+          - Wait for each device agent to reconnect after the reboot before
             returning.
         type: bool
         default: false
       timeout:
         description:
-          - Maximum seconds to wait for reconnection when
+          - Maximum seconds to wait for reconnection per device when
             C(wait_for_online=true).
         type: int
         default: 300
@@ -70,10 +89,13 @@ options:
     required: true
     choices: ["rebooted"]
 notes:
-  - The device must be in C(connected) state and have C(management_level=full_control)
-    before reboot is attempted.
-  - In check mode the module reports whether a reboot would be triggered without
+  - Each device must be in C(connected) state and have
+    C(management_level=full_control) before reboot is attempted.
+  - In check mode the module reports which devices would be rebooted without
     issuing any API calls.
+  - When multiple devices are specified a C(results) list is returned with
+    per-device outcome.  C(changed) is True when at least one device was
+    rebooted.
 extends_documentation_fragment:
   - juniper.apstra.apstra_client
 author:
@@ -81,7 +103,7 @@ author:
 """
 
 EXAMPLES = r"""
-# Reboot a device by system name (blueprint context)
+# Reboot a single device by blueprint system name
 - name: Reboot DC2-Leaf1
   juniper.apstra.device_management:
     id:
@@ -89,26 +111,49 @@ EXAMPLES = r"""
       system_name: DC2-Leaf1
     state: rebooted
 
-# Reboot and wait for the device to reconnect (5 min timeout)
-- name: Reboot DC2-Leaf1 and wait for reconnection
+# Reboot multiple devices by system names
+- name: Reboot DC2 leaf devices
   juniper.apstra.device_management:
     id:
       blueprint: DC2
-      system_name: DC2-Leaf1
+      system_names:
+        - DC2-Leaf1
+        - DC2-Leaf2
+    body:
+      force: true
+    state: rebooted
+
+# Reboot multiple devices and wait for reconnection
+- name: Reboot and wait
+  juniper.apstra.device_management:
+    id:
+      blueprint: DC2
+      system_names:
+        - DC2-Leaf1
+        - DC2-Leaf2
     body:
       wait_for_online: true
       timeout: 300
     state: rebooted
 
-# Reboot using global agent ID
+# Reboot using a list of agent IDs
+- name: Reboot by agent IDs
+  juniper.apstra.device_management:
+    id:
+      agent_ids:
+        - "a1b2c3d4-0000-0000-0000-000000000001"
+        - "a1b2c3d4-0000-0000-0000-000000000002"
+    state: rebooted
+
+# Reboot a single device by agent ID
 - name: Reboot by agent ID
   juniper.apstra.device_management:
     id:
       agent_id: "a1b2c3d4-0000-0000-0000-000000000001"
     state: rebooted
 
-# Force reboot even when device is in a blueprint
-- name: Force reboot
+# Force reboot a single device with wait
+- name: Force reboot with wait
   juniper.apstra.device_management:
     id:
       blueprint: DC2
@@ -122,7 +167,7 @@ EXAMPLES = r"""
 
 RETURN = r"""
 changed:
-  description: True when the reboot was triggered.
+  description: True when at least one reboot was triggered.
   type: bool
   returned: always
 msg:
@@ -130,19 +175,24 @@ msg:
   type: str
   returned: always
 agent_id:
-  description: The global system-agent UUID used for the operation.
+  description: The system-agent UUID (single-device result only).
   type: str
-  returned: always
+  returned: when a single device was specified
 system_id:
-  description: The device serial / MAC (system_id) from the agent status.
+  description: The device serial / MAC from the agent status (single-device only).
   type: str
-  returned: when resolved
+  returned: when a single device was specified
 connection_state:
-  description: |
-    Agent connection state at the time the module returned.
-    Meaningful when C(wait_for_online=true).
+  description: Agent connection state at the time the module returned (single-device only).
   type: str
-  returned: always
+  returned: when a single device was specified
+results:
+  description: >
+    Per-device result list when multiple devices were specified.
+    Each entry contains agent_id, changed, msg, and connection_state.
+  type: list
+  elements: dict
+  returned: when multiple devices were specified
 """
 
 import traceback
@@ -167,8 +217,41 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.device_mgmt 
 # ---------------------------------------------------------------------------
 
 
+def _resolve_blueprint_id(client_factory, blueprint_ref):
+    """Resolve a blueprint label or UUID to its UUID."""
+    base = client_factory.get_base_client()
+    bp_list = base.blueprints.list() or []
+    for bp in bp_list:
+        if bp.get("label") == blueprint_ref or bp.get("id") == blueprint_ref:
+            return bp.get("id")
+    raise ValueError(f"Blueprint '{blueprint_ref}' not found.")
+
+
+def _resolve_single_agent(client_factory, id_params):
+    """Resolve one id dict entry (agent_id/system_name/hostname) to an agent_id."""
+    agent_id = id_params.get("agent_id")
+    blueprint_ref = id_params.get("blueprint")
+    system_name = id_params.get("system_name")
+    hostname = id_params.get("hostname")
+
+    if agent_id:
+        return agent_id
+
+    system_ref = system_name or hostname
+    if not system_ref:
+        raise ValueError(
+            "One of 'id.agent_id', 'id.system_name', or 'id.hostname' is required."
+        )
+
+    blueprint_id = None
+    if blueprint_ref and system_name:
+        blueprint_id = _resolve_blueprint_id(client_factory, blueprint_ref)
+
+    return resolve_agent_id(client_factory, system_ref, blueprint_id)
+
+
 def _handle_rebooted(module, client_factory):
-    """Handle state=rebooted — trigger a device reboot."""
+    """Handle state=rebooted — trigger a reboot on one or more devices."""
     id_params = module.params.get("id") or {}
     body = module.params.get("body") or {}
 
@@ -176,101 +259,147 @@ def _handle_rebooted(module, client_factory):
     wait_for_online = bool(body.get("wait_for_online", False))
     timeout = int(body.get("timeout", 300))
 
-    # ── Resolve agent_id ──────────────────────────────────────────────────
-    agent_id = id_params.get("agent_id")
+    # ── Build list of per-device id dicts ─────────────────────────────────
     blueprint_ref = id_params.get("blueprint")
-    system_name = id_params.get("system_name")
-    hostname = id_params.get("hostname")
 
-    if not agent_id:
-        # resolve_agent_id accepts system_name, hostname, or management_ip
-        system_ref = system_name or hostname
-        if not system_ref:
-            module.fail_json(
-                msg="One of 'id.agent_id', 'id.system_name', or 'id.hostname' is required."
+    if id_params.get("agent_ids"):
+        target_dicts = [{"agent_id": aid} for aid in id_params["agent_ids"]]
+    elif id_params.get("system_names"):
+        target_dicts = [
+            {"system_name": name, "blueprint": blueprint_ref}
+            for name in id_params["system_names"]
+        ]
+    elif id_params.get("hostnames"):
+        target_dicts = [{"hostname": h} for h in id_params["hostnames"]]
+    else:
+        # Single-device: use id_params as-is
+        target_dicts = [id_params]
+
+    multi = len(target_dicts) > 1
+
+    # ── Resolve all agent IDs upfront (fail early if any lookup fails) ────
+    resolved = []
+    for td in target_dicts:
+        try:
+            agent_id = _resolve_single_agent(client_factory, td)
+        except Exception as e:
+            module.fail_json(msg=str(e))
+        resolved.append(agent_id)
+
+    # ── Safety-check all devices before rebooting any ─────────────────────
+    statuses = {}
+    failed_safety = []
+    for agent_id in resolved:
+        status = get_agent_status(client_factory, agent_id)
+        statuses[agent_id] = status
+        conn = status.get("connection_state", "")
+        mgmt = status.get("management_level", "")
+        if conn != "connected":
+            failed_safety.append(
+                f"agent '{agent_id}': not connected (connection_state={conn!r})"
             )
-        # Resolve blueprint_id when system_name is used
-        blueprint_id = None
-        if blueprint_ref and system_name:
-            base = client_factory.get_base_client()
-            bp_list = base.blueprints.list() or []
-            for bp in bp_list:
-                if bp.get("label") == blueprint_ref or bp.get("id") == blueprint_ref:
-                    blueprint_id = bp.get("id")
-                    break
-            if not blueprint_id:
-                module.fail_json(
-                    msg=f"Blueprint '{blueprint_ref}' not found."
-                )
-        agent_id = resolve_agent_id(client_factory, system_ref, blueprint_id)
-
-    if not agent_id:
-        module.fail_json(
-            msg=f"Could not resolve a system agent for the given id parameters."
-        )
-
-    # ── Safety check — device must be connected and fully managed ─────────
-    status = get_agent_status(client_factory, agent_id)
-    connection_state = status.get("connection_state", "")
-    management_level = status.get("management_level", "")
-
-    if connection_state != "connected":
-        module.fail_json(
-            msg=(
-                f"Device agent '{agent_id}' is not connected "
-                f"(connection_state={connection_state!r}). "
-                "Reboot requires the agent to be in 'connected' state."
+        elif mgmt and mgmt != "full_control":
+            failed_safety.append(
+                f"agent '{agent_id}': not fully managed (management_level={mgmt!r})"
             )
-        )
 
-    if management_level and management_level != "full_control":
+    if failed_safety:
         module.fail_json(
-            msg=(
-                f"Device agent '{agent_id}' is not fully managed "
-                f"(management_level={management_level!r}). "
-                "Reboot requires management_level='full_control'."
-            )
+            msg="Reboot safety check failed — "
+            + "; ".join(failed_safety)
         )
 
     # ── Check mode ────────────────────────────────────────────────────────
     if module.check_mode:
+        if multi:
+            results = [
+                dict(
+                    agent_id=aid,
+                    changed=True,
+                    msg=f"Would reboot agent '{aid}' (check mode).",
+                    connection_state=statuses[aid].get("connection_state", ""),
+                )
+                for aid in resolved
+            ]
+            return dict(
+                changed=True,
+                msg=f"Would reboot {len(resolved)} device(s) (check mode — no action taken).",
+                results=results,
+            )
+        agent_id = resolved[0]
+        status = statuses[agent_id]
         return dict(
             changed=True,
             msg=f"Would reboot device agent '{agent_id}' (check mode — no action taken).",
             agent_id=agent_id,
             system_id=status.get("system_id", ""),
-            connection_state=connection_state,
+            connection_state=status.get("connection_state", ""),
         )
 
-    # ── Trigger reboot ────────────────────────────────────────────────────
-    reboot_device(client_factory, agent_id, force=force)
+    # ── Reboot all devices ────────────────────────────────────────────────
+    results = []
+    any_changed = False
 
-    # ── Wait for reconnection (optional) ─────────────────────────────────
-    if wait_for_online:
-        final_state = wait_for_agent_online(client_factory, agent_id, timeout)
-        if final_state != "connected":
-            module.fail_json(
-                msg=(
-                    f"Device agent '{agent_id}' did not reconnect within "
-                    f"{timeout}s after reboot (last state: {final_state!r})."
-                ),
+    for agent_id in resolved:
+        status = statuses[agent_id]
+        reboot_device(client_factory, agent_id, force=force)
+        any_changed = True
+
+        if wait_for_online:
+            final_state = wait_for_agent_online(client_factory, agent_id, timeout)
+            if final_state != "connected":
+                results.append(dict(
+                    agent_id=agent_id,
+                    changed=True,
+                    failed=True,
+                    msg=(
+                        f"Agent '{agent_id}' did not reconnect within {timeout}s "
+                        f"after reboot (last state: {final_state!r})."
+                    ),
+                    connection_state=final_state,
+                ))
+                continue
+            results.append(dict(
                 agent_id=agent_id,
+                changed=True,
+                msg=f"Agent '{agent_id}' rebooted and reconnected successfully.",
                 connection_state=final_state,
-            )
+                system_id=status.get("system_id", ""),
+            ))
+        else:
+            results.append(dict(
+                agent_id=agent_id,
+                changed=True,
+                msg=f"Reboot triggered for agent '{agent_id}'.",
+                connection_state=status.get("connection_state", ""),
+                system_id=status.get("system_id", ""),
+            ))
+
+    # ── Check for post-reboot wait failures ───────────────────────────────
+    failed = [r for r in results if r.get("failed")]
+    if failed:
+        module.fail_json(
+            msg=f"Reboot failed for {len(failed)} agent(s): "
+                + "; ".join(r["msg"] for r in failed),
+            results=results,
+            changed=any_changed,
+        )
+
+    # ── Flatten for single-device case ────────────────────────────────────
+    if not multi:
+        r = results[0]
         return dict(
-            changed=True,
-            msg=f"Device agent '{agent_id}' rebooted and reconnected successfully.",
-            agent_id=agent_id,
-            system_id=status.get("system_id", ""),
-            connection_state=final_state,
+            changed=r["changed"],
+            msg=r["msg"],
+            agent_id=r["agent_id"],
+            system_id=r.get("system_id", ""),
+            connection_state=r["connection_state"],
         )
 
     return dict(
-        changed=True,
-        msg=f"Reboot triggered for device agent '{agent_id}'.",
-        agent_id=agent_id,
-        system_id=status.get("system_id", ""),
-        connection_state=connection_state,
+        changed=any_changed,
+        msg=f"Reboot triggered for {len(results)} device(s).",
+        results=results,
     )
 
 

@@ -77,6 +77,42 @@ options:
             C(id.agent_id) is not known.
         type: str
         required: false
+      system_name:
+        description:
+          - Blueprint node label (human-readable device name such as
+            C(DC2-Leaf1)).  Used with C(state=host_key_updated) to
+            look up the agent via the blueprint.  Requires C(id.blueprint).
+        type: str
+        required: false
+      blueprint:
+        description:
+          - Blueprint name or UUID.  Required when C(id.system_name) or
+            C(id.system_names) is used.
+        type: str
+        required: false
+      agent_ids:
+        description:
+          - List of agent UUIDs.  Used with C(state=host_key_updated) to
+            update host keys on multiple agents in one task.
+        type: list
+        elements: str
+        required: false
+      management_ips:
+        description:
+          - List of management IP addresses.  Used with
+            C(state=host_key_updated) to update host keys on multiple
+            agents by IP.
+        type: list
+        elements: str
+        required: false
+      system_names:
+        description:
+          - List of blueprint node labels.  Used with
+            C(state=host_key_updated) to update host keys on multiple
+            devices by name.  Requires C(id.blueprint).
+        type: list
+        elements: str
+        required: false
   body:
     description:
       - A dict containing the system agent specification.
@@ -195,12 +231,16 @@ options:
       - When C(state=acknowledged) and C(body.management_ip) is provided,
         only the device matching that IP will be acknowledged. Without
         C(management_ip), all unacknowledged devices are acknowledged.
-      - C(host_key_updated) clears the stored SSH authorized key on the agent
-        so Apstra re-validates the host key on the next connection attempt.
-        Useful after a device OS upgrade or key rotation changes the SSH
-        fingerprint.  Set C(body.force_accept=true) to perform the clear;
-        with C(body.force_accept=false) the operation is a no-op when the
-        agent is already connected (safe idempotency check).
+      - C(host_key_updated) triggers C(POST /system-agents/{id}/update-host-keys)
+        which re-learns the current SSH host key of the device, clearing any
+        cached mismatch.  Useful after a device OS upgrade or re-image changes
+        the SSH fingerprint.  Set C(body.force_accept=true) (default) to
+        always run; with C(body.force_accept=false) the operation is a no-op
+        when the agent is already in C(connected) state (safe idempotency
+        check).  Accepts single or list id forms: C(id.agent_id),
+        C(id.management_ip), C(id.system_name)+C(id.blueprint), or the
+        corresponding list variants C(id.agent_ids), C(id.management_ips),
+        C(id.system_names).
     type: str
     required: false
     choices: ["present", "absent", "gathered", "installed", "acknowledged", "host_key_updated"]
@@ -329,7 +369,9 @@ EXAMPLES = """
 
 # ── Clear host key (accept changed SSH fingerprint) ───────────
 
-- name: Clear stored host key by agent ID
+# ── Update host key by agent ID ────────────────────────────────────
+
+- name: Update host key by agent ID
   juniper.apstra.system_agents:
     id:
       agent_id: "a1b2c3d4-0000-0000-0000-000000000001"
@@ -338,7 +380,9 @@ EXAMPLES = """
     state: host_key_updated
   register: hk_result
 
-- name: Clear stored host key by management IP
+# ── Update host key by management IP ────────────────────────────
+
+- name: Update host key by management IP
   juniper.apstra.system_agents:
     id:
       management_ip: "10.0.0.1"
@@ -346,14 +390,43 @@ EXAMPLES = """
       force_accept: true
     state: host_key_updated
 
-- name: Check whether host key would be cleared (check mode)
+# ── Update host key by blueprint system name ─────────────────────
+
+- name: Update host key by blueprint system name
   juniper.apstra.system_agents:
     id:
-      agent_id: "a1b2c3d4-0000-0000-0000-000000000001"
+      system_name: DC2-Border1
+      blueprint: DC2
     body:
       force_accept: true
     state: host_key_updated
-  check_mode: true
+
+# ── Update host keys for multiple devices at once ─────────────────
+
+- name: Update host keys for multiple devices by IP
+  juniper.apstra.system_agents:
+    id:
+      management_ips:
+        - "10.0.0.1"
+        - "10.0.0.2"
+        - "10.0.0.3"
+    body:
+      force_accept: true
+    state: host_key_updated
+
+- name: Update host keys for multiple devices by name
+  juniper.apstra.system_agents:
+    id:
+      blueprint: DC2
+      system_names:
+        - DC2-Leaf1
+        - DC2-Leaf2
+        - DC2-Border1
+    body:
+      force_accept: true
+    state: host_key_updated
+
+# ── No-op check — connected agent with force_accept=false ────────
 
 - name: No-op check — connected agent with force_accept=false
   juniper.apstra.system_agents:
@@ -362,6 +435,15 @@ EXAMPLES = """
     body:
       force_accept: false
     state: host_key_updated
+
+- name: Check whether host key would be updated (check mode)
+  juniper.apstra.system_agents:
+    id:
+      management_ip: "10.0.0.1"
+    body:
+      force_accept: true
+    state: host_key_updated
+  check_mode: true
 """
 
 RETURN = """
@@ -425,10 +507,19 @@ acknowledged_systems:
   returned: when state=acknowledged
 host_key_cleared:
   description:
-    - True if the stored SSH authorized key was cleared.
+    - True if any host key update was triggered.
     - Only returned when C(state=host_key_updated).
   type: bool
   returned: when state=host_key_updated
+results:
+  description:
+    - Per-device result list when multiple devices were specified
+      (e.g. C(id.agent_ids), C(id.management_ips), C(id.system_names)).
+    - Each entry contains C(agent_id), C(changed), C(msg), C(connection_state).
+    - Only returned when C(state=host_key_updated) with list input.
+  type: list
+  elements: dict
+  returned: when state=host_key_updated and multiple devices given
 """
 
 import traceback
@@ -1000,20 +1091,76 @@ def _handle_acknowledged(module, client_factory):
     )
 
 
+def _resolve_host_key_agent(base, id_param, client_factory):
+    """Resolve id params to a (agent_id, connection_state) tuple for host_key_updated.
+
+    Accepts: id.agent_id, id.management_ip, or id.system_name + id.blueprint.
+    """
+    agent_id = id_param.get("agent_id")
+    mgmt_ip = id_param.get("management_ip")
+    system_name = id_param.get("system_name")
+    blueprint_ref = id_param.get("blueprint")
+
+    if not agent_id:
+        if system_name:
+            # Resolve via blueprint label → system_id → agent_id
+            from ansible_collections.juniper.apstra.plugins.module_utils.apstra.upgrade import (
+                resolve_agent_id,
+            )
+            blueprint_id = None
+            if blueprint_ref:
+                bp_list = base.blueprints.list() or []
+                for bp in bp_list:
+                    if bp.get("label") == blueprint_ref or bp.get("id") == blueprint_ref:
+                        blueprint_id = bp.get("id")
+                        break
+                if not blueprint_id:
+                    raise Exception(f"Blueprint '{blueprint_ref}' not found.")
+            agent_id = resolve_agent_id(client_factory, system_name, blueprint_id)
+        elif mgmt_ip:
+            resp = base.raw_request("/system-agents")
+            if resp.status_code != 200:
+                raise Exception(f"GET /system-agents failed: {resp.status_code} {resp.text}")
+            all_agents = resp.json().get("items", [])
+            for ag in all_agents:
+                if ag.get("config", {}).get("management_ip") == mgmt_ip:
+                    agent_id = ag.get("id")
+                    break
+            if not agent_id:
+                raise Exception(f"No system agent found with management_ip '{mgmt_ip}'.")
+        else:
+            raise Exception(
+                "state=host_key_updated requires one of: 'id.agent_id', "
+                "'id.management_ip', or 'id.system_name' (with optional 'id.blueprint')."
+            )
+
+    # Fetch current connection state
+    resp = base.raw_request(f"/system-agents/{agent_id}")
+    if resp.status_code != 200:
+        raise Exception(f"GET /system-agents/{agent_id} failed: {resp.status_code} {resp.text}")
+    agent = resp.json()
+    connection_state = agent.get("status", {}).get("connection_state", "")
+    return agent_id, connection_state
+
+
 def _handle_host_key_updated(module, client_factory):
-    """Handle state=host_key_updated — clear or accept a changed SSH host key.
+    """Handle state=host_key_updated — trigger SSH host key refresh on one or more agents.
 
-    When a device is re-imaged (or its host key changes for any reason),
-    the Apstra system agent stores the old key and may refuse to connect.
-    This state clears the stored ``authorized_key`` on the agent record so
-    that the next connection attempt accepts the new key.
+    Uses ``POST /system-agents/{id}/update-host-keys`` which re-learns the
+    device's current SSH host key, clearing any cached mismatch.
 
-    With ``body.force_accept=true`` (default) the stored key is cleared
-    unconditionally.  With ``body.force_accept=false`` the module is a
-    no-op unless the agent is already in an error / disconnected state due
-    to a key mismatch.
+    Accepted id forms (single device):
+      - ``id.agent_id``              — global agent UUID
+      - ``id.management_ip``         — management IP lookup
+      - ``id.system_name`` + optional ``id.blueprint`` — blueprint node label
 
-    Required: ``id.agent_id`` **or** ``id.management_ip``.
+    Accepted id forms (multiple devices):
+      - ``id.agent_ids``             — list of agent UUIDs
+      - ``id.management_ips``        — list of management IPs
+      - ``id.system_names`` + optional ``id.blueprint`` — list of node labels
+
+    ``body.force_accept=false`` (default ``true``) is a no-op when the agent
+    is already in ``connected`` state, useful for safe idempotency checks.
     """
     id_param = module.params.get("id") or {}
     body = module.params.get("body") or {}
@@ -1021,111 +1168,104 @@ def _handle_host_key_updated(module, client_factory):
 
     base = _get_base_client(client_factory)
 
-    # ── Resolve agent_id ──────────────────────────────────────────────────
-    agent_id = id_param.get("agent_id")
-    mgmt_ip = id_param.get("management_ip")
+    # ── Build the list of (ref, form) tuples to resolve ───────────────────
+    targets = []
+    if id_param.get("agent_ids"):
+        targets = [{"agent_id": aid} for aid in id_param["agent_ids"]]
+    elif id_param.get("management_ips"):
+        targets = [{"management_ip": ip} for ip in id_param["management_ips"]]
+    elif id_param.get("system_names"):
+        targets = [
+            {"system_name": name, "blueprint": id_param.get("blueprint")}
+            for name in id_param["system_names"]
+        ]
+    else:
+        # Single-device form — use the id_param as-is
+        targets = [id_param]
 
-    if not agent_id:
-        if not mgmt_ip:
-            raise Exception(
-                "state=host_key_updated requires 'id.agent_id' or 'id.management_ip'."
-            )
-        # Find agent by management IP
-        resp = base.raw_request("/system-agents")
-        if resp.status_code != 200:
-            raise Exception(
-                f"GET /system-agents failed: {resp.status_code} {resp.text}"
-            )
+    results = []
+    any_changed = False
+
+    for target in targets:
+        # ── Resolve this target to agent_id + connection_state ────────────
         try:
-            agents_data = resp.json()
-        except Exception:
-            agents_data = {}
-        all_agents = agents_data.get("items", [])
-        for ag in all_agents:
-            config = ag.get("config", {})
-            if config.get("management_ip") == mgmt_ip:
-                agent_id = ag.get("id")
-                break
-        if not agent_id:
-            raise Exception(
-                f"No system agent found with management_ip '{mgmt_ip}'."
-            )
+            agent_id, connection_state = _resolve_host_key_agent(base, target, client_factory)
+        except Exception as e:
+            results.append({"ref": str(target), "changed": False, "failed": True, "msg": str(e)})
+            continue
 
-    # ── Fetch current agent record ────────────────────────────────────────
-    resp = base.raw_request(f"/system-agents/{agent_id}")
-    if resp.status_code != 200:
-        raise Exception(
-            f"GET /system-agents/{agent_id} failed: {resp.status_code} {resp.text}"
+        # ── Idempotency: force_accept=false on connected agent ────────────
+        if not force_accept and connection_state == "connected":
+            results.append(dict(
+                agent_id=agent_id,
+                changed=False,
+                msg=(
+                    f"Agent '{agent_id}' is already connected "
+                    "and force_accept=false — no key update needed."
+                ),
+                connection_state=connection_state,
+            ))
+            continue
+
+        # ── Check mode ────────────────────────────────────────────────────
+        if module.check_mode:
+            results.append(dict(
+                agent_id=agent_id,
+                changed=True,
+                msg=f"Would trigger host key update for agent '{agent_id}' (check mode).",
+                connection_state=connection_state,
+            ))
+            any_changed = True
+            continue
+
+        # ── POST /system-agents/{id}/update-host-keys ─────────────────────
+        resp = base.raw_request(
+            f"/system-agents/{agent_id}/update-host-keys", method="POST", data={}
         )
-    try:
-        agent = resp.json()
-    except Exception:
-        raise Exception(f"Failed to parse response for agent '{agent_id}'.")
+        if resp.status_code not in (200, 201, 202, 204):
+            results.append(dict(
+                agent_id=agent_id,
+                changed=False,
+                failed=True,
+                msg=f"POST /system-agents/{agent_id}/update-host-keys failed: {resp.status_code} {resp.text}",
+                connection_state=connection_state,
+            ))
+            continue
 
-    config = agent.get("config", {})
-    status = agent.get("status", {})
-    connection_state = status.get("connection_state", "")
-    current_key = config.get("authorized_key", "")
-
-    # ── Idempotency check ─────────────────────────────────────────────────
-    if not force_accept and connection_state == "connected":
-        return dict(
-            changed=False,
-            msg=(
-                f"Agent '{agent_id}' is already connected "
-                f"and force_accept=false — no key update needed."
-            ),
+        any_changed = True
+        results.append(dict(
             agent_id=agent_id,
-            connection_state=connection_state,
-        )
-
-    if not force_accept and not current_key:
-        return dict(
-            changed=False,
-            msg=f"Agent '{agent_id}' has no stored host key — nothing to clear.",
-            agent_id=agent_id,
-            connection_state=connection_state,
-        )
-
-    # ── Check mode ────────────────────────────────────────────────────────
-    if module.check_mode:
-        return dict(
             changed=True,
-            msg=(
-                f"Would clear host key for agent '{agent_id}' "
-                "(check mode — no action taken)."
-            ),
-            agent_id=agent_id,
+            msg=f"Host key update triggered for agent '{agent_id}'.",
             connection_state=connection_state,
+        ))
+
+    # ── Check for any failures ────────────────────────────────────────────
+    failed = [r for r in results if r.get("failed")]
+    if failed:
+        module.fail_json(
+            msg=f"host_key_updated failed for {len(failed)} agent(s): "
+                + "; ".join(r["msg"] for r in failed),
+            results=results,
+            changed=any_changed,
         )
 
-    # ── Build PUT body — preserve existing config, clear authorized_key ──
-    put_body = {
-        "label": config.get("label", ""),
-        "operation_mode": config.get("operation_mode", ""),
-        "username": config.get("username", ""),
-        "platform": config.get("platform", ""),
-        "authorized_key": "",  # clear stored host key
-    }
-    # Include optional fields only when present (avoid schema rejection)
-    if config.get("open_options") is not None:
-        put_body["open_options"] = config["open_options"]
-    if config.get("force_package_install") is not None:
-        put_body["force_package_install"] = config["force_package_install"]
-
-    resp = base.raw_request(
-        f"/system-agents/{agent_id}", method="PUT", data=put_body
-    )
-    if resp.status_code not in (200, 201, 204):
-        raise Exception(
-            f"PUT /system-agents/{agent_id} failed: {resp.status_code} {resp.text}"
+    # ── Flatten result for single-device case ─────────────────────────────
+    if len(results) == 1:
+        r = results[0]
+        return dict(
+            changed=r["changed"],
+            msg=r["msg"],
+            agent_id=r.get("agent_id", ""),
+            connection_state=r.get("connection_state", ""),
+            host_key_cleared=r["changed"],
         )
 
     return dict(
-        changed=True,
-        msg=f"Host key cleared for agent '{agent_id}'. Device will re-authenticate on next connection.",
-        agent_id=agent_id,
-        connection_state=connection_state,
+        changed=any_changed,
+        msg=f"host_key_updated processed {len(results)} agent(s), {sum(1 for r in results if r['changed'])} updated.",
+        results=results,
+        host_key_cleared=any_changed,
     )
 
 
