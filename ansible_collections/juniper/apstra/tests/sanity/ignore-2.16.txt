@@ -19,6 +19,8 @@ plugins/modules/interface_map.py validate-modules:missing-gplv3-license
 plugins/modules/os_upgrade.py validate-modules:missing-gplv3-license
 plugins/modules/property_set.py validate-modules:missing-gplv3-license
 plugins/modules/resource_group.py validate-modules:missing-gplv3-license
+plugins/modules/rbac_roles.py validate-modules:missing-gplv3-license
+plugins/modules/rbac_user.py validate-modules:missing-gplv3-license
 plugins/modules/resource_pools.py validate-modules:missing-gplv3-license
 plugins/modules/rollback.py validate-modules:missing-gplv3-license
 plugins/modules/routing_policy.py validate-modules:missing-gplv3-license
