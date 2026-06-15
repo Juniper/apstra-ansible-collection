@@ -3,6 +3,7 @@ plugins/modules/authenticate.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint_config.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint_health.py validate-modules:missing-gplv3-license
+plugins/modules/blueprint_report.py validate-modules:missing-gplv3-license
 plugins/modules/cabling_map.py validate-modules:missing-gplv3-license
 plugins/modules/configlets.py validate-modules:missing-gplv3-license
 plugins/modules/connectivity_template.py validate-modules:missing-gplv3-license
