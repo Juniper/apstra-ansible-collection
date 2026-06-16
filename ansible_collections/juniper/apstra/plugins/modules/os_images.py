@@ -76,7 +76,7 @@ notes:
 extends_documentation_fragment:
   - juniper.apstra.apstra_client
 author:
-  - Juniper Networks
+  - "Vamsi Gavini (@vgavini)"
 """
 
 EXAMPLES = r"""
