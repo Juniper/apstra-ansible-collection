@@ -11,7 +11,7 @@ DOCUMENTATION = r"""
 ---
 module: os_images
 short_description: Manage NOS images in Apstra's global device-OS image store
-version_added: "1.0.0"
+version_added: "1.1.0"
 description:
   - Uploads, deletes, and lists NOS (Network OS) images stored in the Apstra
     global image repository at C(/device-os/images).
