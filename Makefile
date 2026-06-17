@@ -152,14 +152,21 @@ install: build
 	test-interface_map \
 	test-fabric_settings \
 	test-ztp_device \
+	test-ztp_config \
+	test-ztp_onboarding \
 	test-iba_probes \
 	test-interconnect_gateway \
 	test-cabling_map \
-  test-blueprint_config \
   test-virtual_infra_manager \
   test-floating_ip \
   test-blueprint_health \
-  test-tenant_management
+	test-device_management \
+	test-os_images \
+  test-blueprint_config \
+  test-tenant_management \
+  test-blueprint_report \
+  test-rbac_user \
+  test-rbac_roles
 
 # Ignore warnings about localhost from ansible-playbook
 export ANSIBLE_LOCALHOST_WARNING=False
@@ -269,6 +276,12 @@ test-virtual_infra_manager: install
 test-floating_ip: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/floating_ip.yml
 
+test-device_management: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/device_management.yml
+
+test-os_images: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/os_images.yml
+
 BLUEPRINT_CONFIG_ID ?=
 test-blueprint_config: install
 	@if [ -z "$(BLUEPRINT_CONFIG_ID)" ]; then echo "ERROR: BLUEPRINT_CONFIG_ID is required. Usage: make test-blueprint_config BLUEPRINT_CONFIG_ID=<id>"; exit 1; fi
@@ -280,6 +293,12 @@ test-blueprint_health: install
 test-tenant_management: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/tenant_management.yml
 
+test-rbac_user: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_user.yml
+
+test-rbac_roles: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/rbac_roles.yml
+
 test-interconnect_gateway: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/interconnect_gateway.yml
 
@@ -289,8 +308,17 @@ test-rollback: install
 test-ztp_device: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_device.yml
 
+test-ztp_config: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_config.yml
+
+test-ztp_onboarding: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/ztp_onboarding.yml
+
 test-iba_probes: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/iba_probes.yml
+
+test-blueprint_report: install
+	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/blueprint_report.yml $(if $(BLUEPRINT_ID),-e blueprint_id=$(BLUEPRINT_ID),)
 
 test-name_resolution: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) $(APSTRA_COLLECTION_ROOT)/tests/name_resolution.yml
@@ -366,7 +394,7 @@ delete-connectorops-blueprint: install
 		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
 		-e testbed_file=$(TESTBED_FILE)
 
-test: test-apstra_facts test-aaa_server test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager test-floating_ip
+test: test-apstra_facts test-aaa_server test-blueprint test-virtual_network test-routing_policy test-security_zone test-endpoint_policy test-tag test-resource_group test-configlets test-property_set test-resource_pools test-external_gateway test-connectivity_template test-generic_systems test-system_agents test-os_upgrade test-upgrade_group test-interface_map test-fabric_settings test-interconnect_gateway test-ztp_device test-cabling_map test-iba_probes test-virtual_infra_manager test-floating_ip test-device_management test-os_images
 
 # Integration Tests
 .PHONY: test-integration-property_set

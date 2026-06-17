@@ -413,6 +413,14 @@ class ApstraClientFactory:
                 "virtual_infra_managers",
                 "vlan_pools",
                 "vni_pools",
+                # ── Platform RBAC (AAA) ──────────────────────────────
+                # Maps to /api/aaa/users, /api/aaa/users/{id}/roles,
+                # /api/aaa/roles, /api/aaa/permissions.  See
+                # rbac_user.py / rbac_role.py modules.
+                "users",
+                "users.roles",
+                "roles",
+                "permissions",
             ],
             "l3clos_client": [
                 "blueprints",
@@ -1373,3 +1381,63 @@ class ApstraClientFactory:
         if not obj:
             return None
         return obj.id
+
+    # ── Platform RBAC helpers ────────────────────────────────────────
+    # Users (and global roles) are NOT blueprint-scoped, so they cannot
+    # be looked up via the blueprint graph (get_by_label / get_id_by_label).
+    # Apstra identifies users by ``username`` and roles by ``name``, so
+    # we provide dedicated helpers that list the collection and match
+    # by the appropriate key.
+
+    def get_user_id_by_username(self, username):
+        """
+        Find a platform user by ``username`` and return its UUID.
+
+        Lists all users via ``GET /api/aaa/users`` and returns the
+        ``id`` of the user whose ``username`` matches.  Returns
+        ``None`` when no match is found.
+
+        :param username: The username to search for.
+        :return: The user UUID string, or ``None``.
+        """
+        if not username:
+            return None
+        base_client = self.get_base_client()
+        users = base_client.users.list()
+        if isinstance(users, dict):
+            users = users.get("items", [])
+        if not users:
+            return None
+        for u in users:
+            if isinstance(u, dict) and u.get("username") == username:
+                return u.get("id")
+        return None
+
+    def get_role_id_by_name(self, name):
+        """
+        Find a platform role by name and return its UUID.
+
+        Lists all roles via ``GET /api/aaa/roles`` and returns the
+        ``id`` of the role whose name matches.  Apstra role objects
+        use the ``role`` field as the canonical (immutable) identifier
+        and ``label`` as the display name; both are usually equal for
+        predefined roles ('administrator', 'viewer', etc.).  We match
+        either to make the helper forgiving of UI vs API naming.
+
+        :param name: The role name (e.g. 'administrator', 'viewer') to search for.
+        :return: The role UUID string, or ``None`` when not found.
+        """
+        if not name:
+            return None
+        base_client = self.get_base_client()
+        roles = base_client.roles.list()
+        if isinstance(roles, dict):
+            roles = roles.get("items", [])
+        if not roles:
+            return None
+        for r in roles:
+            if not isinstance(r, dict):
+                continue
+            if r.get("role") == name or r.get("label") == name:
+                return r.get("id")
+        return None

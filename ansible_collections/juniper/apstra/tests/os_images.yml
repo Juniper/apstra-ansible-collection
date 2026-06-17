@@ -1,0 +1,218 @@
+---
+################################################################################
+# AXIS OS Images Test — Full Lifecycle
+#
+# Phase 1: state=gathered   — list all images (read-only)
+# Phase 2: state=absent     — delete non-existent image (idempotent, safe)
+# Phase 3: state=present    — check mode upload (safe — no file needed)
+# Phase 4: state=present    — ACTUAL UPLOAD (DISABLED by default)
+# Phase 5: state=absent     — delete uploaded image (cleanup, conditional)
+#
+# ⚠️  Phase 4 uploads a real NOS image file.  Disabled unless you set
+#     run_upload=true and provide upload_image_path.
+#
+# Usage (safe — read-only + check mode):
+#   pipenv run ansible-playbook -v test_axis_os_images.yml
+#
+# Usage (with actual upload):
+#   pipenv run ansible-playbook -v test_axis_os_images.yml \
+#     -e run_upload=true \
+#     -e upload_image_path="/tmp/junos-evo-23.4R1.tgz"
+#
+# Credentials: loaded automatically from .env (APSTRA_API_URL / USERNAME / PASSWORD)
+################################################################################
+
+- name: "AXIS OS Images Test — Full Lifecycle"
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    # Dummy name used for idempotency / absent checks (should not exist)
+    nonexistent_image: "nonexistent-junos-99.99R99.tgz"
+    # Phase 4 — set these to enable actual upload
+    run_upload: false
+    upload_image_path: "/tmp/test-nos-image.tgz"
+    upload_description: "Ansible test upload"
+    upload_platform: "junos"
+
+  tasks:
+    ########################################################################
+    # Phase 1 — state=gathered: List all OS images
+    ########################################################################
+    - name: "Phase 1 — Gather all OS images"
+      juniper.apstra.os_images:
+        state: gathered
+      register: p1
+
+    - name: "Phase 1 — Assert: gathered succeeds"
+      ansible.builtin.assert:
+        that:
+          - not p1.failed | default(false)
+          - not p1.changed
+          - p1.images is defined
+        success_msg: >-
+          PASSED Phase 1: found {{ p1.images | length }} image(s).
+        fail_msg: "Phase 1 FAILED: state=gathered did not return images list"
+
+    - name: "Phase 1 — Show images"
+      ansible.builtin.debug:
+        msg: |
+          OS Images ({{ p1.images | length }}):
+          {% if p1.images | length == 0 %}
+            (no images currently stored)
+          {% else %}
+          {% for img in p1.images %}
+            id={{ img.id }}  name={{ img.image_name | default(img.filename | default('?')) }}
+            platform={{ img.platform | default('?') }}  type={{ img.type | default('?') }}
+          {% endfor %}
+          {% endif %}
+
+    ########################################################################
+    # Phase 2 — state=absent: Delete non-existent image (idempotent)
+    ########################################################################
+    - name: "Phase 2 — Delete non-existent image (idempotent)"
+      juniper.apstra.os_images:
+        id:
+          image_name: "{{ nonexistent_image }}"
+        state: absent
+      register: p2
+
+    - name: "Phase 2 — Assert: absent is idempotent when image does not exist"
+      ansible.builtin.assert:
+        that:
+          - not p2.failed | default(false)
+          - not p2.changed
+          - "'not found' in p2.msg | lower or 'nothing to delete' in p2.msg | lower"
+        success_msg: >-
+          PASSED Phase 2: state=absent correctly no-ops for nonexistent image.
+        fail_msg: "Phase 2 FAILED: {{ p2.msg | default('no msg') }}"
+
+    - name: "Phase 2 — Show absent idempotency result"
+      ansible.builtin.debug:
+        msg: "absent idempotent result: {{ p2.msg }}"
+
+    ########################################################################
+    # Phase 3 — state=present check mode (no file required)
+    ########################################################################
+    - name: "Phase 3 — Check mode upload"
+      juniper.apstra.os_images:
+        id:
+          image_name: "{{ upload_image_path | basename }}"
+        body:
+          image_path: "{{ upload_image_path }}"
+          description: "{{ upload_description }}"
+          platform: "{{ upload_platform }}"
+        state: present
+      check_mode: true
+      register: p3
+
+    - name: "Phase 3 — Assert: check mode reports would-upload"
+      ansible.builtin.assert:
+        that:
+          - not p3.failed | default(false)
+          - p3.changed
+          - "'check mode' in p3.msg | lower or 'would' in p3.msg | lower"
+        success_msg: >-
+          PASSED Phase 3: check mode correctly reports would-upload for
+          '{{ upload_image_path | basename }}'.
+        fail_msg: "Phase 3 FAILED: {{ p3.msg | default('no msg') }}"
+
+    - name: "Phase 3 — Show check mode result"
+      ansible.builtin.debug:
+        msg: "Check mode upload: {{ p3.msg }}"
+
+    ########################################################################
+    # Phase 4 — ACTUAL UPLOAD (disabled by default)
+    ########################################################################
+    - name: "Phase 4 — Upload image (ACTUAL)"
+      juniper.apstra.os_images:
+        body:
+          image_path: "{{ upload_image_path }}"
+          description: "{{ upload_description }}"
+          platform: "{{ upload_platform }}"
+        state: present
+      register: p4
+      when:
+        - run_upload | bool
+
+    - name: "Phase 4 — Assert: upload succeeded"
+      ansible.builtin.assert:
+        that:
+          - not p4.failed | default(false)
+          - p4.changed
+          - p4.image is defined
+        success_msg: >-
+          PASSED Phase 4: image uploaded successfully —
+          id={{ p4.image.id | default('?') }}.
+        fail_msg: "Phase 4 FAILED: {{ p4.msg | default('no msg') }}"
+      when: run_upload | bool and p4 is not skipped
+
+    - name: "Phase 4 — Test idempotency (upload same image again)"
+      juniper.apstra.os_images:
+        body:
+          image_path: "{{ upload_image_path }}"
+          description: "{{ upload_description }}"
+          platform: "{{ upload_platform }}"
+        state: present
+      register: p4_idem
+      when:
+        - run_upload | bool
+        - p4 is not skipped
+        - not p4.failed | default(false)
+
+    - name: "Phase 4 — Assert: second upload is idempotent"
+      ansible.builtin.assert:
+        that:
+          - not p4_idem.failed | default(false)
+          - not p4_idem.changed
+        success_msg: "PASSED Phase 4b: second upload correctly no-ops."
+        fail_msg: "Phase 4b FAILED: upload was not idempotent"
+      when: run_upload | bool and p4_idem is defined and p4_idem is not skipped
+
+    - name: "Phase 4 — Skipped (not enabled)"
+      ansible.builtin.debug:
+        msg: >-
+          Phase 4 SKIPPED: set -e run_upload=true
+          -e upload_image_path="/path/to/image.tgz" to enable actual upload.
+      when: not run_upload | bool
+
+    ########################################################################
+    # Phase 5 — Cleanup: delete uploaded image
+    ########################################################################
+    - name: "Phase 5 — Delete uploaded image (cleanup)"
+      juniper.apstra.os_images:
+        id:
+          image_name: "{{ upload_image_path | basename }}"
+        state: absent
+      register: p5
+      when:
+        - run_upload | bool
+        - p4 is not skipped
+        - not p4.failed | default(false)
+
+    - name: "Phase 5 — Assert: cleanup delete succeeded"
+      ansible.builtin.assert:
+        that:
+          - not p5.failed | default(false)
+          - p5.changed
+        success_msg: "PASSED Phase 5: uploaded image deleted (cleanup)."
+        fail_msg: "Phase 5 FAILED: {{ p5.msg | default('no msg') }}"
+      when: run_upload | bool and p5 is defined and p5 is not skipped
+
+    - name: "Phase 5 — Skipped (upload not run)"
+      ansible.builtin.debug:
+        msg: "Phase 5 SKIPPED: no image was uploaded."
+      when: not run_upload | bool
+
+    ########################################################################
+    # Summary
+    ########################################################################
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg:
+          - "Phase 1 (gathered):          PASSED — {{ p1.images | length }} image(s)"
+          - "Phase 2 (absent idempotent): {{ 'PASSED' if not p2.failed | default(false) else 'FAILED' }}"
+          - "Phase 3 (present check):     {{ 'PASSED' if not p3.failed | default(false) else 'FAILED' }}"
+          - "Phase 4 (actual upload):     {{ 'PASSED' if run_upload | bool and p4 is defined and p4 is not skipped and not p4.failed | default(false) else 'SKIPPED (disabled)' }}"
+          - "Phase 5 (cleanup delete):    {{ 'PASSED' if run_upload | bool and p5 is defined and p5 is not skipped and not p5.failed | default(false) else 'SKIPPED (disabled)' }}"
