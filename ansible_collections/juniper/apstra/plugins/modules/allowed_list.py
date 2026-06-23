@@ -248,9 +248,7 @@ def run_module():
 
     # Validate required parameters
     if state in ["present", "absent"] and not ip_subnet:
-        module.fail_json(
-            msg=f"ip_subnet is required when state is '{state}'"
-        )
+        module.fail_json(msg=f"ip_subnet is required when state is '{state}'")
 
     try:
         client = _get_client(module)
