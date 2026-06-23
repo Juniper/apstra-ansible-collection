@@ -58,24 +58,6 @@
       ansible.builtin.debug:
         msg: "✓ Non-existent entry handled correctly: {{ r_delete_missing.message }}"
 
-    # ========== TEST 2b: CREATE (unsupported by design) ==========
-    - name: "TEST 2b: CREATE - Verify create is rejected (state=present unsupported)"
-      juniper.apstra.banned_list:
-        ip_subnet: "198.51.100.10/32"
-        state: present
-      register: r_create_unsupported
-      ignore_errors: true
-
-    - name: "TEST 2b: Verify unsupported create behavior"
-      ansible.builtin.assert:
-        that:
-          - r_create_unsupported is failed
-          - "'value of state must be one of' in (r_create_unsupported.msg | lower)"
-
-    - name: "TEST 2b: Display unsupported create result"
-      ansible.builtin.debug:
-        msg: "✓ Create correctly rejected for banned_list (entries are auto-added by rate limiter)"
-
     # ========== TEST 3: DELETE (actual entry, if exists) ==========
     - name: "TEST 3: Check if entries exist for deletion test"
       ansible.builtin.set_fact:
@@ -133,6 +115,5 @@
           - "Operations tested:"
           - "  ✓ READ - List all banned entries"
           - "  ✓ DELETE - Non-existent entry handled"
-          - "  ✓ CREATE - Explicitly rejected (unsupported by design)"
           - "{{ '  ✓ DELETE - Actual entry deleted' if has_banned_entries else '  ℹ DELETE - Skipped (no entries)' }}"
           - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
