@@ -104,16 +104,3 @@
       ansible.builtin.debug:
         msg: "✓ Entry count after deletion: {{ r_list_after_delete.banned_list | length }} (was {{ r_list.banned_list | length }})"
       when: has_banned_entries
-
-    # ========== SUMMARY ==========
-    - name: "✓ SUMMARY: All banned_list operations completed successfully"
-      ansible.builtin.debug:
-        msg:
-          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          - "✓ banned_list module tests PASSED"
-          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          - "Operations tested:"
-          - "  ✓ READ - List all banned entries"
-          - "  ✓ DELETE - Non-existent entry handled"
-          - "{{ '  ✓ DELETE - Actual entry deleted' if has_banned_entries else '  ℹ DELETE - Skipped (no entries)' }}"
-          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
