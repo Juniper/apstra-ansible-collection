@@ -1,0 +1,138 @@
+---
+# banned_list - Read & Delete test playbook
+# Requires APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD env vars.
+# Note: Banned entries are auto-added by the rate limiter when IPs violate
+# rate limit rules. This test verifies listing and deletion of such entries.
+
+- name: banned_list module test
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+
+    - name: Show test target
+      ansible.builtin.debug:
+        msg:
+          - "APSTRA_API_URL = {{ lookup('env', 'APSTRA_API_URL') }}"
+          - "Testing banned_list module"
+
+    # ========== TEST 1: READ ==========
+    - name: "TEST 1: READ - List all current banned entries"
+      juniper.apstra.banned_list:
+        state: list
+      register: r_list
+
+    - name: "TEST 1: Verify READ operation"
+      ansible.builtin.assert:
+        that:
+          - r_list is not failed
+          - r_list.banned_list is defined
+          - r_list.banned_list is iterable
+
+    - name: "TEST 1: Display banned entries count"
+      ansible.builtin.debug:
+        msg: "✓ Successfully retrieved {{ r_list.banned_list | length }} banned entries"
+
+    - name: "TEST 1: Display banned entries (if any)"
+      ansible.builtin.debug:
+        msg:
+          - "Banned entries:"
+          - "{{ r_list.banned_list | to_nice_yaml }}"
+      when: r_list.banned_list | length > 0
+
+    # ========== TEST 2: DELETE (non-existent entry) ==========
+    - name: "TEST 2: DELETE - Try to delete non-existent entry"
+      juniper.apstra.banned_list:
+        ip_subnet: "192.0.2.999/32"
+        state: absent
+      register: r_delete_missing
+
+    - name: "TEST 2: Verify no-op for missing entry"
+      ansible.builtin.assert:
+        that:
+          - r_delete_missing is not failed
+          - not r_delete_missing.changed
+          - r_delete_missing.message is defined
+
+    - name: "TEST 2: Display result"
+      ansible.builtin.debug:
+        msg: "✓ Non-existent entry handled correctly: {{ r_delete_missing.message }}"
+
+    # ========== TEST 2b: CREATE (unsupported by design) ==========
+    - name: "TEST 2b: CREATE - Verify create is rejected (state=present unsupported)"
+      juniper.apstra.banned_list:
+        ip_subnet: "198.51.100.10/32"
+        state: present
+      register: r_create_unsupported
+      ignore_errors: true
+
+    - name: "TEST 2b: Verify unsupported create behavior"
+      ansible.builtin.assert:
+        that:
+          - r_create_unsupported is failed
+          - "'value of state must be one of' in (r_create_unsupported.msg | lower)"
+
+    - name: "TEST 2b: Display unsupported create result"
+      ansible.builtin.debug:
+        msg: "✓ Create correctly rejected for banned_list (entries are auto-added by rate limiter)"
+
+    # ========== TEST 3: DELETE (actual entry, if exists) ==========
+    - name: "TEST 3: Check if entries exist for deletion test"
+      ansible.builtin.set_fact:
+        has_banned_entries: "{{ r_list.banned_list | length > 0 }}"
+
+    - name: "TEST 3: DELETE - Delete first banned entry (if available)"
+      juniper.apstra.banned_list:
+        ip_subnet: "{{ r_list.banned_list[0].ip_subnet }}"
+        state: absent
+      register: r_delete_first
+      when: has_banned_entries
+
+    - name: "TEST 3: Verify deletion succeeded"
+      ansible.builtin.assert:
+        that:
+          - r_delete_first is not failed
+          - r_delete_first.changed
+      when: has_banned_entries
+
+    - name: "TEST 3: Display deletion result"
+      ansible.builtin.debug:
+        msg: "✓ Entry successfully deleted: {{ r_delete_first.message }}"
+      when: has_banned_entries
+
+    - name: "TEST 3: No entries to delete"
+      ansible.builtin.debug:
+        msg: "ℹ No banned entries currently in denylist; deletion test skipped"
+      when: not has_banned_entries
+
+    # ========== TEST 4: VERIFY STATE AFTER DELETE ==========
+    - name: "TEST 4: READ - Verify state after deletion"
+      juniper.apstra.banned_list:
+        state: list
+      register: r_list_after_delete
+      when: has_banned_entries
+
+    - name: "TEST 4: Verify entry count decreased"
+      ansible.builtin.assert:
+        that:
+          - r_list_after_delete.banned_list | length < r_list.banned_list | length
+      when: has_banned_entries
+
+    - name: "TEST 4: Display final state"
+      ansible.builtin.debug:
+        msg: "✓ Entry count after deletion: {{ r_list_after_delete.banned_list | length }} (was {{ r_list.banned_list | length }})"
+      when: has_banned_entries
+
+    # ========== SUMMARY ==========
+    - name: "✓ SUMMARY: All banned_list operations completed successfully"
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "✓ banned_list module tests PASSED"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "Operations tested:"
+          - "  ✓ READ - List all banned entries"
+          - "  ✓ DELETE - Non-existent entry handled"
+          - "  ✓ CREATE - Explicitly rejected (unsupported by design)"
+          - "{{ '  ✓ DELETE - Actual entry deleted' if has_banned_entries else '  ℹ DELETE - Skipped (no entries)' }}"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
