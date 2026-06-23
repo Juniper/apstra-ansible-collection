@@ -9,13 +9,6 @@
   gather_facts: false
 
   tasks:
-
-    - name: Show test target
-      ansible.builtin.debug:
-        msg:
-          - "APSTRA_API_URL = {{ lookup('env', 'APSTRA_API_URL') }}"
-          - "Testing banned_list module"
-
     # ========== TEST 1: READ ==========
     - name: "TEST 1: READ - List all current banned entries"
       juniper.apstra.banned_list:
