@@ -26,7 +26,7 @@ description:
   - Admins can remove IP/subnets from the banned list to immediately allow
     logins from that IP/subnet.
   - Maps to C(/api/aaa/ratelimit/denylist).
-  - Supports IP/subnet delete and list operations only (entries are auto-added
+  - Supports IP/subnet delete and query operations only (entries are auto-added
     by the rate limiter).
   - Changes to the banned list are recorded in the event log.
 
@@ -71,18 +71,18 @@ options:
     description:
       - Desired state for ban list management.
       - C(absent) - remove an IP/subnet from the ban list.
-      - C(list) - retrieve all entries in the ban list (default).
+      - C(query) - retrieve all entries in the ban list (default).
       - Note - C(present) is not supported since entries are auto-added.
     type: str
     required: false
-    choices: ["absent", "list"]
-    default: "list"
+    choices: ["absent", "query"]
+    default: "query"
 """
 
 EXAMPLES = """
 - name: List all banned IP addresses
   juniper.apstra.banned_list:
-    state: list
+    state: query
   register: result
 
 - name: Show all banned entries
@@ -114,7 +114,7 @@ message:
 banned_list:
   description: List of all IP/subnet entries in the ban list (denylist).
   type: list
-  returned: when state is C(list)
+  returned: when state is C(query)
   sample:
     - ip_subnet: "192.168.1.100"
     - ip_subnet: "10.0.0.0/24"
@@ -183,8 +183,8 @@ def run_module():
             ip_subnet=dict(type="str", required=False),
             state=dict(
                 type="str",
-                choices=["absent", "list"],
-                default="list",
+          choices=["absent", "query"],
+          default="query",
             ),
         )
     )
@@ -201,7 +201,7 @@ def run_module():
     try:
         client = _get_client(module)
 
-        if state == "list":
+        if state == "query":
             entries = _list_banned_entries(client)
             if entries is None:
                 module.fail_json(msg="Failed to retrieve banned list entries")

@@ -23,7 +23,7 @@ description:
   - Manage platform-level IP/subnet allow list (white-list) in Apstra.
   - Trusted IP/subnets are never locked out, even if they violate rate limit rules.
   - Maps to C(/api/aaa/ratelimit/allowlist).
-  - Supports IP/subnet add (create), edit (update), delete, and list operations.
+  - Supports IP/subnet add (create), edit (update), delete, and query (list) operations.
   - Changes to the allowed list are recorded in the event log.
 
 options:
@@ -73,10 +73,10 @@ options:
       - Desired state of the allow list entry.
       - C(present) - add or update an IP/subnet (default).
       - C(absent) - remove an IP/subnet.
-      - C(list) - retrieve all entries in the allow list.
+      - C(query) - retrieve all entries in the allow list.
     type: str
     required: false
-    choices: ["present", "absent", "list"]
+    choices: ["present", "absent", "query"]
     default: "present"
 """
 
@@ -104,9 +104,9 @@ EXAMPLES = """
     ip_subnet: "192.168.1.100"
     state: absent
 
-- name: List all allowed IPs/subnets
+- name: Query all allowed IPs/subnets
   juniper.apstra.allowed_list:
-    state: list
+    state: query
   register: result
 
 - name: Show all allowed entries
@@ -128,11 +128,11 @@ message:
 allowed_list:
   description: List of all IP/subnet entries in the allowed list.
   type: list
-  returned: when state is C(list)
+  returned: when state is C(query)
   sample:
-    - ip_subnet: "192.168.1.100"
+    - subnet: "192.168.1.100"
       comment: "Management workstation"
-    - ip_subnet: "10.0.0.0/8"
+    - subnet: "10.0.0.0/8"
       comment: "Corporate network"
 
 entry:
@@ -234,7 +234,7 @@ def run_module():
             comment=dict(type="str", required=False),
             state=dict(
                 type="str",
-                choices=["present", "absent", "list"],
+                choices=["present", "absent", "query"],
                 default="present",
             ),
         )
@@ -253,7 +253,7 @@ def run_module():
     try:
         client = _get_client(module)
 
-        if state == "list":
+        if state == "query":
             entries = _list_allowed_entries(client)
             if entries is None:
                 module.fail_json(msg="Failed to retrieve allowed list entries")

@@ -54,7 +54,7 @@
     # ========== TEST 2: READ (Verify created entry exists) ==========
     - name: "TEST 2: READ - List and verify entry was created"
       juniper.apstra.allowed_list:
-        state: list
+        state: query
       register: r_list_after_create
 
     - name: "TEST 2: Verify entry exists in list"
@@ -104,7 +104,7 @@
     # ========== TEST 4: READ (Verify updated entry) ==========
     - name: "TEST 4: READ - Verify updated entry"
       juniper.apstra.allowed_list:
-        state: list
+        state: query
       register: r_list_after_update
 
     - name: "TEST 4: Find and verify updated entry"
@@ -151,7 +151,7 @@
     # ========== TEST 7: VERIFY CLEANUP ==========
     - name: "TEST 7: READ - Verify entry was deleted"
       juniper.apstra.allowed_list:
-        state: list
+        state: query
       register: r_list_after_delete
 
     - name: "TEST 7: Verify entry is gone"
