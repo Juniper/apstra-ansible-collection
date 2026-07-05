@@ -1,5 +1,7 @@
+plugins/modules/allowed_list.py validate-modules:missing-gplv3-license
 plugins/modules/apstra_facts.py validate-modules:missing-gplv3-license
 plugins/modules/authenticate.py validate-modules:missing-gplv3-license
+plugins/modules/banned_list.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint_config.py validate-modules:missing-gplv3-license
 plugins/modules/blueprint_health.py validate-modules:missing-gplv3-license
