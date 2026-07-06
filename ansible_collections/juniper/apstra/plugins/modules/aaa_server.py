@@ -14,7 +14,7 @@ module: aaa_server
 
 short_description: Manage AAA (RADIUS) servers in an Apstra blueprint
 
-version_added: "1.0.9"
+version_added: "1.1.0"
 
 author:
   - "Prabhanjan K V (@prabhanjankv)"
