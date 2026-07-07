@@ -20,6 +20,7 @@ plugins/modules/generic_systems.py validate-modules:missing-gplv3-license
 plugins/modules/iba_probes.py validate-modules:missing-gplv3-license
 plugins/modules/interconnect_gateway.py validate-modules:missing-gplv3-license
 plugins/modules/interface_map.py validate-modules:missing-gplv3-license
+plugins/modules/os_images.py validate-modules:missing-gplv3-license
 plugins/modules/os_upgrade.py validate-modules:missing-gplv3-license
 plugins/modules/property_set.py validate-modules:missing-gplv3-license
 plugins/modules/resource_group.py validate-modules:missing-gplv3-license
