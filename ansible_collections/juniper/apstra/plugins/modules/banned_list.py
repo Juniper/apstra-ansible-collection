@@ -14,7 +14,7 @@ module: banned_list
 
 short_description: Manage platform-level IP/subnet ban list (denylist) in Apstra
 
-version_added: "1.2.0"
+version_added: "1.1.0"
 
 author:
   - "Shirish Ranoji (@sranoji)"
