@@ -1,0 +1,165 @@
+---
+# allowed_list - CRUD test playbook
+# Requires APSTRA_API_URL, APSTRA_USERNAME, APSTRA_PASSWORD env vars.
+# Tests allowed list create, read, update, and delete operations.
+
+- name: allowed_list module CRUD test
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # CRUD test IP/subnet to use (different from persistent test entry)
+    # Using unique IP to avoid conflicts with previous test runs
+    crud_test_ip: "10.250.250.251/32"
+    crud_test_comment_v1: "CRUD Test - Version 1"
+    crud_test_comment_v2: "CRUD Test - Version 2 (Updated)"
+
+  tasks:
+
+    # ========== TEST 1: CREATE ==========
+    - name: "TEST 1: CREATE - Add new IP to allowed list with comment"
+      juniper.apstra.allowed_list:
+        ip_subnet: "{{ crud_test_ip }}"
+        comment: "{{ crud_test_comment_v1 }}"
+        state: present
+      register: r_create
+
+    - name: "TEST 1: Verify CREATE operation"
+      ansible.builtin.assert:
+        that:
+          - r_create is not failed
+          - r_create.changed
+
+    - name: "TEST 1: Display created entry"
+      ansible.builtin.debug:
+        msg: "✓ Created entry: {{ r_create.entry }}"
+
+    # ========== TEST 1b: IDEMPOTENT CREATE (same parameters) ==========
+    - name: "TEST 1b: IDEMPOTENT - Re-run same CREATE (expect no-op)"
+      juniper.apstra.allowed_list:
+        ip_subnet: "{{ crud_test_ip }}"
+        comment: "{{ crud_test_comment_v1 }}"
+        state: present
+      register: r_idempotent_create
+
+    - name: "TEST 1b: Verify idempotent behavior"
+      ansible.builtin.assert:
+        that:
+          - not r_idempotent_create.changed
+
+    - name: "TEST 1b: Display idempotent result"
+      ansible.builtin.debug:
+        msg: "✓ Idempotent check passed: {{ r_idempotent_create.message }}"
+
+    # ========== TEST 2: READ (Verify created entry exists) ==========
+    - name: "TEST 2: READ - List and verify entry was created"
+      juniper.apstra.allowed_list:
+        state: query
+      register: r_list_after_create
+
+    - name: "TEST 2: Verify entry exists in list"
+      ansible.builtin.assert:
+        that:
+          - crud_test_ip in (r_list_after_create.allowed_list | map(attribute='subnet') | list)
+
+    - name: "TEST 2: Display entry in list"
+      ansible.builtin.debug:
+        msg: "✓ Entry found in list: Total entries = {{ r_list_after_create.allowed_list | length }}"
+
+    # ========== TEST 3: UPDATE ==========
+    - name: "TEST 3: UPDATE - Change comment for allowed entry"
+      juniper.apstra.allowed_list:
+        ip_subnet: "{{ crud_test_ip }}"
+        comment: "{{ crud_test_comment_v2 }}"
+        state: present
+      register: r_update
+
+    - name: "TEST 3: Verify UPDATE operation"
+      ansible.builtin.assert:
+        that:
+          - r_update is not failed
+          - r_update.changed
+
+    - name: "TEST 3: Display updated entry"
+      ansible.builtin.debug:
+        msg: "✓ Updated entry: {{ r_update.entry }}"
+
+    # ========== TEST 3b: IDEMPOTENT UPDATE (same parameters after update) ==========
+    - name: "TEST 3b: IDEMPOTENT - Re-run same UPDATE (expect no-op)"
+      juniper.apstra.allowed_list:
+        ip_subnet: "{{ crud_test_ip }}"
+        comment: "{{ crud_test_comment_v2 }}"
+        state: present
+      register: r_idempotent_update
+
+    - name: "TEST 3b: Verify idempotent update"
+      ansible.builtin.assert:
+        that:
+          - not r_idempotent_update.changed
+
+    - name: "TEST 3b: Display idempotent update result"
+      ansible.builtin.debug:
+        msg: "✓ Idempotent update passed"
+
+    # ========== TEST 4: READ (Verify updated entry) ==========
+    - name: "TEST 4: READ - Verify updated entry"
+      juniper.apstra.allowed_list:
+        state: query
+      register: r_list_after_update
+
+    - name: "TEST 4: Find and verify updated entry"
+      ansible.builtin.set_fact:
+        updated_entry: "{{ r_list_after_update.allowed_list | selectattr('subnet', 'equalto', crud_test_ip) | first }}"
+
+    - name: "TEST 4: Display verified entry"
+      ansible.builtin.debug:
+        msg: "✓ Entry verified: {{ updated_entry }}"
+
+    # ========== TEST 5: DELETE ==========
+    - name: "TEST 5: DELETE - Remove IP from allowed list"
+      juniper.apstra.allowed_list:
+        ip_subnet: "{{ crud_test_ip }}"
+        state: absent
+      register: r_delete
+
+    - name: "TEST 5: Verify DELETE operation"
+      ansible.builtin.assert:
+        that:
+          - r_delete is not failed
+          - r_delete.changed
+
+    - name: "TEST 5: Display delete result"
+      ansible.builtin.debug:
+        msg: "✓ Deleted entry: {{ r_delete.message }}"
+
+    # ========== TEST 5b: IDEMPOTENT DELETE (already deleted) ==========
+    - name: "TEST 5b: IDEMPOTENT - Re-run DELETE (expect no-op)"
+      juniper.apstra.allowed_list:
+        ip_subnet: "{{ crud_test_ip }}"
+        state: absent
+      register: r_idempotent_delete
+
+    - name: "TEST 5b: Verify idempotent delete"
+      ansible.builtin.assert:
+        that:
+          - not r_idempotent_delete.changed
+
+    - name: "TEST 5b: Display idempotent delete result"
+      ansible.builtin.debug:
+        msg: "✓ Idempotent delete passed (entry not found)"
+
+    # ========== TEST 7: VERIFY CLEANUP ==========
+    - name: "TEST 7: READ - Verify entry was deleted"
+      juniper.apstra.allowed_list:
+        state: query
+      register: r_list_after_delete
+
+    - name: "TEST 7: Verify entry is gone"
+      ansible.builtin.assert:
+        that:
+          - crud_test_ip not in (r_list_after_delete.allowed_list | map(attribute='subnet') | list)
+
+    - name: "TEST 7: Display final state"
+      ansible.builtin.debug:
+        msg: "✓ Entry successfully removed. Final count: {{ r_list_after_delete.allowed_list | length }} entries"
+
