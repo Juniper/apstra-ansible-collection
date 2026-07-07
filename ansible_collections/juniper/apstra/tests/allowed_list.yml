@@ -162,4 +162,3 @@
     - name: "TEST 7: Display final state"
       ansible.builtin.debug:
         msg: "✓ Entry successfully removed. Final count: {{ r_list_after_delete.allowed_list | length }} entries"
-
