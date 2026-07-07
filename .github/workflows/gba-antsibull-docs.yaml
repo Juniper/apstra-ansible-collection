@@ -1,0 +1,69 @@
+name: antsibull
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ansible_collections/**"
+      - "!ansible_collections/juniper/apstra/docs/**"
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Copy collections to ansible
+      run : |
+        ls
+        mkdir -p ~/.ansible/collections/ansible_collections
+        cp -rv ansible_collections/juniper/ ~/.ansible/collections/ansible_collections/juniper
+        ls -l ~/.ansible/collections/ansible_collections/juniper
+
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+
+    - name: Create build directory
+      run: |
+          mkdir -p _build
+          chmod og-rwx _build
+
+    - name: Install antsibull-docs (and sphinx template)
+      run: |
+        pip install antsibull-docs sphinx_ansible_theme
+
+    - name: Make antsibull
+      run: |
+        antsibull-docs sphinx-init \
+        --dest-dir _build \
+        --no-indexes \
+        --no-add-antsibull-docs-version \
+        --output-format simplified-rst \
+        --use-current \
+        --squash-hierarchy \
+        --lenient \
+        --project "Juniper Network Apstra Ansible Collection" \
+        --copyright "Juniper Networks, Inc." \
+        --title "Apstra Ansible Collection" \
+        juniper.apstra
+
+    - name: build
+      run: |
+        _build/build.sh
+
+    - name: Copy to docs
+      run: |
+        cp -r _build/rst/*  ansible_collections/juniper/apstra/docs/
+
+    - name: Commit doc
+      run: |
+        git config user.name "GitHub Actions Bot"
+        git config user.email "<>"
+        git add ansible_collections/juniper/apstra/docs/
+        git commit -m "Update doc via antsibull-docs and GitHub Actions" || echo "No changes"
+        git push
