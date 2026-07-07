@@ -57,7 +57,7 @@ options:
     description:
       - IP address or subnet CIDR notation to add/remove from the allow list.
       - Required for C(state) C(present) or C(absent).
-      - Examples: C(192.168.1.10), C(10.0.0.0/24), C(2001:db8::1/32).
+      - Examples C(192.168.1.10), C(10.0.0.0/24), C(2001:db8::1/32).
     type: str
     required: false
 

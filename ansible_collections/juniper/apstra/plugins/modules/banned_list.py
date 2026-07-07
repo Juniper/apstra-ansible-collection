@@ -63,7 +63,7 @@ options:
       - Required for C(state) C(absent).
       - Note - entries cannot be manually created; they are automatically added
         by the rate limiter when IP/subnets violate rate limit rules.
-      - Examples: C(192.168.1.10), C(10.0.0.0/24), C(2001:db8::1/32).
+      - Examples C(192.168.1.10), C(10.0.0.0/24), C(2001:db8::1/32).
     type: str
     required: false
 
