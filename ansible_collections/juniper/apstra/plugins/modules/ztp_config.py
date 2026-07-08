@@ -66,7 +66,7 @@ options:
       - Whether to verify SSL certificates when connecting to the ZTP VM.
     type: bool
     required: false
-    default: false
+    default: true
   scope:
     description:
       - The configuration scope to manage.
@@ -158,13 +158,11 @@ options:
       - Current ZTP web UI password (required for C(scope=password)).
     type: str
     required: false
-    no_log: true
   new_password:
     description:
       - New ZTP web UI password (required for C(scope=password)).
     type: str
     required: false
-    no_log: true
 """
 
 EXAMPLES = """
