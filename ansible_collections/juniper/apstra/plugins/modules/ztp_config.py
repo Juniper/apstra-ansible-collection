@@ -158,13 +158,11 @@ options:
       - Current ZTP web UI password (required for C(scope=password)).
     type: str
     required: false
-    no_log: true
   new_password:
     description:
       - New ZTP web UI password (required for C(scope=password)).
     type: str
     required: false
-    no_log: true
 """
 
 EXAMPLES = """
