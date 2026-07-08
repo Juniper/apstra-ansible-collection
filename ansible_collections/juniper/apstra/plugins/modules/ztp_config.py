@@ -66,7 +66,7 @@ options:
       - Whether to verify SSL certificates when connecting to the ZTP VM.
     type: bool
     required: false
-    default: false
+    default: true
   scope:
     description:
       - The configuration scope to manage.
