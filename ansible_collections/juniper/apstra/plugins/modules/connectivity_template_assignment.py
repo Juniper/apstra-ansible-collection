@@ -220,8 +220,8 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolut
 )
 
 if not AOS_IMPORT_ERROR:
-    from aos.sdk.reference_design.extension.endpoint_policy import (
-        generator as ct_gen,
+    from aos.sdk.api.reference_design._extensions import (
+        endpoint_policy_generator as ct_gen,
     )
 
 

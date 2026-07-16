@@ -1,5 +1,9 @@
 REMOTE ?= origin
 
+# Ensure pyenv is on PATH
+export PYENV_ROOT ?= $(HOME)/.pyenv
+export PATH := $(PYENV_ROOT)/bin:$(PYENV_ROOT)/shims:$(PATH)
+
 APSTRA_COLLECTION_ROOT := ansible_collections/juniper/apstra
 
 VERSION := $(shell sed -n '/^version: / s,.*"\(.*\)"$$,\1,p' $(APSTRA_COLLECTION_ROOT)/galaxy.yml)
@@ -45,23 +49,27 @@ AOS_SDK_DEFAULT_WHL := aos_sdk-0.1.0-py3-none-any.whl
 AOS_SDK_DEFAULT_URL := https://s-artifactory.juniper.net:443/artifactory/atom-generic/aos_sdk_5.1.0/$(AOS_SDK_DEFAULT_WHL)
 
 pipenv: build/wheels
-	@# Pick the highest-versioned aos_sdk wheel; fall back to downloading the default
-	@AOS_SDK_WHL=$$(ls build/wheels/aos_sdk-*.whl 2>/dev/null | grep -v '$(AOS_SDK_DEFAULT_WHL)' | sort -V | tail -1); \
-	if [ -z "$$AOS_SDK_WHL" ]; then \
-		AOS_SDK_WHL=$$(ls build/wheels/$(AOS_SDK_DEFAULT_WHL) 2>/dev/null); \
-	fi; \
-	if [ -z "$$AOS_SDK_WHL" ]; then \
-		echo "No aos_sdk wheel found in build/wheels/, downloading default $(AOS_SDK_DEFAULT_WHL)..."; \
-		curl -fso "build/wheels/$(AOS_SDK_DEFAULT_WHL)" "$(AOS_SDK_DEFAULT_URL)"; \
-		AOS_SDK_WHL="build/wheels/$(AOS_SDK_DEFAULT_WHL)"; \
-	fi; \
-	AOS_SDK_BASENAME=$$(basename $$AOS_SDK_WHL); \
-	echo "Using aos_sdk wheel: $$AOS_SDK_BASENAME"; \
-	CURRENT=$$(sed -n 's/.*aos-sdk = {file = "build\/wheels\/\(aos_sdk-[^"]*\.whl\)".*/\1/p' Pipfile); \
-	if [ "$$CURRENT" != "$$AOS_SDK_BASENAME" ]; then \
-		echo "Updating Pipfile: $$CURRENT -> $$AOS_SDK_BASENAME"; \
-		sed -i "s|aos-sdk = {file = \"build/wheels/aos_sdk-[^\"]*\.whl\"}|aos-sdk = {file = \"build/wheels/$$AOS_SDK_BASENAME\"}|" Pipfile; \
-		rm -f Pipfile.lock; \
+	@# If Pipfile references aos-sdk-api (PyPI), skip wheel management entirely
+	@if grep -q "aos-sdk-api" Pipfile; then \
+		echo "Using aos-sdk-api from PyPI (no wheel needed)"; \
+	else \
+		AOS_SDK_WHL=$$(ls build/wheels/aos_sdk-*.whl 2>/dev/null | grep -v '$(AOS_SDK_DEFAULT_WHL)' | sort -V | tail -1); \
+		if [ -z "$$AOS_SDK_WHL" ]; then \
+			AOS_SDK_WHL=$$(ls build/wheels/$(AOS_SDK_DEFAULT_WHL) 2>/dev/null); \
+		fi; \
+		if [ -z "$$AOS_SDK_WHL" ]; then \
+			echo "No aos_sdk wheel found in build/wheels/, downloading default $(AOS_SDK_DEFAULT_WHL)..."; \
+			curl -fso "build/wheels/$(AOS_SDK_DEFAULT_WHL)" "$(AOS_SDK_DEFAULT_URL)"; \
+			AOS_SDK_WHL="build/wheels/$(AOS_SDK_DEFAULT_WHL)"; \
+		fi; \
+		AOS_SDK_BASENAME=$$(basename $$AOS_SDK_WHL); \
+		echo "Using aos_sdk wheel: $$AOS_SDK_BASENAME"; \
+		CURRENT=$$(sed -n 's/.*aos-sdk = {file = "build\/wheels\/\(aos_sdk-[^"]*\.whl\)".*/\1/p' Pipfile); \
+		if [ "$$CURRENT" != "$$AOS_SDK_BASENAME" ]; then \
+			echo "Updating Pipfile: $$CURRENT -> $$AOS_SDK_BASENAME"; \
+			sed -i "s|aos-sdk = {file = \"build/wheels/aos_sdk-[^\"]*\.whl\"}|aos-sdk = {file = \"build/wheels/$$AOS_SDK_BASENAME\"}|" Pipfile; \
+			rm -f Pipfile.lock; \
+		fi; \
 	fi
 	(pip install pipenv pre-commit && \
 	 export PATH="$$HOME/.local/bin:$$PATH" && \

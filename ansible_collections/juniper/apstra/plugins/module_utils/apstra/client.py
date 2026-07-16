@@ -4,24 +4,24 @@ __metaclass__ = type
 from time import sleep
 
 try:
-    from aos.sdk.client import (
+    from aos.sdk.api import (
         Client,
         ClientError,
     )
-    from aos.sdk.reference_design.two_stage_l3clos import Client as l3closClient
-    from aos.sdk.reference_design.freeform.client import Client as freeformClient
-    from aos.sdk.reference_design.extension.endpoint_policy import (
+    from aos.sdk.api.reference_design.two_stage_l3clos.client import (
+        Client as l3closClient,
+    )
+    from aos.sdk.api.reference_design.freeform.client import Client as freeformClient
+    from aos.sdk.api.reference_design._extensions.endpoint_policy import (
         Client as endpointPolicyClient,
     )
-    from aos.sdk.reference_design.extension.resource_allocation import (
+    from aos.sdk.api.reference_design._extensions.resource_allocation import (
         Client as resourceAllocationClient,
     )
-    from aos.sdk.reference_design.extension.tags.client import Client as tagsClient
+    from aos.sdk.api.reference_design._extensions.tags import Client as tagsClient
     from aos.sdk.api.reference_design._extensions.virtual_infra import (
         Client as virtualInfraClient,
     )
-    from aos.sdk.graph import Graph
-    from aos.sdk.graph import query
 except ImportError as imp_exc:
     AOS_IMPORT_ERROR = imp_exc
 else:
@@ -91,9 +91,7 @@ def _add_objects_to_db(objects_db, full_object_type, objects):
         return
     if full_object_type not in objects_db:
         objects_db[full_object_type] = {}
-    if isinstance(objects, Graph):
-        objects_db[full_object_type][objects.id] = objects.compact_json()
-    elif isinstance(objects, dict):
+    if isinstance(objects, dict):
         if objects.get("id") is not None:
             # Individual object
             objects_db[full_object_type][objects["id"]] = objects
@@ -1325,34 +1323,33 @@ class ApstraClientFactory:
         )
         return tags
 
-    def query_blueprint(self, blueprint_id, graph_query):
+    def query_blueprint(self, blueprint_id, qe_string):
         """
-        Query the blueprint with the given ID.
+        Query the blueprint with the given QE query string.
 
         :param blueprint_id: The ID of the blueprint to query.
-        :param query_string: The query string.
-        :return: The result of the query.
+        :param qe_string: The QE query string.
+        :return: The result of the query as a list of dicts.
         """
-        bp = self.get_blueprint_graph(blueprint_id)
-
-        result = list(query.iterate(bp, graph_query))
-        return result
+        blueprint_client = self.get_client("blueprints", blueprint_id=blueprint_id)
+        result = blueprint_client.blueprints[blueprint_id].query(qe_string)
+        if result is None:
+            return []
+        items = result.get("items", result) if isinstance(result, dict) else result
+        return list(items) if items else []
 
     def get_by_label(self, blueprint_id, obj_type, label, label_key="label"):
         """
         Find an object by label.
 
         :param blueprint_id: The ID of the blueprint to query.
-        :param obj_type: The query string.
+        :param obj_type: The node type to search.
         :param label: The label of the object to find.
         :param label_key: The key to use for the label.
         :return: The result of the query.
         """
-        bp = self.get_blueprint_graph(blueprint_id)
-
-        get_query = query.node(type=obj_type, **{label_key: label}, name=obj_type)
-
-        result = list(query.iterate(bp, get_query))
+        qe_string = f'node(type="{obj_type}", {label_key}="{label}", name="{obj_type}")'
+        result = self.query_blueprint(blueprint_id, qe_string)
         if not result:
             self.module.debug(f"Object with {label_key} {label} not found")
             return result
@@ -1380,7 +1377,7 @@ class ApstraClientFactory:
         obj = self.get_by_label(blueprint_id, obj_type, label, label_key)
         if not obj:
             return None
-        return obj.id
+        return obj.get("id") if isinstance(obj, dict) else obj.id
 
     # ── Platform RBAC helpers ────────────────────────────────────────
     # Users (and global roles) are NOT blueprint-scoped, so they cannot

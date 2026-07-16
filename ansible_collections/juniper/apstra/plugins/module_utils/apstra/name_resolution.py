@@ -533,6 +533,15 @@ def resolve_system_node_id(client_factory, blueprint_id, node_ref):
         if (sys_node.get("label") or "").lower() == ref_lower:
             return sys_node["id"]
 
+    # Last resort: check if node_ref is a valid graph node ID of any type
+    # (e.g. interface node IDs passed directly, which are short non-UUID strings)
+    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.bp_nodes import (  # noqa: PLC0415
+        get_node,
+    )
+
+    if get_node(client_factory, blueprint_id, node_ref) is not None:
+        return node_ref
+
     available = [r.get("sys", {}).get("label", "") for r in results]
     raise ValueError(
         f"System node '{node_ref}' not found in blueprint. " f"Available: {available}"
