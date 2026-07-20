@@ -20,21 +20,41 @@
 
     - name: Set blueprint name fact
       ansible.builtin.set_fact:
-        blueprint_name: "test_rbac_roles_{{ local_hostname.stdout }}"
+        blueprint_name_1: "test_rbac_roles_1_{{ local_hostname.stdout }}"
+        blueprint_name_2: "test_rbac_roles_2_{{ local_hostname.stdout }}"
+        blueprint_name_3: "test_rbac_roles_3_{{ local_hostname.stdout }}"
 
     - name: Connect to Apstra
       juniper.apstra.authenticate:
         logout: false
       register: auth
 
-    - name: Create blueprint for testing
+    - name: Create first blueprint for testing
       juniper.apstra.blueprint:
         body:
-          label: "{{ blueprint_name }}"
+          label: "{{ blueprint_name_1 }}"
           design: "freeform"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
-      register: bp_create
+      register: bp_create_1
+
+    - name: Create second blueprint for testing
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name_2 }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp_create_2
+
+    - name: Create third blueprint for testing
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name_3 }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp_create_3
 
     - name: Pick unique role/user names
       ansible.builtin.set_fact:
@@ -42,7 +62,11 @@
         role_granular_name: "ansible_role_granular"
         role_tenant_name: "tenant-vn-only"
         role_user_name: "ansible_role_user"
-        role_scope_blueprint_id: "{{ bp_create.id.blueprint }}"
+        role_scope_blueprint_id: "{{ bp_create_1.id.blueprint }}"
+        role_scope_blueprint_ids:
+          - "{{ bp_create_1.id.blueprint }}"
+          - "{{ bp_create_2.id.blueprint }}"
+        role_unused_blueprint_id: "{{ bp_create_3.id.blueprint }}"
 
     # -------------------------
     # GLOBAL ROLE CRUD
@@ -135,9 +159,9 @@
           role: "{{ role_granular_name }}"
           type: "granular"
           label: "{{ role_granular_name }}"
-          description: "granular role create"
+          description: "granular role create for two blueprints"
           granular_permissions:
-            - scope: "{{ role_scope_blueprint_id }}"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
         state: present
@@ -150,7 +174,9 @@
           - gr_create.changed
           - gr_create.role.role == role_granular_name
           - gr_create.role.granular_permissions | length > 0
-          - role_scope_blueprint_id in gr_create.role.granular_permissions[0].scope
+          - role_scope_blueprint_ids[0] in gr_create.role.granular_permissions[0].scope
+          - role_scope_blueprint_ids[1] in gr_create.role.granular_permissions[0].scope
+          - role_unused_blueprint_id not in gr_create.role.granular_permissions[0].scope
 
     - name: Re-run granular role create body (idempotent)
       juniper.apstra.rbac_roles:
@@ -158,8 +184,7 @@
           role: "{{ role_granular_name }}"
           type: "granular"
           granular_permissions:
-            - scope:
-                - "{{ role_scope_blueprint_id }}"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
         state: present
@@ -176,10 +201,9 @@
         body:
           role: "{{ role_granular_name }}"
           type: "granular"
-          description: "granular role update"
+          description: "granular role update for two blueprints"
           granular_permissions:
-            - scope:
-                - "{{ role_scope_blueprint_id }}"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
                 - "rbac.blueprint.write"
@@ -200,7 +224,7 @@
           role: "{{ role_granular_name }}"
           type: "granular"
           granular_permissions:
-            - scope: "{{ role_scope_blueprint_id }}"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
           permissions:
@@ -227,9 +251,9 @@
           role: "{{ role_tenant_name }}"
           label: "tenant-vn-only"
           type: "granular"
-          description: "Virtual network access for selected blueprint"
+          description: "Virtual network access for selected blueprints"
           granular_permissions:
-            - scope: "{{ role_scope_blueprint_id }}"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "two_stage_l3clos.virtual_networks.write"
                 - "two_stage_l3clos.virtual_network_endpoints.write"
@@ -252,8 +276,7 @@
           role: "{{ role_tenant_name }}"
           type: "granular"
           granular_permissions:
-            - scope:
-                - "{{ role_scope_blueprint_id }}"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "two_stage_l3clos.virtual_networks.write"
                 - "two_stage_l3clos.virtual_network_endpoints.write"
@@ -417,9 +440,25 @@
         auth_token: "{{ auth.token }}"
       failed_when: false
 
-    - name: Cleanup test blueprint
+    - name: Cleanup first test blueprint
       juniper.apstra.blueprint:
-        id: "{{ bp_create.id }}"
+        id: "{{ bp_create_1.id }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup second test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_create_2.id }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup third test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_create_3.id }}"
         lock_state: "ignore"
         state: absent
         auth_token: "{{ auth.token }}"
