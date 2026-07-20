@@ -71,6 +71,12 @@
       ansible.builtin.set_fact:
         tb: "{{ testbed_raw.testbeds.apstra.testbed1 }}"
 
+    - name: "Phase 0b.1 — Derive topology_name from testbed (first topology key)"
+      tags: [always]
+      ansible.builtin.set_fact:
+        topology_name: "{{ tb.topologies.keys() | list | first }}"
+      when: topology_name is not defined or topology_name == ''
+
     - name: "Phase 0c — Derive AOS credentials and topology from testbed"
       tags: [always]
       ansible.builtin.set_fact:
@@ -1239,6 +1245,28 @@
         label: "{{ item.key }}"
       register: sz_results
 
+    # ─── Phase 16: SZ Loopback IP Pool Assignment ──────────────────────────────
+    # Assign loopback pool immediately after SZ creation so that on any re-run
+    # the pool is already assigned before Phase 7 (first commit) executes.
+    # ═══════════════════════════════════════════════════════════════════════════
+    - name: "Phase 16 — Assign loopback IP pool to SZ: {{ item.item.key }}"
+      tags: [phase14_sz, phase15_vn]
+      juniper.apstra.resource_group:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          group_type: "ip"
+          group_name: "sz:{{ item.id.security_zone }},leaf_loopback_ips"
+        body:
+          pool_ids:
+            - "{{ loopback_pool_name }}"
+        state: present
+      loop: "{{ sz_results.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+
     # ─── Phase 15: Virtual Networks — ESI expansion + global vlan_id ──────────
     # Tests two enhancements to the virtual_network module simultaneously:
     #   Feature 1 — global vlan_id: specified at body level, applied to all
@@ -1445,7 +1473,7 @@
           blueprint: "{{ blueprint_label }}"
         body:
           label: "customer-test-vn"
-          description: "Regression test — customer scenario with create_policy_tagged"
+          description: "Regression test - customer scenario with create_policy_tagged"
           ipv4_enabled: true
           virtual_gateway_ipv4: "10.100.10.1"
           ipv4_subnet: "10.100.10.0/24"
@@ -1491,30 +1519,6 @@
         auth_token: "{{ token }}"
         id: "{{ customer_vn.id }}"
         state: absent
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Phase 16: SZ Loopback IP Pool Assignment
-    # Each security zone requires a loopback IP pool assigned to its per-leaf
-    # loopback resource group, or the blueprint commit will fail with
-    # 'Loopback interface … missing IPv4 address' errors.
-    # ═══════════════════════════════════════════════════════════════════════════
-    - name: "Phase 16 — Assign loopback IP pool to SZ: {{ item.item.key }}"
-      tags: [phase14_sz, phase15_vn]
-      juniper.apstra.resource_group:
-        api_url: "{{ api_url }}"
-        verify_certificates: "{{ verify_certs }}"
-        auth_token: "{{ token }}"
-        id:
-          blueprint: "{{ blueprint_label }}"
-          group_type: "ip"
-          group_name: "sz:{{ item.id.security_zone }},leaf_loopback_ips"
-        body:
-          pool_ids:
-            - "{{ loopback_pool_name }}"
-        state: present
-      loop: "{{ sz_results.results }}"
-      loop_control:
-        label: "{{ item.item.key }}"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Phase 17: Deploy after SZ + VN configuration

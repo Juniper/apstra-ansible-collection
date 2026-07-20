@@ -191,8 +191,10 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 )
 
 if not AOS_IMPORT_ERROR:
-    from aos.sdk.graph import query
-    from aos.sdk.graph.matchers import aeq
+    pass  # graph query/aeq not needed; raw QE strings used instead
+
+
+_AEQ_SENTINEL = object()  # unused, kept for reference
 
 
 def main():
@@ -264,21 +266,17 @@ def main():
                     )
             elif virtual_network_label:
                 # Get the endpoint id by label
-                ep_policy_by_vn = (
-                    query.node(type="virtual_network", label=virtual_network_label)
-                    .in_(type="vn_to_attach")
-                    .node(type="ep_endpoint_policy")
-                    .in_(type="ep_first_subpolicy")
-                    .node(type="ep_endpoint_policy", policy_type_name="pipeline")
-                    .in_(type="ep_subpolicy")
-                    .node(
-                        type="ep_endpoint_policy",
-                        policy_type_name="batch",
-                        name=leaf_object_type,
-                    )
+                ep_policy_by_vn_qe = (
+                    f'node(type="virtual_network", label="{virtual_network_label}")'
+                    f'.in_(type="vn_to_attach")'
+                    f'.node(type="ep_endpoint_policy")'
+                    f'.in_(type="ep_first_subpolicy")'
+                    f'.node(type="ep_endpoint_policy", policy_type_name="pipeline")'
+                    f'.in_(type="ep_subpolicy")'
+                    f'.node(type="ep_endpoint_policy", policy_type_name="batch", name="{leaf_object_type}")'
                 )
                 ep_found = client_factory.query_blueprint(
-                    id["blueprint"], ep_policy_by_vn
+                    id["blueprint"], ep_policy_by_vn_qe
                 )
 
                 if not ep_found:
@@ -297,7 +295,7 @@ def main():
                     )
 
                 # Finally, save the endpoint policy id
-                id[leaf_object_type] = ep_found[0][leaf_object_type].id
+                id[leaf_object_type] = ep_found[0][leaf_object_type]["id"]
 
                 current_object = client_factory.object_request(object_type, "get", id)
         else:
@@ -368,21 +366,38 @@ def main():
                             used = False
 
                             # Find the remote interface
-                            find_remote_if = (
-                                query.node(
-                                    type="interface",
-                                    description=aeq(f"*{remote_host}:{if_name}"),
-                                )
-                                .out(type="link")
-                                .node(type="link")
-                                .in_(type="link")
-                                .node(
-                                    type="interface", if_name=if_name, name="interface"
-                                )
+                            # Query all interfaces then filter by description suffix
+                            find_remote_if_qe = (
+                                f'node(type="interface", if_name="{if_name}", name="interface")'
+                                f'.in_(type="link")'
+                                f'.node(type="link")'
+                                f'.out(type="link")'
+                                f'.node(type="interface")'
                             )
+                            all_ifs_found = client_factory.query_blueprint(
+                                id["blueprint"], find_remote_if_qe
+                            )
+                            # Filter by description containing remote_host
+                            remote_ifs_found = [
+                                r
+                                for r in all_ifs_found
+                                if (r.get("interface") or {})
+                                .get("description", "")
+                                .endswith(f"{remote_host}:{if_name}")
+                            ]
                             remote_ifs_found = client_factory.query_blueprint(
-                                id["blueprint"], find_remote_if
+                                id["blueprint"],
+                                f'node(type="interface", if_name="{if_name}", name="interface")',
                             )
+                            # Filter by description suffix matching remote_host:if_name
+                            desc_suffix = f"{remote_host}:{if_name}"
+                            remote_ifs_found = [
+                                r
+                                for r in remote_ifs_found
+                                if (r.get("interface") or {})
+                                .get("description", "")
+                                .endswith(desc_suffix)
+                            ]
                             if not remote_ifs_found:
                                 module.fail_json(
                                     msg=f"Remote interface {remote_host}:{if_name} not found"
@@ -395,26 +410,22 @@ def main():
                                 module.fail_json(
                                     msg=f"Object missing key 'interface': {remote_ifs_found[0]}"
                                 )
-                            remote_if_id = remote_ifs_found[0]["interface"].id
+                            remote_if_id = remote_ifs_found[0]["interface"]["id"]
 
                             # Custom query to determine if the interface is associated with the virtual_network.
-                            if_to_vn = (
-                                query.node(id=remote_if_id)
-                                .out(type="ep_member_of")
-                                .node(type="ep_group")
-                                .in_(type="ep_affected_by")
-                                .node(type="ep_application_instance")
-                                .out(type="ep_nested")
-                                .node(type="ep_endpoint_policy")
-                                .out(type="vn_to_attach")
-                                .node(
-                                    type="virtual_network",
-                                    label=virtual_network_label,
-                                    name="virtual_network",
-                                )
+                            if_to_vn_qe = (
+                                f'node(id="{remote_if_id}")'
+                                f'.out(type="ep_member_of")'
+                                f'.node(type="ep_group")'
+                                f'.in_(type="ep_affected_by")'
+                                f'.node(type="ep_application_instance")'
+                                f'.out(type="ep_nested")'
+                                f'.node(type="ep_endpoint_policy")'
+                                f'.out(type="vn_to_attach")'
+                                f'.node(type="virtual_network", label="{virtual_network_label}", name="virtual_network")'
                             )
                             if_to_vn_found = client_factory.query_blueprint(
-                                id["blueprint"], if_to_vn
+                                id["blueprint"], if_to_vn_qe
                             )
                             if if_to_vn_found:
                                 if len(if_to_vn_found) > 1:
