@@ -41,7 +41,10 @@ Synopsis
 - Maps to ``/api/aaa/roles``.
 - Supports role create, update, delete, and idempotent checks.
 - ``body.type`` is required for ``state: present`` and must be ``global`` or ``granular``.
+- ``type: global`` uses ``permissions`` and rejects ``granular_permissions`` / ``blueprint_permissions``.
+- ``type: granular`` uses ``granular_permissions`` / ``blueprint_permissions`` and rejects ``permissions``.
 - ``granular_permissions[].scope`` accepts only shorthand blueprint IDs (string or list), which the module expands to ``blueprint_id in [...]``.
+- Invalid combinations are rejected by the module before any API call is made.
 
 Parameters
 ----------
@@ -57,6 +60,9 @@ Parameters
   - Required for ``state: present``.
   - Role identifier via ``body.role`` (or ``body.name`` alias).
   - ``body.type`` required for ``state: present`` with values ``global`` or ``granular``.
+  - ``type: global`` requires ``permissions``.
+  - ``type: granular`` requires ``granular_permissions`` / ``blueprint_permissions``.
+  - ``granular_permissions`` entries must contain ``scope`` and ``permissions``.
   - ``granular_permissions`` / ``blueprint_permissions`` scopes must be shorthand blueprint IDs (full scope expressions are rejected).
 
 - ``state`` (str): Desired state. Choices: ``present`` (default), ``absent``.

@@ -20,6 +20,10 @@ description:
   - Maps to C(/api/aaa/roles).
   - Supports role create/update/delete with idempotency.
     - Role C(type) is mandatory for state C(present) and must be C(global) or C(granular).
+        - For C(type=global), use C(body.permissions) and do not provide
+            C(body.granular_permissions)/C(body.blueprint_permissions).
+        - For C(type=granular), use C(body.granular_permissions)
+            (or C(body.blueprint_permissions)) and do not provide C(body.permissions).
     - Granular permission C(scope) accepts only shorthand blueprint values
         (a single blueprint id string or a list of blueprint ids), which the
         module expands to C(blueprint_id in [...]).
@@ -60,6 +64,11 @@ options:
             - Required for state C(present).
             - Role identifier must be supplied via C(body.role) (or C(body.name) alias).
             - C(body.type) is required for state C(present) and must be C(global) or C(granular).
+            - C(body.type=global) requires C(body.permissions) and rejects
+                C(body.granular_permissions)/C(body.blueprint_permissions).
+            - C(body.type=granular) requires
+                C(body.granular_permissions)/C(body.blueprint_permissions) and rejects
+                C(body.permissions).
                         - For C(granular_permissions) and C(blueprint_permissions), C(scope)
                             must be a single blueprint id string or a list of blueprint ids.
                         - Full scope expressions (for example C(blueprint_id in [...])) are
@@ -149,6 +158,34 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 
 
 VALID_ROLE_TYPES = {"global", "granular"}
+
+
+def _has_non_null(body, key):
+    return key in body and body.get(key) is not None
+
+
+def _validate_permission_shape(body, role_type):
+    has_permissions = _has_non_null(body, "permissions")
+    has_granular_permissions = _has_non_null(body, "granular_permissions") or _has_non_null(
+        body, "blueprint_permissions"
+    )
+
+    if role_type == "global":
+        if not has_permissions:
+            raise ValueError("body.permissions is required when body.type=global")
+        if has_granular_permissions:
+            raise ValueError(
+                "body.granular_permissions/body.blueprint_permissions is not allowed when body.type=global"
+            )
+        return
+
+    if role_type == "granular":
+        if not has_granular_permissions:
+            raise ValueError(
+                "body.granular_permissions (or body.blueprint_permissions) is required when body.type=granular"
+            )
+        if has_permissions:
+            raise ValueError("body.permissions is not allowed when body.type=granular")
 
 
 def _normalize(value):
@@ -411,6 +448,11 @@ def main():
             module.fail_json(
                 msg=f"Invalid body.type '{role_type}'. Allowed values: global, granular"
             )
+
+        try:
+            _validate_permission_shape(body, role_type)
+        except ValueError as e:
+            module.fail_json(msg=str(e))
 
         if not current:
             create_payload = _build_payload(body)

@@ -104,6 +104,28 @@
           - g_update.changed
           - "'core.blueprints.write' in g_update.role.permissions"
 
+    - name: Reject global role with granular_permissions
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+          type: "global"
+          permissions:
+            - "core.blueprints.read"
+          granular_permissions:
+            - scope: "{{ role_scope_blueprint_id }}"
+              permissions:
+                - "core.blueprints.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: g_invalid_granular
+      ignore_errors: true
+
+    - name: Assert global role rejects granular_permissions
+      ansible.builtin.assert:
+        that:
+          - g_invalid_granular.failed
+          - '"body.granular_permissions/body.blueprint_permissions is not allowed when body.type=global" in g_invalid_granular.msg'
+
     # -------------------------
     # GRANULAR ROLE CRUD
     # -------------------------
@@ -172,6 +194,28 @@
           - gr_update.role.granular_permissions | length > 0
           - "'rbac.blueprint.write' in gr_update.role.granular_permissions[0].permissions"
 
+    - name: Reject granular role with permissions
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+          type: "granular"
+          granular_permissions:
+            - scope: "{{ role_scope_blueprint_id }}"
+              permissions:
+                - "rbac.blueprint.read"
+          permissions:
+            - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_invalid_permissions
+      ignore_errors: true
+
+    - name: Assert granular role rejects permissions
+      ansible.builtin.assert:
+        that:
+          - gr_invalid_permissions.failed
+          - '"body.permissions is not allowed when body.type=granular" in gr_invalid_permissions.msg'
+
     # -------------------------
     # ADDITIONAL GRANULAR ROLE CRUD
     # -------------------------
@@ -184,7 +228,6 @@
           label: "tenant-vn-only"
           type: "granular"
           description: "Virtual network access for selected blueprint"
-          permissions: null
           granular_permissions:
             - scope: "{{ role_scope_blueprint_id }}"
               permissions:
