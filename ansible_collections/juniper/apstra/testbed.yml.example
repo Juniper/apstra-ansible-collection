@@ -1,0 +1,133 @@
+# testbed.yml.example
+#
+# Copy this file to testbed.yml and fill in the values for your environment.
+# testbed.yml is git-ignored and should NEVER be committed to the repository.
+#
+# Usage:
+#   cp testbed.yml.example testbed.yml
+#   # Edit testbed.yml with your Apstra server details and device inventory
+#   make test-integration-connectivity_template_connectorops TESTBED_FILE=ansible_collections/juniper/apstra/testbed.yml
+
+testbeds:
+  apstra:
+    testbed1:
+      aos:
+        api_url: https://<APSTRA_IP>
+        ip: <APSTRA_IP>
+        password: <APSTRA_PASSWORD>
+        username: admin
+        version: "<APSTRA_VERSION>"     # e.g. "6.1.2"
+      aos_edge:
+        pre_deploy: true
+        receiver_ip: <APSTRA_IP>
+        receiver_port: 9595
+        ssh_config:
+          host: <APSTRA_IP>
+          password: <APSTRA_SSH_PASSWORD>
+          port: 22
+          username: admin
+        working_dir: /home/admin/aos-edge
+      apstra_flows:
+        remote-server-1:
+          ip: <FLOWS_SERVER_IP>
+          opensearch_password: <OPENSEARCH_PASSWORD>
+          opensearch_port: 9200
+          opensearch_username: admin
+          ssh_config:
+            host: <FLOWS_SERVER_IP>
+            password: <FLOWS_SSH_PASSWORD>
+            port: 22
+            username: <FLOWS_SSH_USER>
+      devices:
+        devices_list:
+          <TOPOLOGY_NAME>-leaf1:
+            ip: <LEAF1_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-leaf2:
+            ip: <LEAF2_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-leaf3border:
+            ip: <LEAF3_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-leaf4border:
+            ip: <LEAF4_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-spine1:
+            ip: <SPINE1_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-spine2:
+            ip: <SPINE2_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-srx1:
+            ip: <SRX1_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          <TOPOLOGY_NAME>-srx2:
+            ip: <SRX2_IP>
+            mgmt_ip: <MGMT_HOST>
+            ssh_port: <SSH_PORT>
+          # Optional: add host/server entries if your topology includes them
+          # <TOPOLOGY_NAME>-h1:
+          #   ip: <H1_IP>
+          #   mgmt_ip: <MGMT_HOST>
+          #   password: root
+          #   ssh_port: <SSH_PORT>
+          #   username: root
+        password: <DEVICE_PASSWORD>
+        ssh_port: 22
+        username: admin
+      topologies:
+        <TOPOLOGY_NAME>:
+          blueprint_template: <BLUEPRINT_TEMPLATE_NAME>
+          # flow_server: remote-server-1   # uncomment if using Apstra Flows
+          hosts:
+            # Map host NICs to leaf switch interfaces
+            # <TOPOLOGY_NAME>-h1:
+            #   eth1:
+            #     <TOPOLOGY_NAME>-leaf1: ge-0/0/2
+            #   eth2:
+            #     <TOPOLOGY_NAME>-leaf2: ge-0/0/2
+          nodes:
+            <TOPOLOGY_NAME>-leaf1:
+              role: leaf
+            <TOPOLOGY_NAME>-leaf2:
+              role: leaf
+            <TOPOLOGY_NAME>-leaf3border:
+              role: leaf
+            <TOPOLOGY_NAME>-leaf4border:
+              role: leaf
+            <TOPOLOGY_NAME>-spine1:
+              role: spine
+            <TOPOLOGY_NAME>-spine2:
+              role: spine
+          pre_deploy: true
+          topology_type: srx-gateway
+          unmanaged_nodes:
+            <TOPOLOGY_NAME>-srx1:
+              connections:
+                ge-0/0/0:
+                  <TOPOLOGY_NAME>-leaf3border: ge-0/0/2
+                ge-0/0/1:
+                  <TOPOLOGY_NAME>-leaf4border: ge-0/0/2
+              role: gw
+            <TOPOLOGY_NAME>-srx2:
+              connections:
+                ge-0/0/0:
+                  <TOPOLOGY_NAME>-leaf3border: ge-0/0/3
+                ge-0/0/1:
+                  <TOPOLOGY_NAME>-leaf4border: ge-0/0/3
+              role: gw
+  jcloud:
+    api_token: <JCLOUD_API_TOKEN>
+    api_url: <JCLOUD_API_URL>
+    epterm:
+      ca_cert: <JCLOUD_CA_CERT>
+    org_id: <JCLOUD_ORG_ID>
+    password: <JCLOUD_PASSWORD>
+    username: <JCLOUD_USERNAME>

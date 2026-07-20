@@ -440,10 +440,12 @@ test-integration-configlets: install
 #   - AOS at 10.88.137.14 must be reachable
 #
 # Usage:
-#   make test-integration-connectivity_template_connectorops
+#   make test-integration-connectivity_template_connectorops TESTBED_FILE=/path/to/testbed.yml
 #   make test-integration-connectivity_template_connectorops ANSIBLE_FLAGS="-v"
 test-integration-connectivity_template_connectorops: install
 	pipenv run ansible-playbook $(ANSIBLE_FLAGS) \
+		-e @$(APSTRA_COLLECTION_ROOT)/tests/vars/connectorops_blueprint.yml \
+		-e testbed_file=$(if $(TESTBED_FILE),$(TESTBED_FILE),$(APSTRA_COLLECTION_ROOT)/testbed.yml) \
 		$(APSTRA_COLLECTION_ROOT)/tests/integration/connectivity_template_connectorops.yml
 
 # ── OS Upgrade Integration Test (requires account team Apstra 6.1.1) ─────────
