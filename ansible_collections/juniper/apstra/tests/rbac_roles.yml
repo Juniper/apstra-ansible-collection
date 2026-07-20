@@ -1,7 +1,8 @@
 ---
 # rbac_roles test for Apstra schema where:
 # - global roles use: permissions: [ ... ]
-# - granular roles use: granular_permissions: [ {scope, permissions:[...]} ]
+# - granular roles can use shorthand blueprint scope values, which the module
+#   expands to blueprint_id in [...]
 
 - name: rbac_roles module CRUD + user assignment test
   hosts: localhost
@@ -114,7 +115,7 @@
           label: "{{ role_granular_name }}"
           description: "granular role create"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+            - scope: "{{ role_scope_blueprint_id }}"
               permissions:
                 - "rbac.blueprint.read"
         state: present
@@ -135,7 +136,8 @@
           role: "{{ role_granular_name }}"
           type: "granular"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+            - scope:
+                - "{{ role_scope_blueprint_id }}"
               permissions:
                 - "rbac.blueprint.read"
         state: present
@@ -154,7 +156,8 @@
           type: "granular"
           description: "granular role update"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+            - scope:
+                - "{{ role_scope_blueprint_id }}"
               permissions:
                 - "rbac.blueprint.read"
                 - "rbac.blueprint.write"
@@ -170,22 +173,20 @@
           - "'rbac.blueprint.write' in gr_update.role.granular_permissions[0].permissions"
 
     # -------------------------
-    # TENANT-SCOPED GRANULAR ROLE CRUD
+    # ADDITIONAL GRANULAR ROLE CRUD
     # -------------------------
-    # This role is scoped to "tenant-name" tenant and the test user will be assigned this role to verify that the scope is applied correctly on the user.
-    #Currently we do not create a tenant as it is out of scope for this module. 
-    #The test is commented just for reference.
+    # This role validates shorthand scope handling with a second role payload.
 
-    - name: Create tenant-scoped granular role (vn write only)
+    - name: Create additional granular role (vn write only)
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_tenant_name }}"
           label: "tenant-vn-only"
           type: "granular"
-          description: "Virtual network access for tenant-name only"
+          description: "Virtual network access for selected blueprint"
           permissions: null
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"] and tenant in [\"tenant-name\"]"
+            - scope: "{{ role_scope_blueprint_id }}"
               permissions:
                 - "two_stage_l3clos.virtual_networks.write"
                 - "two_stage_l3clos.virtual_network_endpoints.write"
@@ -193,7 +194,7 @@
         auth_token: "{{ auth.token }}"
       register: t_create
 
-    - name: Assert tenant-scoped granular role created
+    - name: Assert additional granular role created
       ansible.builtin.assert:
         that:
           - t_create.changed
@@ -202,13 +203,14 @@
           - "'two_stage_l3clos.virtual_networks.write' in t_create.role.granular_permissions[0].permissions"
           - "'two_stage_l3clos.virtual_network_endpoints.write' in t_create.role.granular_permissions[0].permissions"
 
-    - name: Re-run tenant-scoped granular role create body (idempotent)
+    - name: Re-run additional granular role create body (idempotent)
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_tenant_name }}"
           type: "granular"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"] and tenant in [\"tenant-name\"]"
+            - scope:
+                - "{{ role_scope_blueprint_id }}"
               permissions:
                 - "two_stage_l3clos.virtual_networks.write"
                 - "two_stage_l3clos.virtual_network_endpoints.write"
@@ -216,7 +218,7 @@
         auth_token: "{{ auth.token }}"
       register: t_noop
 
-    - name: Assert tenant-scoped granular role idempotent
+    - name: Assert additional granular role idempotent
       ansible.builtin.assert:
         that:
           - not t_noop.changed

@@ -19,6 +19,10 @@ description:
   - Manage platform (controller-level) RBAC roles in Apstra.
   - Maps to C(/api/aaa/roles).
   - Supports role create/update/delete with idempotency.
+    - Role C(type) is mandatory for state C(present) and must be C(global) or C(granular).
+    - Granular permission C(scope) accepts only shorthand blueprint values
+        (a single blueprint id string or a list of blueprint ids), which the
+        module expands to C(blueprint_id in [...]).
   - Permission payload supports direct C(body.permissions) or convenience keys
         C(global_permissions), C(granular_permissions)/C(blueprint_permissions), and
         C(tenant_permissions).
@@ -55,6 +59,11 @@ options:
             - Role definition.
             - Required for state C(present).
             - Role identifier must be supplied via C(body.role) (or C(body.name) alias).
+            - C(body.type) is required for state C(present) and must be C(global) or C(granular).
+                        - For C(granular_permissions) and C(blueprint_permissions), C(scope)
+                            must be a single blueprint id string or a list of blueprint ids.
+                        - Full scope expressions (for example C(blueprint_id in [...])) are
+                            rejected by this module.
             - Permission content can be passed as C(body.permissions) directly or split into
                 C(global_permissions), C(granular_permissions)/C(blueprint_permissions), and
                 C(tenant_permissions), which are merged into C(permissions).
@@ -73,12 +82,18 @@ EXAMPLES = """
   juniper.apstra.rbac_roles:
         body:
             role: custom_role_ansible
+            type: global
             label: custom_role_ansible
             description: Custom role from ansible
             global_permissions:
                 aaa:
                     users: write
-            granular_permissions: []
+            granular_permissions:
+                - scope:
+                    - blueprint-id-1
+                    - blueprint-id-2
+                  permissions:
+                    - rbac.blueprint.read
             tenant_permissions: []
         state: present
 
@@ -86,6 +101,7 @@ EXAMPLES = """
   juniper.apstra.rbac_roles:
         body:
             role: custom_role_ansible
+                        type: global
             permissions:
                 global: {}
                 granular: []
@@ -130,6 +146,9 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
     ApstraClientFactory,
     apstra_client_module_args,
 )
+
+
+VALID_ROLE_TYPES = {"global", "granular"}
 
 
 def _normalize(value):
@@ -204,6 +223,55 @@ def _resolve_role(base_client, factory, role_ref=None, role_name=None):
     return role_id, current
 
 
+def _normalize_blueprint_scope(scope):
+    def _validate_blueprint_id(value):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "granular_permissions.scope blueprint ids must be non-empty strings"
+            )
+        if " in [" in value or " and " in value or " or " in value:
+            raise ValueError(
+                "granular_permissions.scope only accepts shorthand blueprint ids, not full expressions"
+            )
+        return value.strip()
+
+    if isinstance(scope, list):
+        if not scope:
+            raise ValueError(
+                "granular_permissions.scope list must contain at least one blueprint id"
+            )
+        normalized_scope_values = [_validate_blueprint_id(value) for value in scope]
+        quoted_scope = ", ".join(f"'{value}'" for value in normalized_scope_values)
+        return f"blueprint_id in [{quoted_scope}]"
+
+    if isinstance(scope, str):
+        normalized_scope = _validate_blueprint_id(scope)
+        return f"blueprint_id in ['{normalized_scope}']"
+
+    raise ValueError(
+        "granular_permissions.scope must be a blueprint id string or list of blueprint ids"
+    )
+
+
+def _normalize_granular_permissions(granular_permissions):
+    if not isinstance(granular_permissions, list):
+        return granular_permissions
+
+    normalized_permissions = []
+    for permission in granular_permissions:
+        if not isinstance(permission, dict) or "scope" not in permission:
+            normalized_permissions.append(permission)
+            continue
+
+        normalized_permission = dict(permission)
+        normalized_permission["scope"] = _normalize_blueprint_scope(
+            permission.get("scope")
+        )
+        normalized_permissions.append(normalized_permission)
+
+    return normalized_permissions
+
+
 def _build_payload(body, current=None):
     payload = {}
     role_name = body.get("role") or body.get("name")
@@ -221,12 +289,16 @@ def _build_payload(body, current=None):
         payload["permissions"] = body.get("permissions")
 
     if "granular_permissions" in body and body.get("granular_permissions") is not None:
-        payload["granular_permissions"] = body.get("granular_permissions")
+        payload["granular_permissions"] = _normalize_granular_permissions(
+            body.get("granular_permissions")
+        )
     elif (
         "blueprint_permissions" in body
         and body.get("blueprint_permissions") is not None
     ):
-        payload["granular_permissions"] = body.get("blueprint_permissions")
+        payload["granular_permissions"] = _normalize_granular_permissions(
+            body.get("blueprint_permissions")
+        )
 
     if "tenant_permissions" in body and body.get("tenant_permissions") is not None:
         payload["tenant_permissions"] = body.get("tenant_permissions")
@@ -328,6 +400,17 @@ def main():
         # present
         if not body:
             module.fail_json(msg="body is required when state=present")
+
+        role_type = body.get("type")
+        if role_type is None:
+            module.fail_json(
+                msg="body.type is required when state=present (allowed: global, granular)"
+            )
+
+        if role_type not in VALID_ROLE_TYPES:
+            module.fail_json(
+                msg=f"Invalid body.type '{role_type}'. Allowed values: global, granular"
+            )
 
         if not current:
             create_payload = _build_payload(body)
