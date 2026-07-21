@@ -20,9 +20,9 @@
 
     - name: Set blueprint name fact
       ansible.builtin.set_fact:
-        blueprint_name_1: "test_rbac_roles_1_{{ local_hostname.stdout }}"
-        blueprint_name_2: "test_rbac_roles_2_{{ local_hostname.stdout }}"
-        blueprint_name_3: "test_rbac_roles_3_{{ local_hostname.stdout }}"
+        blueprint_name_1: "test_rbac_roles_1"
+        blueprint_name_2: "test_rbac_roles_2"
+        blueprint_name_3: "test_rbac_roles_3"
 
     - name: Connect to Apstra
       juniper.apstra.authenticate:
@@ -61,6 +61,8 @@
         role_global_name: "ansible_role_global"
         role_granular_name: "ansible_role_granular"
         role_tenant_name: "tenant-vn-only"
+        role_any_scope_name: "ansible_role_scope_any"
+        role_no_scope_name: "ansible_role_scope_missing"
         role_user_name: "ansible_role_user"
         role_scope_blueprint_id: "{{ bp_create_1.id.blueprint }}"
         role_scope_blueprint_ids:
@@ -289,6 +291,51 @@
         that:
           - not t_noop.changed
 
+    - name: Create granular role with scope any (all blueprints)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_any_scope_name }}"
+          label: "{{ role_any_scope_name }}"
+          type: "granular"
+          description: "granular role with any scope"
+          granular_permissions:
+            - scope: "any"
+              permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: any_scope_create
+
+    - name: Assert granular role with scope any created
+      ansible.builtin.assert:
+        that:
+          - any_scope_create.changed
+          - any_scope_create.role.role == role_any_scope_name
+          - any_scope_create.role.granular_permissions | length > 0
+          - any_scope_create.role.granular_permissions[0].scope == "blueprint_id in [any]"
+
+    - name: Create granular role without scope (defaults to all blueprints)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_no_scope_name }}"
+          label: "{{ role_no_scope_name }}"
+          type: "granular"
+          description: "granular role with missing scope"
+          granular_permissions:
+            - permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: no_scope_create
+
+    - name: Assert granular role without scope created
+      ansible.builtin.assert:
+        that:
+          - no_scope_create.changed
+          - no_scope_create.role.role == role_no_scope_name
+          - no_scope_create.role.granular_permissions | length > 0
+          - no_scope_create.role.granular_permissions[0].scope == "blueprint_id in [any]"
+
     # -------------------------
     # USER ROLE ASSIGNMENT
     # -------------------------
@@ -407,6 +454,32 @@
         that:
           - t_delete.changed
 
+    - name: Delete any-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_any_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: any_scope_delete
+
+    - name: Assert any-scope role deleted
+      ansible.builtin.assert:
+        that:
+          - any_scope_delete.changed
+
+    - name: Delete missing-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_no_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: no_scope_delete
+
+    - name: Assert missing-scope role deleted
+      ansible.builtin.assert:
+        that:
+          - no_scope_delete.changed
+
   post_tasks:
     - name: Cleanup test user
       juniper.apstra.rbac_user:
@@ -436,6 +509,22 @@
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_tenant_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup any-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_any_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup missing-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_no_scope_name }}"
         state: absent
         auth_token: "{{ auth.token }}"
       failed_when: false

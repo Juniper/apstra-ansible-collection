@@ -266,11 +266,17 @@ def _normalize_blueprint_scope(scope):
             raise ValueError(
                 "granular_permissions.scope blueprint ids must be non-empty strings"
             )
-        if " in [" in value or " and " in value or " or " in value:
+        normalized = value.strip()
+        if normalized.lower() == "any":
+            return "any"
+        if " in [" in normalized or " and " in normalized or " or " in normalized:
             raise ValueError(
                 "granular_permissions.scope only accepts shorthand blueprint ids, not full expressions"
             )
-        return value.strip()
+        return normalized
+
+    if scope is None:
+        return "blueprint_id in [any]"
 
     if isinstance(scope, list):
         if not scope:
@@ -278,11 +284,19 @@ def _normalize_blueprint_scope(scope):
                 "granular_permissions.scope list must contain at least one blueprint id"
             )
         normalized_scope_values = [_validate_blueprint_id(value) for value in scope]
+        if "any" in normalized_scope_values:
+            if len(normalized_scope_values) > 1:
+                raise ValueError(
+                    "granular_permissions.scope list cannot mix 'any' with blueprint ids"
+                )
+            return "blueprint_id in [any]"
         quoted_scope = ", ".join(f"'{value}'" for value in normalized_scope_values)
         return f"blueprint_id in [{quoted_scope}]"
 
     if isinstance(scope, str):
         normalized_scope = _validate_blueprint_id(scope)
+        if normalized_scope == "any":
+            return "blueprint_id in [any]"
         return f"blueprint_id in ['{normalized_scope}']"
 
     raise ValueError(
@@ -296,7 +310,7 @@ def _normalize_granular_permissions(granular_permissions):
 
     normalized_permissions = []
     for permission in granular_permissions:
-        if not isinstance(permission, dict) or "scope" not in permission:
+        if not isinstance(permission, dict):
             normalized_permissions.append(permission)
             continue
 
