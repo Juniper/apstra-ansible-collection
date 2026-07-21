@@ -63,6 +63,9 @@
         role_tenant_name: "tenant-vn-only"
         role_any_scope_name: "ansible_role_scope_any"
         role_no_scope_name: "ansible_role_scope_missing"
+        role_tenant_scoped_name: "ansible_role_scope_tenant"
+        tenant_name_1: "tenant_name_1"
+        tenant_name_2: "tenant_name_2"
         role_user_name: "ansible_role_user"
         role_scope_blueprint_id: "{{ bp_create_1.id.blueprint }}"
         role_scope_blueprint_ids:
@@ -336,6 +339,32 @@
           - no_scope_create.role.granular_permissions | length > 0
           - no_scope_create.role.granular_permissions[0].scope == "blueprint_id in [any]"
 
+    - name: Create granular role with tenant permissions (all blueprints)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_scoped_name }}"
+          label: "{{ role_tenant_scoped_name }}"
+          type: "granular"
+          description: "granular role with tenant scope over all blueprints"
+          tenant_permissions:
+            - "{{ tenant_name_1 }}"
+            - "{{ tenant_name_2 }}"
+          granular_permissions:
+            - permissions:
+                - "two_stage_l3clos.virtual_networks.write"
+                - "two_stage_l3clos.virtual_network_endpoints.write"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: tenant_scope_create
+
+    - name: Assert granular role with tenant permissions created
+      ansible.builtin.assert:
+        that:
+          - tenant_scope_create.changed
+          - tenant_scope_create.role.role == role_tenant_scoped_name
+          - tenant_scope_create.role.granular_permissions | length > 0
+          - tenant_scope_create.role.granular_permissions[0].scope == 'blueprint_id in [any] and tenant in ["tenant_name_1", "tenant_name_2"]'
+
     # -------------------------
     # USER ROLE ASSIGNMENT
     # -------------------------
@@ -480,6 +509,19 @@
         that:
           - no_scope_delete.changed
 
+    - name: Delete tenant-scoped role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_scoped_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: tenant_scope_delete
+
+    - name: Assert tenant-scoped role deleted
+      ansible.builtin.assert:
+        that:
+          - tenant_scope_delete.changed
+
   post_tasks:
     - name: Cleanup test user
       juniper.apstra.rbac_user:
@@ -525,6 +567,14 @@
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_no_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup tenant-scoped role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_scoped_name }}"
         state: absent
         auth_token: "{{ auth.token }}"
       failed_when: false

@@ -169,6 +169,7 @@ def _validate_permission_shape(body, role_type):
     has_granular_permissions = _has_non_null(body, "granular_permissions") or _has_non_null(
         body, "blueprint_permissions"
     )
+    has_tenant_permissions = _has_non_null(body, "tenant_permissions")
 
     if role_type == "global":
         if not has_permissions:
@@ -177,6 +178,8 @@ def _validate_permission_shape(body, role_type):
             raise ValueError(
                 "body.granular_permissions/body.blueprint_permissions is not allowed when body.type=global"
             )
+        if has_tenant_permissions:
+            raise ValueError("body.tenant_permissions is not allowed when body.type=global")
         return
 
     if role_type == "granular":
@@ -304,7 +307,37 @@ def _normalize_blueprint_scope(scope):
     )
 
 
-def _normalize_granular_permissions(granular_permissions):
+def _normalize_tenant_permissions(tenant_permissions):
+    if tenant_permissions is None:
+        return None
+
+    if not isinstance(tenant_permissions, list):
+        raise ValueError("tenant_permissions must be a list of tenant names")
+
+    if not tenant_permissions:
+        return None
+
+    normalized_tenants = []
+    for tenant_name in tenant_permissions:
+        if not isinstance(tenant_name, str) or not tenant_name.strip():
+            raise ValueError(
+                "tenant_permissions must contain non-empty tenant name strings"
+            )
+        normalized_tenants.append(tenant_name.strip())
+
+    return normalized_tenants
+
+
+def _append_tenant_scope(scope, tenant_permissions):
+    normalized_tenants = _normalize_tenant_permissions(tenant_permissions)
+    if not normalized_tenants:
+        return scope
+
+    tenant_values = ", ".join(f'"{tenant_name}"' for tenant_name in normalized_tenants)
+    return f"{scope} and tenant in [{tenant_values}]"
+
+
+def _normalize_granular_permissions(granular_permissions, tenant_permissions=None):
     if not isinstance(granular_permissions, list):
         return granular_permissions
 
@@ -315,8 +348,9 @@ def _normalize_granular_permissions(granular_permissions):
             continue
 
         normalized_permission = dict(permission)
-        normalized_permission["scope"] = _normalize_blueprint_scope(
-            permission.get("scope")
+        normalized_scope = _normalize_blueprint_scope(permission.get("scope"))
+        normalized_permission["scope"] = _append_tenant_scope(
+            normalized_scope, tenant_permissions
         )
         normalized_permissions.append(normalized_permission)
 
@@ -341,18 +375,17 @@ def _build_payload(body, current=None):
 
     if "granular_permissions" in body and body.get("granular_permissions") is not None:
         payload["granular_permissions"] = _normalize_granular_permissions(
-            body.get("granular_permissions")
+            body.get("granular_permissions"),
+            body.get("tenant_permissions"),
         )
     elif (
         "blueprint_permissions" in body
         and body.get("blueprint_permissions") is not None
     ):
         payload["granular_permissions"] = _normalize_granular_permissions(
-            body.get("blueprint_permissions")
+            body.get("blueprint_permissions"),
+            body.get("tenant_permissions"),
         )
-
-    if "tenant_permissions" in body and body.get("tenant_permissions") is not None:
-        payload["tenant_permissions"] = body.get("tenant_permissions")
 
     for key, value in body.items():
         if key in (
