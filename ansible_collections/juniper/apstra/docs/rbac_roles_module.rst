@@ -43,7 +43,7 @@ Synopsis
 - ``body.type`` is required for ``state: present`` and must be ``global`` or ``granular``.
 - ``type: global`` uses ``permissions`` and rejects ``granular_permissions`` / ``blueprint_permissions``.
 - ``type: granular`` uses ``granular_permissions`` / ``blueprint_permissions`` and rejects ``permissions``.
-- ``granular_permissions[].scope`` accepts only shorthand blueprint IDs (string or list), which the module expands to ``blueprint_id in [...]``.
+- ``granular_permissions[].scope`` accepts shorthand blueprint IDs or labels (string or list), which the module resolves to blueprint IDs and expands to ``blueprint_id in [...]``.
 - Invalid combinations are rejected by the module before any API call is made.
 
 Parameters
@@ -63,7 +63,7 @@ Parameters
   - ``type: global`` requires ``permissions``.
   - ``type: granular`` requires ``granular_permissions`` / ``blueprint_permissions``.
   - ``granular_permissions`` entries must contain ``scope`` and ``permissions``.
-  - ``granular_permissions`` / ``blueprint_permissions`` scopes must be shorthand blueprint IDs (full scope expressions are rejected).
+  - ``granular_permissions`` / ``blueprint_permissions`` scopes must be shorthand blueprint IDs or labels (full scope expressions are rejected).
 
 - ``state`` (str): Desired state. Choices: ``present`` (default), ``absent``.
 

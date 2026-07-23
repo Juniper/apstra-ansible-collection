@@ -60,6 +60,7 @@
       ansible.builtin.set_fact:
         role_global_name: "ansible_role_global"
         role_granular_name: "ansible_role_granular"
+        role_granular_name_label: "ansible_role_granular_by_label"
         role_tenant_name: "tenant-vn-only"
         role_any_scope_name: "ansible_role_scope_any"
         role_no_scope_name: "ansible_role_scope_missing"
@@ -71,6 +72,7 @@
         role_scope_blueprint_ids:
           - "{{ bp_create_1.id.blueprint }}"
           - "{{ bp_create_2.id.blueprint }}"
+        role_scope_blueprint_name: "{{ blueprint_name_1 }}"
         role_unused_blueprint_id: "{{ bp_create_3.id.blueprint }}"
 
     # -------------------------
@@ -200,6 +202,29 @@
       ansible.builtin.assert:
         that:
           - not gr_noop.changed
+
+    - name: Create granular role using blueprint label in scope
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name_label }}"
+          type: "granular"
+          label: "{{ role_granular_name_label }}"
+          description: "granular role create by blueprint label"
+          granular_permissions:
+            - scope: "{{ role_scope_blueprint_name }}"
+              permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_label_create
+
+    - name: Assert granular role created from blueprint label scope
+      ansible.builtin.assert:
+        that:
+          - gr_label_create.changed
+          - gr_label_create.role.role == role_granular_name_label
+          - gr_label_create.role.granular_permissions | length > 0
+          - role_scope_blueprint_id in gr_label_create.role.granular_permissions[0].scope
 
     - name: Update granular role options (add write)
       juniper.apstra.rbac_roles:
@@ -483,6 +508,19 @@
         that:
           - t_delete.changed
 
+    - name: Delete blueprint-label granular role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name_label }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gr_label_delete
+
+    - name: Assert blueprint-label granular role deleted
+      ansible.builtin.assert:
+        that:
+          - gr_label_delete.changed
+
     - name: Delete any-scope role
       juniper.apstra.rbac_roles:
         body:
@@ -551,6 +589,14 @@
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_tenant_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup blueprint-label granular role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name_label }}"
         state: absent
         auth_token: "{{ auth.token }}"
       failed_when: false

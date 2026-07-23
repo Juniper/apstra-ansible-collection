@@ -24,9 +24,10 @@ description:
             C(body.granular_permissions)/C(body.blueprint_permissions).
         - For C(type=granular), use C(body.granular_permissions)
             (or C(body.blueprint_permissions)) and do not provide C(body.permissions).
-    - Granular permission C(scope) accepts only shorthand blueprint values
-        (a single blueprint id string or a list of blueprint ids), which the
-        module expands to C(blueprint_id in [...]).
+    - Granular permission C(scope) accepts shorthand blueprint values
+        (a single blueprint id/label string or a list of blueprint ids/labels),
+        which the module resolves to blueprint ids and expands to
+        C(blueprint_id in [...]).
   - Permission payload supports direct C(body.permissions) or convenience keys
         C(global_permissions), C(granular_permissions)/C(blueprint_permissions), and
         C(tenant_permissions).
@@ -70,7 +71,8 @@ options:
                 C(body.granular_permissions)/C(body.blueprint_permissions) and rejects
                 C(body.permissions).
                         - For C(granular_permissions) and C(blueprint_permissions), C(scope)
-                            must be a single blueprint id string or a list of blueprint ids.
+                            must be a single blueprint id/label string or a list of
+                            blueprint ids/labels.
                         - Full scope expressions (for example C(blueprint_id in [...])) are
                             rejected by this module.
             - Permission content can be passed as C(body.permissions) directly or split into
@@ -263,7 +265,17 @@ def _resolve_role(base_client, factory, role_ref=None, role_name=None):
     return role_id, current
 
 
-def _normalize_blueprint_scope(scope):
+def _resolve_scope_value(factory, value):
+    if value == "any":
+        return value
+
+    if factory is None:
+        return value
+
+    return factory.resolve_blueprint_id(value)
+
+
+def _normalize_blueprint_scope(scope, factory=None):
     def _validate_blueprint_id(value):
         if not isinstance(value, str) or not value.strip():
             raise ValueError(
@@ -276,7 +288,7 @@ def _normalize_blueprint_scope(scope):
             raise ValueError(
                 "granular_permissions.scope only accepts shorthand blueprint ids, not full expressions"
             )
-        return normalized
+        return _resolve_scope_value(factory, normalized)
 
     if scope is None:
         return "blueprint_id in [any]"
@@ -337,7 +349,9 @@ def _append_tenant_scope(scope, tenant_permissions):
     return f"{scope} and tenant in [{tenant_values}]"
 
 
-def _normalize_granular_permissions(granular_permissions, tenant_permissions=None):
+def _normalize_granular_permissions(
+    granular_permissions, tenant_permissions=None, factory=None
+):
     if not isinstance(granular_permissions, list):
         return granular_permissions
 
@@ -348,7 +362,9 @@ def _normalize_granular_permissions(granular_permissions, tenant_permissions=Non
             continue
 
         normalized_permission = dict(permission)
-        normalized_scope = _normalize_blueprint_scope(permission.get("scope"))
+        normalized_scope = _normalize_blueprint_scope(
+            permission.get("scope"), factory=factory
+        )
         normalized_permission["scope"] = _append_tenant_scope(
             normalized_scope, tenant_permissions
         )
@@ -357,7 +373,7 @@ def _normalize_granular_permissions(granular_permissions, tenant_permissions=Non
     return normalized_permissions
 
 
-def _build_payload(body, current=None):
+def _build_payload(body, current=None, factory=None):
     payload = {}
     role_name = body.get("role") or body.get("name")
     if role_name:
@@ -377,6 +393,7 @@ def _build_payload(body, current=None):
         payload["granular_permissions"] = _normalize_granular_permissions(
             body.get("granular_permissions"),
             body.get("tenant_permissions"),
+            factory=factory,
         )
     elif (
         "blueprint_permissions" in body
@@ -385,6 +402,7 @@ def _build_payload(body, current=None):
         payload["granular_permissions"] = _normalize_granular_permissions(
             body.get("blueprint_permissions"),
             body.get("tenant_permissions"),
+            factory=factory,
         )
 
     for key, value in body.items():
@@ -502,7 +520,7 @@ def main():
             module.fail_json(msg=str(e))
 
         if not current:
-            create_payload = _build_payload(body)
+            create_payload = _build_payload(body, factory=factory)
             if "role" not in create_payload:
                 module.fail_json(
                     msg="body.role (or body.name) is required to create a role"
@@ -531,7 +549,7 @@ def main():
                 msg=f"role '{create_payload['role']}' created",
             )
 
-        desired = _build_payload(body, current=current)
+        desired = _build_payload(body, current=current, factory=factory)
         changes = _compute_changes(current, desired)
 
         if not changes:
