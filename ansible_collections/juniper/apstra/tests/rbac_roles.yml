@@ -1,7 +1,8 @@
 ---
 # rbac_roles test for Apstra schema where:
 # - global roles use: permissions: [ ... ]
-# - granular roles use: granular_permissions: [ {scope, permissions:[...]} ]
+# - granular roles can use shorthand blueprint scope values, which the module
+#   expands to blueprint_id in [...]
 
 - name: rbac_roles module CRUD + user assignment test
   hosts: localhost
@@ -19,29 +20,60 @@
 
     - name: Set blueprint name fact
       ansible.builtin.set_fact:
-        blueprint_name: "test_rbac_roles_{{ local_hostname.stdout }}"
+        blueprint_name_1: "test_rbac_roles_1"
+        blueprint_name_2: "test_rbac_roles_2"
+        blueprint_name_3: "test_rbac_roles_3"
 
     - name: Connect to Apstra
       juniper.apstra.authenticate:
         logout: false
       register: auth
 
-    - name: Create blueprint for testing
+    - name: Create first blueprint for testing
       juniper.apstra.blueprint:
         body:
-          label: "{{ blueprint_name }}"
+          label: "{{ blueprint_name_1 }}"
           design: "freeform"
         lock_state: "ignore"
         auth_token: "{{ auth.token }}"
-      register: bp_create
+      register: bp_create_1
+
+    - name: Create second blueprint for testing
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name_2 }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp_create_2
+
+    - name: Create third blueprint for testing
+      juniper.apstra.blueprint:
+        body:
+          label: "{{ blueprint_name_3 }}"
+          design: "freeform"
+        lock_state: "ignore"
+        auth_token: "{{ auth.token }}"
+      register: bp_create_3
 
     - name: Pick unique role/user names
       ansible.builtin.set_fact:
         role_global_name: "ansible_role_global"
         role_granular_name: "ansible_role_granular"
+        role_granular_name_label: "ansible_role_granular_by_label"
         role_tenant_name: "tenant-vn-only"
+        role_any_scope_name: "ansible_role_scope_any"
+        role_no_scope_name: "ansible_role_scope_missing"
+        role_tenant_scoped_name: "ansible_role_scope_tenant"
+        tenant_name_1: "tenant_name_1"
+        tenant_name_2: "tenant_name_2"
         role_user_name: "ansible_role_user"
-        role_scope_blueprint_id: "{{ bp_create.id.blueprint }}"
+        role_scope_blueprint_id: "{{ bp_create_1.id.blueprint }}"
+        role_scope_blueprint_ids:
+          - "{{ bp_create_1.id.blueprint }}"
+          - "{{ bp_create_2.id.blueprint }}"
+        role_scope_blueprint_name: "{{ blueprint_name_1 }}"
+        role_unused_blueprint_id: "{{ bp_create_3.id.blueprint }}"
 
     # -------------------------
     # GLOBAL ROLE CRUD
@@ -103,6 +135,28 @@
           - g_update.changed
           - "'core.blueprints.write' in g_update.role.permissions"
 
+    - name: Reject global role with granular_permissions
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_global_name }}"
+          type: "global"
+          permissions:
+            - "core.blueprints.read"
+          granular_permissions:
+            - scope: "{{ role_scope_blueprint_id }}"
+              permissions:
+                - "core.blueprints.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: g_invalid_granular
+      ignore_errors: true
+
+    - name: Assert global role rejects granular_permissions
+      ansible.builtin.assert:
+        that:
+          - g_invalid_granular.failed
+          - '"body.granular_permissions/body.blueprint_permissions is not allowed when body.type=global" in g_invalid_granular.msg'
+
     # -------------------------
     # GRANULAR ROLE CRUD
     # -------------------------
@@ -112,9 +166,9 @@
           role: "{{ role_granular_name }}"
           type: "granular"
           label: "{{ role_granular_name }}"
-          description: "granular role create"
+          description: "granular role create for two blueprints"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
         state: present
@@ -127,7 +181,9 @@
           - gr_create.changed
           - gr_create.role.role == role_granular_name
           - gr_create.role.granular_permissions | length > 0
-          - role_scope_blueprint_id in gr_create.role.granular_permissions[0].scope
+          - role_scope_blueprint_ids[0] in gr_create.role.granular_permissions[0].scope
+          - role_scope_blueprint_ids[1] in gr_create.role.granular_permissions[0].scope
+          - role_unused_blueprint_id not in gr_create.role.granular_permissions[0].scope
 
     - name: Re-run granular role create body (idempotent)
       juniper.apstra.rbac_roles:
@@ -135,7 +191,7 @@
           role: "{{ role_granular_name }}"
           type: "granular"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
         state: present
@@ -147,14 +203,37 @@
         that:
           - not gr_noop.changed
 
+    - name: Create granular role using blueprint label in scope
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name_label }}"
+          type: "granular"
+          label: "{{ role_granular_name_label }}"
+          description: "granular role create by blueprint label"
+          granular_permissions:
+            - scope: "{{ role_scope_blueprint_name }}"
+              permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_label_create
+
+    - name: Assert granular role created from blueprint label scope
+      ansible.builtin.assert:
+        that:
+          - gr_label_create.changed
+          - gr_label_create.role.role == role_granular_name_label
+          - gr_label_create.role.granular_permissions | length > 0
+          - role_scope_blueprint_id in gr_label_create.role.granular_permissions[0].scope
+
     - name: Update granular role options (add write)
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_granular_name }}"
           type: "granular"
-          description: "granular role update"
+          description: "granular role update for two blueprints"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"]"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "rbac.blueprint.read"
                 - "rbac.blueprint.write"
@@ -169,23 +248,42 @@
           - gr_update.role.granular_permissions | length > 0
           - "'rbac.blueprint.write' in gr_update.role.granular_permissions[0].permissions"
 
-    # -------------------------
-    # TENANT-SCOPED GRANULAR ROLE CRUD
-    # -------------------------
-    # This role is scoped to "tenant-name" tenant and the test user will be assigned this role to verify that the scope is applied correctly on the user.
-    #Currently we do not create a tenant as it is out of scope for this module. 
-    #The test is commented just for reference.
+    - name: Reject granular role with permissions
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name }}"
+          type: "granular"
+          granular_permissions:
+            - scope: "{{ role_scope_blueprint_ids }}"
+              permissions:
+                - "rbac.blueprint.read"
+          permissions:
+            - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: gr_invalid_permissions
+      ignore_errors: true
 
-    - name: Create tenant-scoped granular role (vn write only)
+    - name: Assert granular role rejects permissions
+      ansible.builtin.assert:
+        that:
+          - gr_invalid_permissions.failed
+          - '"body.permissions is not allowed when body.type=granular" in gr_invalid_permissions.msg'
+
+    # -------------------------
+    # ADDITIONAL GRANULAR ROLE CRUD
+    # -------------------------
+    # This role validates shorthand scope handling with a second role payload.
+
+    - name: Create additional granular role (vn write only)
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_tenant_name }}"
           label: "tenant-vn-only"
           type: "granular"
-          description: "Virtual network access for tenant-name only"
-          permissions: null
+          description: "Virtual network access for selected blueprints"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"] and tenant in [\"tenant-name\"]"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "two_stage_l3clos.virtual_networks.write"
                 - "two_stage_l3clos.virtual_network_endpoints.write"
@@ -193,7 +291,7 @@
         auth_token: "{{ auth.token }}"
       register: t_create
 
-    - name: Assert tenant-scoped granular role created
+    - name: Assert additional granular role created
       ansible.builtin.assert:
         that:
           - t_create.changed
@@ -202,13 +300,13 @@
           - "'two_stage_l3clos.virtual_networks.write' in t_create.role.granular_permissions[0].permissions"
           - "'two_stage_l3clos.virtual_network_endpoints.write' in t_create.role.granular_permissions[0].permissions"
 
-    - name: Re-run tenant-scoped granular role create body (idempotent)
+    - name: Re-run additional granular role create body (idempotent)
       juniper.apstra.rbac_roles:
         body:
           role: "{{ role_tenant_name }}"
           type: "granular"
           granular_permissions:
-            - scope: "blueprint_id in [\"{{ role_scope_blueprint_id }}\"] and tenant in [\"tenant-name\"]"
+            - scope: "{{ role_scope_blueprint_ids }}"
               permissions:
                 - "two_stage_l3clos.virtual_networks.write"
                 - "two_stage_l3clos.virtual_network_endpoints.write"
@@ -216,10 +314,81 @@
         auth_token: "{{ auth.token }}"
       register: t_noop
 
-    - name: Assert tenant-scoped granular role idempotent
+    - name: Assert additional granular role idempotent
       ansible.builtin.assert:
         that:
           - not t_noop.changed
+
+    - name: Create granular role with scope any (all blueprints)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_any_scope_name }}"
+          label: "{{ role_any_scope_name }}"
+          type: "granular"
+          description: "granular role with any scope"
+          granular_permissions:
+            - scope: "any"
+              permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: any_scope_create
+
+    - name: Assert granular role with scope any created
+      ansible.builtin.assert:
+        that:
+          - any_scope_create.changed
+          - any_scope_create.role.role == role_any_scope_name
+          - any_scope_create.role.granular_permissions | length > 0
+          - any_scope_create.role.granular_permissions[0].scope == "blueprint_id in [any]"
+
+    - name: Create granular role without scope (defaults to all blueprints)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_no_scope_name }}"
+          label: "{{ role_no_scope_name }}"
+          type: "granular"
+          description: "granular role with missing scope"
+          granular_permissions:
+            - permissions:
+                - "rbac.blueprint.read"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: no_scope_create
+
+    - name: Assert granular role without scope created
+      ansible.builtin.assert:
+        that:
+          - no_scope_create.changed
+          - no_scope_create.role.role == role_no_scope_name
+          - no_scope_create.role.granular_permissions | length > 0
+          - no_scope_create.role.granular_permissions[0].scope == "blueprint_id in [any]"
+
+    - name: Create granular role with tenant permissions (all blueprints)
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_scoped_name }}"
+          label: "{{ role_tenant_scoped_name }}"
+          type: "granular"
+          description: "granular role with tenant scope over all blueprints"
+          tenant_permissions:
+            - "{{ tenant_name_1 }}"
+            - "{{ tenant_name_2 }}"
+          granular_permissions:
+            - permissions:
+                - "two_stage_l3clos.virtual_networks.write"
+                - "two_stage_l3clos.virtual_network_endpoints.write"
+        state: present
+        auth_token: "{{ auth.token }}"
+      register: tenant_scope_create
+
+    - name: Assert granular role with tenant permissions created
+      ansible.builtin.assert:
+        that:
+          - tenant_scope_create.changed
+          - tenant_scope_create.role.role == role_tenant_scoped_name
+          - tenant_scope_create.role.granular_permissions | length > 0
+          - tenant_scope_create.role.granular_permissions[0].scope == 'blueprint_id in [any] and tenant in ["tenant_name_1", "tenant_name_2"]'
 
     # -------------------------
     # USER ROLE ASSIGNMENT
@@ -339,6 +508,58 @@
         that:
           - t_delete.changed
 
+    - name: Delete blueprint-label granular role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name_label }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: gr_label_delete
+
+    - name: Assert blueprint-label granular role deleted
+      ansible.builtin.assert:
+        that:
+          - gr_label_delete.changed
+
+    - name: Delete any-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_any_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: any_scope_delete
+
+    - name: Assert any-scope role deleted
+      ansible.builtin.assert:
+        that:
+          - any_scope_delete.changed
+
+    - name: Delete missing-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_no_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: no_scope_delete
+
+    - name: Assert missing-scope role deleted
+      ansible.builtin.assert:
+        that:
+          - no_scope_delete.changed
+
+    - name: Delete tenant-scoped role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_scoped_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      register: tenant_scope_delete
+
+    - name: Assert tenant-scoped role deleted
+      ansible.builtin.assert:
+        that:
+          - tenant_scope_delete.changed
+
   post_tasks:
     - name: Cleanup test user
       juniper.apstra.rbac_user:
@@ -372,9 +593,57 @@
         auth_token: "{{ auth.token }}"
       failed_when: false
 
-    - name: Cleanup test blueprint
+    - name: Cleanup blueprint-label granular role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_granular_name_label }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup any-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_any_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup missing-scope role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_no_scope_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup tenant-scoped role
+      juniper.apstra.rbac_roles:
+        body:
+          role: "{{ role_tenant_scoped_name }}"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup first test blueprint
       juniper.apstra.blueprint:
-        id: "{{ bp_create.id }}"
+        id: "{{ bp_create_1.id }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup second test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_create_2.id }}"
+        lock_state: "ignore"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      failed_when: false
+
+    - name: Cleanup third test blueprint
+      juniper.apstra.blueprint:
+        id: "{{ bp_create_3.id }}"
         lock_state: "ignore"
         state: absent
         auth_token: "{{ auth.token }}"
