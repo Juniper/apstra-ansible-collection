@@ -91,39 +91,39 @@ options:
 EXAMPLES = """
 - name: Create custom role with global + granular + tenant permissions
   juniper.apstra.rbac_roles:
-        body:
-            role: custom_role_ansible
-            type: global
-            label: custom_role_ansible
-            description: Custom role from ansible
-            global_permissions:
-                aaa:
-                    users: write
-            granular_permissions:
-                - scope:
-                    - blueprint-id-1
-                    - blueprint-id-2
-                  permissions:
-                    - rbac.blueprint.read
-            tenant_permissions: []
-        state: present
+    body:
+      role: custom_role_ansible
+      type: global
+      label: custom_role_ansible
+      description: Custom role from ansible
+      global_permissions:
+        aaa:
+          users: write
+      granular_permissions:
+        - scope:
+            - blueprint-id-1
+            - blueprint-id-2
+          permissions:
+            - rbac.blueprint.read
+      tenant_permissions: []
+    state: present
 
 - name: Replace permissions in existing role
   juniper.apstra.rbac_roles:
-        body:
-            role: custom_role_ansible
-                        type: global
-            permissions:
-                global: {}
-                granular: []
-                tenant: []
-        state: present
+    body:
+      role: custom_role_ansible
+      type: global
+      permissions:
+        global: {}
+        granular: []
+        tenant: []
+    state: present
 
 - name: Delete custom role
   juniper.apstra.rbac_roles:
-        body:
-            role: custom_role_ansible
-        state: absent
+    body:
+      role: custom_role_ansible
+    state: absent
 """
 
 RETURN = """
@@ -168,9 +168,9 @@ def _has_non_null(body, key):
 
 def _validate_permission_shape(body, role_type):
     has_permissions = _has_non_null(body, "permissions")
-    has_granular_permissions = _has_non_null(body, "granular_permissions") or _has_non_null(
-        body, "blueprint_permissions"
-    )
+    has_granular_permissions = _has_non_null(
+        body, "granular_permissions"
+    ) or _has_non_null(body, "blueprint_permissions")
     has_tenant_permissions = _has_non_null(body, "tenant_permissions")
 
     if role_type == "global":
@@ -181,7 +181,9 @@ def _validate_permission_shape(body, role_type):
                 "body.granular_permissions/body.blueprint_permissions is not allowed when body.type=global"
             )
         if has_tenant_permissions:
-            raise ValueError("body.tenant_permissions is not allowed when body.type=global")
+            raise ValueError(
+                "body.tenant_permissions is not allowed when body.type=global"
+            )
         return
 
     if role_type == "granular":

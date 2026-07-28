@@ -20,11 +20,8 @@ try:
 except ImportError:
     pass
 
-try:
-    from urllib.request import Request, urlopen
-    from urllib.error import URLError, HTTPError
-except ImportError:
-    from urllib2 import Request, urlopen, URLError, HTTPError
+from urllib.error import URLError, HTTPError
+from ansible.module_utils.urls import open_url
 
 import ssl
 
@@ -137,12 +134,16 @@ class ZtpClient:
 
         body = None
         if data is not None:
-            body = json.dumps(data).encode("utf-8")
-
-        req = Request(url, data=body, headers=headers, method=method)
+            body = json.dumps(data)
 
         try:
-            response = urlopen(req, context=self._get_ssl_context())
+            response = open_url(
+                url,
+                data=body,
+                headers=headers,
+                method=method,
+                validate_certs=self.verify_certificates,
+            )
             response_data = response.read().decode("utf-8")
             if response_data:
                 return json.loads(response_data)

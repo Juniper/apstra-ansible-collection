@@ -183,8 +183,8 @@ def run_module():
             ip_subnet=dict(type="str", required=False),
             state=dict(
                 type="str",
-          choices=["absent", "query"],
-          default="query",
+                choices=["absent", "query"],
+                default="query",
             ),
         )
     )

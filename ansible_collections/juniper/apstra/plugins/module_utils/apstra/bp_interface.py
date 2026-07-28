@@ -407,7 +407,7 @@ def set_lag_mode(
         lag_mode=final_lag_mode,
         port_channel_id=final_pc_id,
         msg=(
-            f"LAG configuration updated: "
+            "LAG configuration updated: "
             + ", ".join(f"{k}={v}" for k, v in changes.items())
         ),
     )

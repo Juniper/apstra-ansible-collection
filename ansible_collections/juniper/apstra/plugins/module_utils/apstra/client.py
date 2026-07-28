@@ -39,7 +39,13 @@ else:
 import os
 import re
 import time
-import yaml
+
+try:
+    import yaml
+except ImportError as imp_exc:
+    YAML_IMPORT_ERROR = imp_exc
+else:
+    YAML_IMPORT_ERROR = None
 from datetime import datetime
 
 DEFAULT_BLUEPRINT_LOCK_TIMEOUT = 60

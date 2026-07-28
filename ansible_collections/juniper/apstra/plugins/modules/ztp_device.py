@@ -226,7 +226,6 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 from ansible_collections.juniper.apstra.plugins.module_utils.apstra.ztp_client import (
     ztp_client_module_args,
     ZtpClient,
-    ZtpClientError,
 )
 
 

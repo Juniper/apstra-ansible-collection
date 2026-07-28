@@ -237,7 +237,7 @@ options:
         the SSH fingerprint.  Set C(body.force_accept=true) (default) to
         always run; with C(body.force_accept=false) the operation is a no-op
         when the agent is already in C(connected) state (safe idempotency
-        check).  Accepts single or list id forms: C(id.agent_id),
+        check).  Accepts single or list id forms - C(id.agent_id),
         C(id.management_ip), C(id.system_name)+C(id.blueprint), or the
         corresponding list variants C(id.agent_ids), C(id.management_ips),
         C(id.system_names).
@@ -1107,11 +1107,15 @@ def _resolve_host_key_agent(base, id_param, client_factory):
             from ansible_collections.juniper.apstra.plugins.module_utils.apstra.upgrade import (
                 resolve_agent_id,
             )
+
             blueprint_id = None
             if blueprint_ref:
                 bp_list = base.blueprints.list() or []
                 for bp in bp_list:
-                    if bp.get("label") == blueprint_ref or bp.get("id") == blueprint_ref:
+                    if (
+                        bp.get("label") == blueprint_ref
+                        or bp.get("id") == blueprint_ref
+                    ):
                         blueprint_id = bp.get("id")
                         break
                 if not blueprint_id:
@@ -1120,14 +1124,18 @@ def _resolve_host_key_agent(base, id_param, client_factory):
         elif mgmt_ip:
             resp = base.raw_request("/system-agents")
             if resp.status_code != 200:
-                raise Exception(f"GET /system-agents failed: {resp.status_code} {resp.text}")
+                raise Exception(
+                    f"GET /system-agents failed: {resp.status_code} {resp.text}"
+                )
             all_agents = resp.json().get("items", [])
             for ag in all_agents:
                 if ag.get("config", {}).get("management_ip") == mgmt_ip:
                     agent_id = ag.get("id")
                     break
             if not agent_id:
-                raise Exception(f"No system agent found with management_ip '{mgmt_ip}'.")
+                raise Exception(
+                    f"No system agent found with management_ip '{mgmt_ip}'."
+                )
         else:
             raise Exception(
                 "state=host_key_updated requires one of: 'id.agent_id', "
@@ -1137,7 +1145,9 @@ def _resolve_host_key_agent(base, id_param, client_factory):
     # Fetch current connection state
     resp = base.raw_request(f"/system-agents/{agent_id}")
     if resp.status_code != 200:
-        raise Exception(f"GET /system-agents/{agent_id} failed: {resp.status_code} {resp.text}")
+        raise Exception(
+            f"GET /system-agents/{agent_id} failed: {resp.status_code} {resp.text}"
+        )
     agent = resp.json()
     connection_state = agent.get("status", {}).get("connection_state", "")
     return agent_id, connection_state
@@ -1189,32 +1199,40 @@ def _handle_host_key_updated(module, client_factory):
     for target in targets:
         # ── Resolve this target to agent_id + connection_state ────────────
         try:
-            agent_id, connection_state = _resolve_host_key_agent(base, target, client_factory)
+            agent_id, connection_state = _resolve_host_key_agent(
+                base, target, client_factory
+            )
         except Exception as e:
-            results.append({"ref": str(target), "changed": False, "failed": True, "msg": str(e)})
+            results.append(
+                {"ref": str(target), "changed": False, "failed": True, "msg": str(e)}
+            )
             continue
 
         # ── Idempotency: force_accept=false on connected agent ────────────
         if not force_accept and connection_state == "connected":
-            results.append(dict(
-                agent_id=agent_id,
-                changed=False,
-                msg=(
-                    f"Agent '{agent_id}' is already connected "
-                    "and force_accept=false — no key update needed."
-                ),
-                connection_state=connection_state,
-            ))
+            results.append(
+                dict(
+                    agent_id=agent_id,
+                    changed=False,
+                    msg=(
+                        f"Agent '{agent_id}' is already connected "
+                        "and force_accept=false — no key update needed."
+                    ),
+                    connection_state=connection_state,
+                )
+            )
             continue
 
         # ── Check mode ────────────────────────────────────────────────────
         if module.check_mode:
-            results.append(dict(
-                agent_id=agent_id,
-                changed=True,
-                msg=f"Would trigger host key update for agent '{agent_id}' (check mode).",
-                connection_state=connection_state,
-            ))
+            results.append(
+                dict(
+                    agent_id=agent_id,
+                    changed=True,
+                    msg=f"Would trigger host key update for agent '{agent_id}' (check mode).",
+                    connection_state=connection_state,
+                )
+            )
             any_changed = True
             continue
 
@@ -1223,29 +1241,33 @@ def _handle_host_key_updated(module, client_factory):
             f"/system-agents/{agent_id}/update-host-keys", method="POST", data={}
         )
         if resp.status_code not in (200, 201, 202, 204):
-            results.append(dict(
-                agent_id=agent_id,
-                changed=False,
-                failed=True,
-                msg=f"POST /system-agents/{agent_id}/update-host-keys failed: {resp.status_code} {resp.text}",
-                connection_state=connection_state,
-            ))
+            results.append(
+                dict(
+                    agent_id=agent_id,
+                    changed=False,
+                    failed=True,
+                    msg=f"POST /system-agents/{agent_id}/update-host-keys failed: {resp.status_code} {resp.text}",
+                    connection_state=connection_state,
+                )
+            )
             continue
 
         any_changed = True
-        results.append(dict(
-            agent_id=agent_id,
-            changed=True,
-            msg=f"Host key update triggered for agent '{agent_id}'.",
-            connection_state=connection_state,
-        ))
+        results.append(
+            dict(
+                agent_id=agent_id,
+                changed=True,
+                msg=f"Host key update triggered for agent '{agent_id}'.",
+                connection_state=connection_state,
+            )
+        )
 
     # ── Check for any failures ────────────────────────────────────────────
     failed = [r for r in results if r.get("failed")]
     if failed:
         module.fail_json(
             msg=f"host_key_updated failed for {len(failed)} agent(s): "
-                + "; ".join(r["msg"] for r in failed),
+            + "; ".join(r["msg"] for r in failed),
             results=results,
             changed=any_changed,
         )
@@ -1316,7 +1338,14 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent", "gathered", "installed", "acknowledged", "host_key_updated"],
+            choices=[
+                "present",
+                "absent",
+                "gathered",
+                "installed",
+                "acknowledged",
+                "host_key_updated",
+            ],
             default="present",
         ),
         uninstall_timeout=dict(type="int", required=False, default=120),
