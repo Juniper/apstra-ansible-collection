@@ -4,7 +4,7 @@ Juniper Apstra Collection Release Notes
 
 .. contents:: Topics
 
-v1.0.9
+v1.1.0
 ======
 
 Breaking Changes / Porting Guide
@@ -12,6 +12,41 @@ Breaking Changes / Porting Guide
 - **Python 3.12 required** — The minimum Python version has been raised from 3.11 to 3.12. Update your virtual environments and Execution Environments accordingly.
 - **ansible-core 2.16.16** — The recommended ansible-core version is now 2.16.16+.
 - **Execution Environment base image** — Switched from ``ee-minimal-rhel8`` to ``ee-minimal-rhel9`` (ships Python 3.12 natively).
+
+Major Changes
+-------------
+- Added ``aaa_server`` module: Manage AAA (authentication, authorization, accounting) server configurations in Apstra.
+- Added ``allowed_list`` module: Manage the allowed-list of IP addresses in Apstra.
+- Added ``banned_list`` module: Manage the banned-list of IP addresses in Apstra.
+- Added ``blueprint_config`` module: Collect rendered device configurations from an Apstra blueprint.
+- Added ``blueprint_health`` module: Retrieve anomalies and build errors from an Apstra blueprint.
+- Added ``blueprint_report`` module: Generate and retrieve blueprint reports from Apstra.
+- Added ``rbac_roles`` module: Create, update, and delete RBAC roles with global, granular, and tenant permissions.
+- Added ``rbac_user`` module: Manage RBAC users in Apstra.
+- Added ``os_images`` module: Manage OS images in Apstra for device lifecycle management.
+- Added ``ztp_config`` module: Manage ZTP (Zero Touch Provisioning) configuration on the Apstra ZTP VM.
+- Added ``device_management`` module: Manage device onboarding, acknowledge, and system agent operations.
+
+Minor Changes
+-------------
+- ``blueprint``: Added ``state=commit_check`` for dry-run blueprint validation.
+- ``blueprint``: Added ``state=interface_updated`` for interface speed and configuration management.
+- ``blueprint``: Added ``state=interface_tagged`` for interface tag assignment.
+- ``blueprint``: Added ``state=lag_updated`` for LAG/port-channel configuration.
+- ``blueprint``: Added ``state=rack_added`` and ``state=rack_deleted`` for rack management.
+- ``security_zone``: Added tenant management support.
+- ``interconnect_gateway``: Fixed VN/SZ settings merge instead of replace on PATCH.
+- ``virtual_network``: Added keyword expansion for ``bound_to`` system_id.
+- All ``ansible-test sanity`` checks now pass on Python 3.12.
+
+Bug Fixes
+---------
+- Fixed all ``ansible-test sanity`` failures for Python 3.12 and ansible-core 2.16.
+- Replaced ``urlopen`` with ``ansible.module_utils.urls.open_url`` in ``ztp_client``.
+- Fixed YAML syntax errors in ``system_agents`` and ``rbac_roles`` documentation.
+- Fixed configlets not updating properly when changes are detected.
+- Fixed node resolution in ``state=node_updated`` for non-system nodes.
+- Fixed ``interface_map`` extra colon in description.
 
 v1.0.8
 ======

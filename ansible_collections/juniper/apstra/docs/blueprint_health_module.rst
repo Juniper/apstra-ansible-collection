@@ -30,7 +30,7 @@ juniper.apstra.blueprint_health module -- Collect anomalies and build errors fro
 
 .. rst-class:: ansible-version-added
 
-New in juniper.apstra 1.0.9
+New in juniper.apstra 1.1.0
 
 .. contents::
    :local:

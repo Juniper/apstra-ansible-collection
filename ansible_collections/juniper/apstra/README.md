@@ -39,7 +39,8 @@ The following matrix shows which collection version to use with each Juniper Aps
 
 Collection Version | Supported Apstra Versions | Notes
 --- | --- | ---
-**v1.0.8** | 6.0, 6.1 | Current release. Includes new modules: `floating_ip`, `upgrade_management`, `interconnect_gateway`, `iba_probes`, `cabling_map`, `virtual_infra_manager`. Adds tag support, commit descriptions, rack renaming, and many bug fixes.
+**v1.1.0** | 6.0, 6.1.0, 6.1.2 | Current release. Python 3.12 and ansible-core 2.16 support. All ansible-test sanity checks pass. Includes new modules: `floating_ip`, `upgrade_management`, `interconnect_gateway`, `iba_probes`, `cabling_map`, `virtual_infra_manager`.
+**v1.0.8** | 6.0, 6.1 | Adds tag support, commit descriptions, rack renaming, and many bug fixes.
 **v1.0.7** | 6.0, 6.1 | Added `interconnect_gateway`, `iba_probes`, `cabling_map`, `virtual_infra_manager` modules. Name-to-ID resolution across all modules.
 **v1.0.6** | 6.0, 6.1 | Added `rollback`, `ztp_device`, `connectivity_template`, `connectivity_template_assignment`, `external_gateway`, `generic_systems`, `configlets`, `property_set`, `resource_pools`.
 **v1.0.5** | 5.1 | Use this version for Apstra 5.x deployments.

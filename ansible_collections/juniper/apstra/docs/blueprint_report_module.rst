@@ -30,7 +30,7 @@ juniper.apstra.blueprint_report module -- Generate reports from Apstra blueprint
 
 .. rst-class:: ansible-version-added
 
-New in juniper.apstra 1.0.9
+New in juniper.apstra 1.1.0
 
 .. contents::
    :local:

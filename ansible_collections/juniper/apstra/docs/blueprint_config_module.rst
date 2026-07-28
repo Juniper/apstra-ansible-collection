@@ -16,7 +16,7 @@ juniper.apstra.blueprint_config module -- Collect rendered device configurations
 
 .. rst-class:: ansible-version-added
 
-New in juniper.apstra 1.0.9
+New in juniper.apstra 1.1.0
 
 .. contents::
    :local:
