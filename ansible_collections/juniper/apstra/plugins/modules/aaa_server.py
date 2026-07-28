@@ -8,7 +8,7 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
-DOCUMENTATION = """git push --force-with-lease origin ansible-sanity
+DOCUMENTATION = """
 ---
 module: aaa_server
 
