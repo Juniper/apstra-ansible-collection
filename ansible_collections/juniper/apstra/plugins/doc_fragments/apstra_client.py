@@ -31,12 +31,10 @@ options:
       - The password for authentication.
     type: str
     required: false
-    no_log: true
 
   auth_token:
     description:
       - The authentication token to use if already authenticated.
     type: str
     required: false
-    no_log: true
 """

@@ -553,7 +553,7 @@ Examples
       juniper.apstra.security_zone:
         id:
           blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-        state: list
+        state: query
 
     - name: Create a single tenant with routing zones
       juniper.apstra.security_zone:

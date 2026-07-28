@@ -128,7 +128,7 @@
     - name: List all AAA servers
       juniper.apstra.aaa_server:
         id: "{{ bp.id }}"
-        state: list
+        state: query
         auth_token: "{{ auth.token }}"
       register: listed
 

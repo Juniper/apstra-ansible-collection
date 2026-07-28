@@ -8,7 +8,7 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
-DOCUMENTATION = """
+DOCUMENTATION = """git push --force-with-lease origin ansible-sanity
 ---
 module: aaa_server
 
@@ -90,10 +90,10 @@ options:
   state:
     description:
       - Desired state of the AAA server.
-      - Use C(list) to enumerate all AAA servers in the blueprint.
+      - Use C(query) to enumerate all AAA servers in the blueprint.
     required: false
     type: str
-    choices: ["present", "absent", "list"]
+    choices: ["present", "absent", "query"]
     default: "present"
 """
 
@@ -144,7 +144,7 @@ EXAMPLES = """
   juniper.apstra.aaa_server:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-    state: list
+    state: query
 
 - name: Delete an AAA server by label
   juniper.apstra.aaa_server:
@@ -201,7 +201,7 @@ aaa_server:
   }
 aaa_servers:
   description: List of all AAA servers in the blueprint.
-  returned: when state is list
+  returned: when state is query
   type: list
 msg:
   description: The output message that the module generates.
@@ -345,7 +345,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent", "list"],
+            choices=["present", "absent", "query"],
             default="present",
         ),
     )
@@ -379,8 +379,8 @@ def main():
         if body and body.get(_SECRET_KEY):
             module.no_log_values.add(body[_SECRET_KEY])
 
-        # --- State: list ---
-        if state == "list":
+        # --- State: query ---
+        if state == "query":
             servers = _api_list(base_client, blueprint_id)
             result["aaa_servers"] = [_strip_secret(s) for s in servers]
             result["changed"] = False

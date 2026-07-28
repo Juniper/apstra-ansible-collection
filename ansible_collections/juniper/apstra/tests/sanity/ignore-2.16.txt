@@ -36,11 +36,7 @@ plugins/modules/upgrade_group.py validate-modules:missing-gplv3-license
 plugins/modules/virtual_infra_manager.py validate-modules:missing-gplv3-license
 plugins/modules/virtual_network.py validate-modules:missing-gplv3-license
 plugins/modules/ztp_device.py validate-modules:missing-gplv3-license
-plugins/modules/aaa_server.py validate-modules:parameter-state-invalid-choice
-plugins/modules/device_management.py validate-modules:invalid-documentation
 plugins/modules/device_management.py validate-modules:missing-gplv3-license
-plugins/modules/os_images.py validate-modules:invalid-documentation
-plugins/modules/security_zone.py validate-modules:parameter-state-invalid-choice
 plugins/modules/ztp_config.py validate-modules:missing-gplv3-license
 plugins/modules/ztp_device.py validate-modules:doc-default-does-not-match-spec
 plugins/modules/ztp_device.py validate-modules:parameter-type-not-in-doc

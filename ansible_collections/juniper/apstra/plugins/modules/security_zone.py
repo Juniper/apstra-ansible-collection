@@ -94,10 +94,10 @@ options:
   state:
     description:
       - Desired state of the security zone or tenant.
-      - Use C(list) to enumerate all security zones and tenants in the blueprint.
+      - Use C(query) to enumerate all security zones and tenants in the blueprint.
     required: false
     type: str
-    choices: ["present", "absent", "list"]
+    choices: ["present", "absent", "query"]
     default: "present"
 """
 
@@ -153,7 +153,7 @@ EXAMPLES = """
   juniper.apstra.security_zone:
     id:
       blueprint: "5f2a77f6-1f33-4e11-8d59-6f9c26f16962"
-    state: list
+    state: query
 
 - name: Bulk create/update tenants
   juniper.apstra.security_zone:
@@ -234,7 +234,7 @@ security_zone:
   }
 security_zones:
   description: List of all security zones in the blueprint.
-  returned: when state is list
+  returned: when state is query
   type: list
 tag_response:
   description: The response from applying tags to the security zone.
@@ -243,7 +243,7 @@ tag_response:
   sample: ["red", "blue"]
 tenants:
   description: Results of bulk tenant operations or list of all tenants.
-  returned: when tenants/tenant parameter is used, or state is list
+  returned: when tenants/tenant parameter is used, or state is query
   type: list
 msg:
   description: The output message that the module generates.
@@ -583,7 +583,7 @@ def main():
         state=dict(
             type="str",
             required=False,
-            choices=["present", "absent", "list"],
+            choices=["present", "absent", "query"],
             default="present",
         ),
         tags=dict(type="list", elements="str", required=False),
@@ -628,8 +628,8 @@ def main():
         if "blueprint" in id:
             id["blueprint"] = client_factory.resolve_blueprint_id(id["blueprint"])
 
-        # ── state=list: enumerate all security zones and tenants ─
-        if state == "list":
+        # ── state=query: enumerate all security zones and tenants ─
+        if state == "query":
             all_sz = client_factory.object_request(object_type, "get", id)
             sz_list = []
             if isinstance(all_sz, dict):

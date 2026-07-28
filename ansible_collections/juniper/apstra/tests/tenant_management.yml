@@ -172,7 +172,7 @@
     - name: List all security zones and tenants
       juniper.apstra.security_zone:
         id: "{{ bp.id }}"
-        state: list
+        state: query
         auth_token: "{{ auth.token }}"
       register: sz_list
 
@@ -278,7 +278,7 @@
     - name: List all after bulk operations
       juniper.apstra.security_zone:
         id: "{{ bp.id }}"
-        state: list
+        state: query
         auth_token: "{{ auth.token }}"
       register: list_after_bulk
 
@@ -407,7 +407,7 @@
     - name: Final list
       juniper.apstra.security_zone:
         id: "{{ bp.id }}"
-        state: list
+        state: query
         auth_token: "{{ auth.token }}"
       register: final_list
 

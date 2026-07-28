@@ -99,7 +99,7 @@ notes:
 extends_documentation_fragment:
   - juniper.apstra.apstra_client
 author:
-  - Juniper Networks
+  - "Juniper Networks (@Juniper)"
 """
 
 EXAMPLES = r"""
