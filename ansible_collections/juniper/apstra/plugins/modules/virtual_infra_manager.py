@@ -34,32 +34,6 @@ description:
     is linked to a blueprint, specifying C(infra_type) and C(system_id).
 
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra api.
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The Apstra username for authentication.
-    type: str
-    required: false
-  password:
-    description:
-      - The Apstra password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated.
-    type: str
-    required: false
   id:
     description:
       - Dictionary containing identifiers.
@@ -159,6 +133,8 @@ options:
     required: false
     choices: ["present", "replaced", "absent"]
     default: "present"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """

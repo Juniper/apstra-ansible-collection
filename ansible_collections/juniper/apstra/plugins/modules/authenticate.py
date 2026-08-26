@@ -17,37 +17,13 @@ description:
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra api.
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The username for authentication.
-    type: str
-    required: false
-  password:
-    description:
-      - The password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated.
-    type: str
-    required: false
   logout:
     description:
       - If set to true, the module will log out the current session.
     type: bool
     default: false
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """

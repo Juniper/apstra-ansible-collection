@@ -28,32 +28,6 @@ description:
     Upgrade groups (C(upgrade_group.py)) require Apstra 6.1+.
 
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra API.
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The Apstra username for authentication.
-    type: str
-    required: false
-  password:
-    description:
-      - The Apstra password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated.
-    type: str
-    required: false
   id:
     description:
       - A dict identifying the target blueprint and (for most states) device.
@@ -122,6 +96,8 @@ options:
     required: false
     choices: ["present", "impact_report", "gathered"]
     default: "present"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """

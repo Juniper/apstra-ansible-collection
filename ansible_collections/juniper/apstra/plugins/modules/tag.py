@@ -18,32 +18,6 @@ author:
 description:
   - This module allows you to create, update, and delete tags in Apstra.
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra api.
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The username for authentication.
-    type: str
-    required: false
-  password:
-    description:
-      - The password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated.
-    type: str
-    required: false
   id:
     description:
       - Dictionary containing the blueprint and tag IDs.
@@ -61,6 +35,8 @@ options:
     type: str
     choices: ["present", "absent"]
     default: "present"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """
