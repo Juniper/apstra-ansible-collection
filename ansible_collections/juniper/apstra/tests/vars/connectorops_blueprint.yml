@@ -21,7 +21,8 @@
 testbed_file: "{{ lookup('env', 'TESTBED_FILE') | default('testbed.yaml', true) }}"
 
 # Topology key inside testbed.topologies (also used as blueprint_label)
-topology_name: "vg-am-cops-tb-0"
+# Derived automatically from the first key in testbed.topologies at runtime.
+# Override with: -e topology_name=<name>
 
 # ── Interface Maps ────────────────────────────────────────────────────────────
 spine_interface_map: "simple_dc_vjunos_ifmap"

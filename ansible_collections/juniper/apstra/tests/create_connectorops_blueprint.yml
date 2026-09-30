@@ -71,6 +71,12 @@
       ansible.builtin.set_fact:
         tb: "{{ testbed_raw.testbeds.apstra.testbed1 }}"
 
+    - name: "Phase 0b.1 — Derive topology_name from testbed (first topology key)"
+      tags: [always]
+      ansible.builtin.set_fact:
+        topology_name: "{{ tb.topologies.keys() | list | first }}"
+      when: topology_name is not defined or topology_name == ''
+
     - name: "Phase 0c — Derive AOS credentials and topology from testbed"
       tags: [always]
       ansible.builtin.set_fact:
@@ -1445,7 +1451,7 @@
           blueprint: "{{ blueprint_label }}"
         body:
           label: "customer-test-vn"
-          description: "Regression test — customer scenario with create_policy_tagged"
+          description: "Regression test - customer scenario with create_policy_tagged"
           ipv4_enabled: true
           virtual_gateway_ipv4: "10.100.10.1"
           ipv4_subnet: "10.100.10.0/24"

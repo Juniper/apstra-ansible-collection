@@ -89,16 +89,27 @@ def run_qe_query(client_factory, blueprint_id, query_string):
         ``id`` and all node properties.
     """
     bp = _get_blueprint(client_factory, blueprint_id)
-    raw_items = bp.query(query_string)
+    result = bp.query(query_string)
+    if not result:
+        return []
+
+    # PyPI SDK bp.query() returns {'items': [{alias: node_dict}, ...]}.
+    # The old wheel returned Node objects directly as a list.
+    if isinstance(result, dict):
+        raw_items = result.get("items", [])
+    else:
+        raw_items = result  # fallback for any future SDK change
+
     if not raw_items:
         return []
 
-    # Convert SDK Node objects to plain dicts
+    # Convert SDK Node objects / plain dicts to plain dicts
     items = []
     for raw_item in raw_items:
         item = {}
-        for alias, node in raw_item.items():
-            item[alias] = _node_to_dict(node)
+        if isinstance(raw_item, dict):
+            for alias, node in raw_item.items():
+                item[alias] = _node_to_dict(node)
         items.append(item)
     return items
 

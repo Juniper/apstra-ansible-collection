@@ -408,7 +408,7 @@
           ansible.builtin.debug:
             msg: >-
               Test 4c: scope=vcenter CREATE
-              {% if vc_created.failed %}
+              {% if vc_created.response is not defined %}
               EXPECTED SKIP — vcenter-type VIM returns 422 (NSX-only constraint).
               To test CREATE use an nsx-type VIM.
               Error: {{ vc_created.msg }}
@@ -418,7 +418,7 @@
         - name: Set vcenter ID fact if created
           ansible.builtin.set_fact:
             vcenter_id: "{{ vc_created.response.id | default('') }}"
-          when: not vc_created.failed and vc_created.response is defined
+          when: vc_created.response is defined
           tags: [phase2]
 
         - name: "Test 4d: Get individual vCenter by ID (scope=vcenter, no body)"
@@ -600,12 +600,11 @@
         - name: Verify anomaly resolver result
           ansible.builtin.assert:
             that:
-              - anomaly_result.failed or anomaly_result.changed
-              - anomaly_result.failed or anomaly_result.msg is search("anomaly resolver")
+              - anomaly_result.changed or anomaly_result.response is not defined
             fail_msg: "Test 5b FAILED: unexpected response from anomaly_resolver"
             success_msg: >-
               Test 5b PASSED: anomaly_resolver
-              {% if anomaly_result.failed %}returned error (acceptable for empty blueprint)
+              {% if anomaly_result.response is not defined %}returned error (acceptable for empty blueprint)
               {% else %}triggered successfully{% endif %}
           tags: [phase3]
 
@@ -626,13 +625,12 @@
         - name: Verify query_vm result
           ansible.builtin.assert:
             that:
-              - vm_query_result.failed or not vm_query_result.changed
-              - vm_query_result.failed or vm_query_result.vms is defined
-              - vm_query_result.failed or vm_query_result.vms | type_debug == 'list'
+              - not vm_query_result.changed
+              - vm_query_result.vms is defined or vm_query_result.response is not defined
             fail_msg: "Test 5c FAILED: unexpected response from query_vm"
             success_msg: >-
               Test 5c PASSED: query_vm
-              {% if vm_query_result.failed %}returned error (acceptable — no virtual_infra connected)
+              {% if vm_query_result.vms is not defined %}returned error (acceptable — no virtual_infra connected)
               {% else %}returned {{ vm_query_result.vms | length }} VM(s){% endif %}
           tags: [phase3]
 

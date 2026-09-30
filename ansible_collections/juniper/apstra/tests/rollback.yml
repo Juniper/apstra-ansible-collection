@@ -49,14 +49,15 @@
       block:
         - name: List all blueprints
           juniper.apstra.apstra_facts:
-            object_type: blueprints
+            gather_network_facts:
+              - blueprints
             auth_token: "{{ auth.token }}"
           register: all_bps
 
         - name: Select first blueprint
           ansible.builtin.set_fact:
-            blueprint_id: "{{ all_bps.objects[0].id }}"
-          when: all_bps.objects | length > 0
+            blueprint_id: "{{ all_bps.ansible_facts.apstra_facts.blueprints.values() | map(attribute='id') | first }}"
+          when: all_bps.ansible_facts.apstra_facts.blueprints | length > 0
 
     - name: Fail if no blueprint available
       ansible.builtin.fail:
@@ -195,7 +196,7 @@
             that:
               - ps_import.changed
 
-        - name: Revert blueprint to undo the uncommitted import
+        - name: Revert blueprint to undo the uncommitted change
           juniper.apstra.rollback:
             id:
               blueprint: "{{ blueprint_id }}"
@@ -241,7 +242,7 @@
             state: absent
             auth_token: "{{ auth.token }}"
           failed_when: false
-          when: revert_ps.id.property_set is defined
+          when: revert_ps is defined and revert_ps.id is defined
 
     ################################################################################
     # TEST 4: Error Handling
@@ -256,7 +257,7 @@
             state: rolledback
             auth_token: "{{ auth.token }}"
           register: no_revision_result
-          failed_when: false
+          ignore_errors: true
 
         - name: Verify missing revision_id error
           ansible.builtin.assert:
@@ -273,7 +274,7 @@
             state: rolledback
             auth_token: "{{ auth.token }}"
           register: invalid_revision_result
-          failed_when: false
+          ignore_errors: true
 
         - name: Verify invalid revision_id error
           ansible.builtin.assert:
@@ -287,7 +288,7 @@
             state: listed
             auth_token: "{{ auth.token }}"
           register: bad_bp_result
-          failed_when: false
+          ignore_errors: true
 
         - name: Verify non-existent blueprint error
           ansible.builtin.assert:

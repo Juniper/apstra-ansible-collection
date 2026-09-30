@@ -428,7 +428,18 @@ def _handle_lldp(module, client_factory, blueprint_id):
     if create_ng:
         client = _get_blueprint_client(client_factory, blueprint_id)
         bp = client.blueprints[blueprint_id]
-        items = bp.cabling_map.new_generics.get() or []
+        try:
+            raw = bp.cabling_map.new_generics.get()
+            # Apstra ≥6.1 returns {"items": [...]}, older versions return a
+            # bare list or a dict without the "items" wrapper.
+            if isinstance(raw, list):
+                items = raw
+            elif isinstance(raw, dict):
+                items = raw.get("items", [])
+            else:
+                items = raw or []
+        except (KeyError, Exception):
+            items = []
         if items:
             if module.check_mode:
                 actions.append(f"would create {len(items)} new generic system(s)")

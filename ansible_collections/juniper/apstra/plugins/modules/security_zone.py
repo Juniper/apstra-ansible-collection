@@ -793,13 +793,36 @@ def main():
 
             # Return the final object state (avoid re-reading after updates
             # because SDK may return stale cached data; for creates, fetch
-            # the full server-populated object)
+            # the full server-populated object).
             if current_object is not None:
                 result[leaf_object_type] = current_object
             else:
                 result[leaf_object_type] = client_factory.object_request(
-                    object_type=object_type, op="get", id=id, retry=10, retry_delay=3
+                    object_type=object_type, op="get", id=id, retry=0
                 )
+                # PyPI aos-sdk-api==6.1.2 regression: GET-by-ID returns None for
+                # non-UUID SZ IDs (the SDK fails to resolve short base62 IDs).
+                # Fall back to a graph query. A brief sleep allows the Apstra
+                # graph engine to index the newly created node before querying.
+                if result[leaf_object_type] is None:
+                    from time import sleep as _sleep
+
+                    from ansible_collections.juniper.apstra.plugins.module_utils.apstra.name_resolution import (
+                        _run_qe,
+                    )
+
+                    _sleep(3)
+                    sz_id = id.get(leaf_object_type)
+                    qe_results = _run_qe(
+                        client_factory,
+                        id["blueprint"],
+                        "node('security_zone', name='sz')",
+                    )
+                    for r in qe_results or []:
+                        sz = r.get("sz", {})
+                        if sz.get("id") == sz_id:
+                            result[leaf_object_type] = sz
+                            break
 
             # Apply interface IP assignments if specified
             if interfaces_ip_assignments:

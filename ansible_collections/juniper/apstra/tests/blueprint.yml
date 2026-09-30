@@ -398,10 +398,20 @@
         id: "{{ bp_assign.id }}"
         state: absent
         auth_token: "{{ auth.token }}"
+      register: _bp_delete
+      retries: 5
+      delay: 10
+      until: _bp_delete is not failed
+      ignore_errors: true
 
     # ─────────────────────────────────────────────────────────────────────
     #  Rack management tests (state=rack_added, state=rack_deleted)
     # ─────────────────────────────────────────────────────────────────────
+
+    - name: "Refresh auth token (before rack tests)"
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
 
     - name: "[RACK SETUP] Find leftover rack test blueprint from prior runs"
       juniper.apstra.blueprint:

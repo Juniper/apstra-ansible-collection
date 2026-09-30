@@ -189,6 +189,11 @@
 
     # ── Assign interface maps to leaf and spine via module ────────────
 
+    - name: "Refresh auth token (mid-test)"
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
     - name: Build interface map assignments dict
       ansible.builtin.set_fact:
         imap_assignments: "{{ {leaf_ids[0]: leaf_imap_id, spine_ids[0]: spine_imap_id} }}"
@@ -1114,7 +1119,7 @@
         state: present
         auth_token: "{{ auth.token }}"
       register: no_links_result
-      failed_when: false
+      ignore_errors: true
 
     - name: Verify missing links error
       ansible.builtin.assert:
@@ -1140,7 +1145,7 @@
         state: present
         auth_token: "{{ auth.token }}"
       register: dup_links_result
-      failed_when: false
+      ignore_errors: true
 
     - name: Verify duplicate link error
       ansible.builtin.assert:

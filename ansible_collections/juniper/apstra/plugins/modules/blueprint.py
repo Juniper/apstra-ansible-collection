@@ -1167,13 +1167,15 @@ def _handle_rack_deleted(module, client_factory, blueprint_id):
     resp = base.raw_request(
         f"/blueprints/{blueprint_id}/delete-racks",
         method="POST",
-        data={"racks_to_delete": [rid for _name, rid in resolved_ids]},
+        data={
+            "racks_to_delete": [resolved_id for _unused, resolved_id in resolved_ids]
+        },
     )
     if resp.status_code not in (200, 201, 202, 204):
         raise Exception(
             f"Failed to delete racks: HTTP {resp.status_code} — {resp.text}"
         )
-    deleted = [rid for _name, rid in resolved_ids]
+    deleted = [resolved_id for _unused, resolved_id in resolved_ids]
 
     n = len(deleted)
     return dict(

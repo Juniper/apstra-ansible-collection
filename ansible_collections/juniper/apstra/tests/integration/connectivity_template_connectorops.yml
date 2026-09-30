@@ -65,13 +65,9 @@
   connection: local
 
   vars:
-    blueprint_label: "vg-am-cops-tb-0"
-
-    # System labels
-    esi_leaf1:   "vg-am-cops-tb-0-leaf1"
-    esi_leaf2:   "vg-am-cops-tb-0-leaf2"
-    rg_label:    "connectorops_vjun_001_leaf_pair1"
-    single_leaf: "vg-am-cops-tb-0-leaf3border"
+    # Testbed input — set TESTBED_FILE env var or pass -e testbed_file=...
+    testbed_file: "{{ lookup('env', 'TESTBED_FILE') | default(playbook_dir ~ '/../../testbed.yml', true) }}"
+    topology_name: "{{ lookup('env', 'TOPOLOGY_NAME') | default('', true) }}"
 
     # Temporary test resources (last 6 digits of epoch = short suffix)
     test_suffix:   "{{ ansible_date_time.epoch[-6:] }}"
@@ -79,11 +75,71 @@
     test_vn_label: "ct_test_vn_{{ test_suffix }}"
     test_sz_vrf:   "ct_sz_{{ test_suffix }}"
     test_ct_name:  "Untagged VxLAN '{{ test_vn_label }}'"
+    # BGP-2-SRX is assigned to single_leaf ge interfaces; temporarily unassign
+    # before Tests 1-4 so untagged VN endpoints can coexist (Apstra 6.1.2
+    # UNTAGGED_VN_EP_AND_SUBINTF rule).
+    bgp_ct_name:   "BGP-2-SRX"
 
     verify_certs: false
-    api_url: "{{ lookup('env','APSTRA_API_URL') | default('https://10.88.137.14/api', true) }}"
 
   tasks:
+    # ── Phase 0 pre: Load Testbed & Derive Topology Variables ────────────────
+    - name: "P0 pre — Load testbed configuration"
+      ansible.builtin.include_vars:
+        file: "{{ testbed_file }}"
+        name: testbed_raw
+
+    - name: "P0 pre — Set testbed shorthand"
+      ansible.builtin.set_fact:
+        _tb: "{{ testbed_raw.testbeds.apstra.testbed1 }}"
+
+    - name: "P0 pre — Derive topology_name from testbed (first topology key)"
+      ansible.builtin.set_fact:
+        topology_name: "{{ _tb.topologies.keys() | list | first }}"
+      when: topology_name is not defined or topology_name == ''
+
+    - name: "P0 pre — Derive api_url, blueprint_label, topology"
+      ansible.builtin.set_fact:
+        api_url: "https://{{ _tb.aos.ip }}/api"
+        blueprint_label: "{{ topology_name }}"
+        esi_leaf1: "{{ topology_name }}-leaf1"
+        esi_leaf2: "{{ topology_name }}-leaf2"
+        _topo: "{{ _tb.topologies[topology_name] }}"
+
+    - name: "P0 pre — Derive single_leaf (first sorted border leaf)"
+      ansible.builtin.set_fact:
+        single_leaf: >-
+          {{
+            _topo.unmanaged_nodes.values()
+            | map(attribute='connections')
+            | map('dict2items') | flatten
+            | map(attribute='value')
+            | map('dict2items') | flatten
+            | map(attribute='key') | unique | sort | first
+          }}
+
+    - name: "P0 pre — Derive SRX-facing interfaces on single_leaf (sorted)"
+      ansible.builtin.set_fact:
+        single_leaf_srx_ifs: >-
+          {{
+            _topo.unmanaged_nodes.values()
+            | map(attribute='connections')
+            | map('dict2items') | flatten
+            | map(attribute='value')
+            | map('dict2items') | flatten
+            | selectattr('key', 'equalto', single_leaf)
+            | map(attribute='value')
+            | unique | sort | list
+          }}
+
+    - name: "P0 pre — Display derived topology vars"
+      ansible.builtin.debug:
+        msg: >
+          API: {{ api_url }} | Blueprint: {{ blueprint_label }} |
+          ESI pair: {{ esi_leaf1 }} / {{ esi_leaf2 }} |
+          Border leaf: {{ single_leaf }} |
+          SRX interfaces: {{ single_leaf_srx_ifs }}
+
     # ── Phase 0: Authenticate ─────────────────────────────────────────────────
     - name: "P0 — Authenticate to Apstra"
       juniper.apstra.authenticate:
@@ -97,6 +153,26 @@
     - name: "P0 — Set auth token"
       ansible.builtin.set_fact:
         token: "{{ auth.token }}"
+
+    # ── Phase 0 post: Discover ESI redundancy group label ─────────────────────
+    - name: "P0 post — Discover redundancy group label from blueprint"
+      juniper.apstra.blueprint:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+        query: 'node(type="redundancy_group", name="rg")'
+        state: queried
+      register: _rg_query
+
+    - name: "P0 post — Set rg_label from query result"
+      ansible.builtin.set_fact:
+        rg_label: "{{ _rg_query.results | map(attribute='rg') | map(attribute='label') | list | first }}"
+
+    - name: "P0 post — Display discovered rg_label"
+      ansible.builtin.debug:
+        msg: "ESI redundancy group: {{ rg_label }}"
 
     # ── Phase 1: Create test SZ + VN ──────────────────────────────────────────
     - name: "P1a — Create test SZ: {{ test_sz_label }}"
@@ -132,6 +208,22 @@
         state: present
       register: test_vn
 
+    # ── Pre-test: temporarily unassign BGP-2-SRX from single_leaf ge interfaces
+    # so Tests 1-4 can assign an untagged VN CT without UNTAGGED_VN_EP_AND_SUBINTF
+    - name: "Pre-test — Unassign BGP-2-SRX from {{ single_leaf }} ge interfaces"
+      juniper.apstra.connectivity_template_assignment:
+        api_url: "{{ api_url }}"
+        verify_certificates: "{{ verify_certs }}"
+        auth_token: "{{ token }}"
+        id:
+          blueprint: "{{ blueprint_label }}"
+          ct_name: "{{ bgp_ct_name }}"
+        body:
+          application_point_ids:
+            - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
+            - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
+        state: absent
+
     # ── Run tests in a block so cleanup (always) fires even on test failure ───
     - name: "Run connectivity template assignment tests"
       block:
@@ -150,7 +242,7 @@
               ct_name: "{{ test_ct_name }}"   # human-readable label, not UUID
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
             state: present
           register: test1_result
 
@@ -172,7 +264,7 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
             state: absent
 
         ##########################################################################
@@ -188,7 +280,7 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/3"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
             state: present
           register: test2_result
 
@@ -210,7 +302,7 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/3"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
             state: absent
 
         ##########################################################################
@@ -226,8 +318,8 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
-                - "{{ single_leaf }}:ge-0/0/3"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
             state: present
           register: test3_result
 
@@ -249,8 +341,8 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
-                - "{{ single_leaf }}:ge-0/0/3"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
             state: absent
 
         ##########################################################################
@@ -266,7 +358,7 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
             state: absent
           register: test4_result
 
@@ -294,7 +386,7 @@
               ct_id: "{{ test_ct_name }}"   # ct_id with human-readable label — exact account team syntax
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
             state: present
           register: test4b_result
 
@@ -316,7 +408,7 @@
               ct_id: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
             state: absent
 
         ##########################################################################
@@ -451,9 +543,9 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"             # valid
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"             # valid
                 - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"   # now resolves (Fix)
-                - "{{ single_leaf }}:ge-0/0/3"             # valid
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"             # valid
             state: present
           register: test8_result
 
@@ -479,9 +571,9 @@
               ct_name: "{{ test_ct_name }}"
             body:
               application_point_ids:
-                - "{{ single_leaf }}:ge-0/0/2"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
                 - "{{ esi_leaf1 }}/{{ esi_leaf2 }}:ae1"
-                - "{{ single_leaf }}:ge-0/0/3"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
             state: absent
 
       ##########################################################################
@@ -505,6 +597,21 @@
               │  Test 8:  Full account-team replay → ALL 3 SUCCEED   [new fix]  │
               └──────────────────────────────────────────────────────────────────┘
               Blueprint: {{ blueprint_label }}  |  CT used: {{ test_ct_name }}
+
+        - name: "Cleanup — Re-assign BGP-2-SRX to {{ single_leaf }} ge interfaces"
+          juniper.apstra.connectivity_template_assignment:
+            api_url: "{{ api_url }}"
+            verify_certificates: "{{ verify_certs }}"
+            auth_token: "{{ token }}"
+            id:
+              blueprint: "{{ blueprint_label }}"
+              ct_name: "{{ bgp_ct_name }}"
+            body:
+              application_point_ids:
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[0] }}"
+                - "{{ single_leaf }}:{{ single_leaf_srx_ifs[1] }}"
+            state: present
+          ignore_errors: true
 
         - name: "Cleanup — Delete VN: {{ test_vn_label }}"
           juniper.apstra.virtual_network:

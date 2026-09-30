@@ -30,7 +30,7 @@
   connection: local
   vars:
     apstra_api_url: "{{ lookup('env', 'APSTRA_API_URL') }}"
-    blueprint_id: "0de00f3b-d90e-4cf4-a03c-328911303372"
+    blueprint_id: ""
     if_transform_id: 1
   tasks:
 
@@ -38,17 +38,37 @@
     #  Validate & Authenticate
     # =================================================================
 
+    - name: Connect to Apstra
+      juniper.apstra.authenticate:
+        logout: false
+      register: auth
+
+    - name: Auto-discover blueprint (when blueprint_id not provided)
+      when: blueprint_id == ''
+      block:
+        - name: List all blueprints
+          juniper.apstra.apstra_facts:
+            gather_network_facts:
+              - blueprints
+            auth_token: "{{ auth.token }}"
+          register: all_bps
+
+        - name: Select first available blueprint
+          ansible.builtin.set_fact:
+            blueprint_id: "{{ (all_bps.ansible_facts.apstra_facts.blueprints | dict2items | first).key }}"
+          when: all_bps.ansible_facts.apstra_facts.blueprints | length > 0
+
+    - name: Fail if no blueprint available
+      ansible.builtin.fail:
+        msg: "No blueprint found. Pass -e blueprint_id=<uuid> or ensure a blueprint exists."
+      when: blueprint_id == ''
+
     - name: Validate blueprint_id is provided
       ansible.builtin.assert:
         that:
           - blueprint_id is defined
           - blueprint_id | length > 0
         fail_msg: "blueprint_id is required. Set it in vars or pass via -e blueprint_id=<uuid>"
-
-    - name: Connect to Apstra
-      juniper.apstra.authenticate:
-        logout: false
-      register: auth
 
     # =================================================================
     #  Auto-discover leaf switch

@@ -834,8 +834,8 @@ def _unassign_ct(ep_client, blueprint_id, ct_id, app_point_ids):
     """Remove CT assignment from given application points."""
     if not app_point_ids:
         return
-    from aos.sdk.reference_design.extension.endpoint_policy import (
-        generator as ct_gen,
+    from aos.sdk.api.reference_design._extensions import (
+        endpoint_policy_generator as ct_gen,
     )
 
     dto = ct_gen.gen_apply_unapply(
@@ -850,8 +850,8 @@ def _reassign_ct(ep_client, blueprint_id, new_ct_id, app_point_ids):
     """Re-apply CT to previously assigned application points."""
     if not app_point_ids:
         return
-    from aos.sdk.reference_design.extension.endpoint_policy import (
-        generator as ct_gen,
+    from aos.sdk.api.reference_design._extensions import (
+        endpoint_policy_generator as ct_gen,
     )
 
     dto = ct_gen.gen_apply_unapply(

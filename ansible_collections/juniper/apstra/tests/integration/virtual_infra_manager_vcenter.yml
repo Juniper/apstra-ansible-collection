@@ -398,7 +398,7 @@
         auth_token: "{{ auth.token }}"
       register: vi_detail
       when: vi_id is defined
-      ignore_errors: true
+      failed_when: false
       tags: [verify]
 
     - name: Display VIM node details
@@ -409,7 +409,7 @@
             infra_type:      {{ (vi_detail.virtual_infra | first).infra_type | default('?') }}
             system_id:       {{ (vi_detail.virtual_infra | first).system_id | default('?') }}
             system_address:  {{ (vi_detail.virtual_infra | first).system_address | default('?') }}
-      when: vi_id is defined and not vi_detail.failed
+      when: vi_id is defined and vi_detail.virtual_infra is defined
       tags: [verify]
 
     - name: "Verify 3: Query VM inventory for '{{ vm_target_name }}' via VIM"
@@ -425,7 +425,7 @@
           vm_name: "{{ vm_target_name }}"
         auth_token: "{{ auth.token }}"
       register: vm_query
-      ignore_errors: true
+      failed_when: false
       tags: [verify]
 
     - name: Display VM query result
@@ -433,7 +433,7 @@
         msg: |
           ─────────────────────────────────────────────────────────────
           query_vm for '{{ vm_target_name }}':
-            Status:       {{ 'OK' if not vm_query.failed else 'ERROR — ' + (vm_query.msg | default('?')) }}
+            Status:       {{ 'OK' if vm_query.vms is defined else 'ERROR — ' + (vm_query.msg | default('?')) }}
             VMs found:    {{ vm_query.vms | default([]) | length }}
             Result:       {{ vm_query.vms | default([]) | to_nice_json }}
           ─────────────────────────────────────────────────────────────
@@ -483,14 +483,14 @@
         state: present
         auth_token: "{{ auth.token }}"
       register: anomaly_result
-      ignore_errors: true
+      failed_when: false
       tags: [verify]
 
     - name: Display anomaly_resolver result
       ansible.builtin.debug:
         msg: >-
           anomaly_resolver:
-          {% if anomaly_result.failed %}
+          {% if anomaly_result.response is not defined %}
           422 EXPECTED on fresh/undeployed blueprint — analytics probe not yet
           deployed. Error: {{ anomaly_result.msg | default('?') }}
           {% else %}

@@ -62,8 +62,8 @@ def build_ct_payload(name, primitives, description="", tags=None):
         of policy dicts (useful for extracting the CT ID).
     """
     # Lazy import to avoid hard failure when aos_sdk is missing
-    from aos.sdk.reference_design.extension.endpoint_policy import (
-        generator as ct_gen,
+    from aos.sdk.api.reference_design._extensions import (
+        endpoint_policy_generator as ct_gen,
     )
 
     sdk_policies = _primitives_dict_to_sdk(primitives)

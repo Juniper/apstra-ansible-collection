@@ -68,6 +68,17 @@
              | map(attribute='value.label')
              | list }}
 
+    # ---- Pre-cleanup: remove any leftover gateway from a previous run ----
+
+    - name: "PRE-CLEANUP — Delete test_ext_gw_1 if it already exists"
+      juniper.apstra.external_gateway:
+        id: "{{ bp.id }}"
+        body:
+          gw_name: "test_ext_gw_1"
+        state: absent
+        auth_token: "{{ auth.token }}"
+      ignore_errors: true
+
     # ---- Create external gateway ----
 
     - name: Create external gateway

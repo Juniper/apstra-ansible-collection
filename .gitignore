@@ -6,6 +6,11 @@ juniper*-apstra-*.gz
 _build
 output
 
+# Testbed files contain credentials — never commit
+# Copy testbed.yml.example → testbed.yml and fill in your values
+ansible_collections/juniper/apstra/testbed.yml
+testbed.yml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

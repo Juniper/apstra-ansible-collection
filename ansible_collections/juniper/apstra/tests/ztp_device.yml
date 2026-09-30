@@ -79,12 +79,12 @@
         state: status
         auth_token: "{{ auth.token }}"
       register: ztp_status_sysid
-      when: ztp_has_devices
+      when: ztp_has_devices and test_device_system_id != ''
 
     - name: Show status result (by system_id)
       ansible.builtin.debug:
         var: ztp_status_sysid
-      when: ztp_has_devices
+      when: ztp_has_devices and test_device_system_id != ''
 
     - name: Verify status by system_id succeeded
       ansible.builtin.assert:
@@ -95,7 +95,7 @@
           - ztp_status_sysid.ztp_device is defined
           - ztp_status_sysid.ztp_device.system_id == test_device_system_id
         fail_msg: "Status by system_id did not return expected data"
-      when: ztp_has_devices
+      when: ztp_has_devices and test_device_system_id != ''
 
     # ── Status by non-existent IP (should fail) ────────────────────────
 

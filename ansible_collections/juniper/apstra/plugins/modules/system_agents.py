@@ -237,7 +237,7 @@ options:
         the SSH fingerprint.  Set C(body.force_accept=true) (default) to
         always run; with C(body.force_accept=false) the operation is a no-op
         when the agent is already in C(connected) state (safe idempotency
-        check).  Accepts single or list id forms - C(id.agent_id),
+        check).  Accepts single or list id forms such as C(id.agent_id),
         C(id.management_ip), C(id.system_name)+C(id.blueprint), or the
         corresponding list variants C(id.agent_ids), C(id.management_ips),
         C(id.system_names).
@@ -787,7 +787,7 @@ def _handle_present(module, client_factory):
     agent_id = id_param.get("agent_id")
     management_ip = body.get("management_ip")
     wait = body.get("wait_for_connection", False)
-    wait_timeout = body.get("wait_timeout", 120)
+    wait_timeout = int(body.get("wait_timeout", 120))
 
     # Find existing agent
     existing = None
@@ -926,7 +926,7 @@ def _handle_installed(module, client_factory):
     """
     body = module.params.get("body") or {}
     wait = body.get("wait_for_connection", False)
-    wait_timeout = body.get("wait_timeout", 180)
+    wait_timeout = int(body.get("wait_timeout", 180))
 
     base = _get_base_client(client_factory)
     agents = _list_agents(client_factory)

@@ -257,16 +257,12 @@ from ansible_collections.juniper.apstra.plugins.module_utils.apstra.client impor
 )
 
 try:
-    import aos.sdk.generator as g
+    from aos.sdk.api.generator import _generators as g
 except ImportError:
     g = None
 
-try:
-    from aos.sdk.interface_map.interface_map_generator import (
-        gen_interface_map as _sdk_gen_interface_map,
-    )
-except ImportError:
-    _sdk_gen_interface_map = None
+# Interface map payload is built manually — PyPI SDK gen_interface_map is a
+# stub that does not accept (dp, ld, dp_usage, label) arguments.
 
 
 # ── Logical Device Helpers ───────────────────────────────────────────────────
@@ -574,8 +570,79 @@ def _get_interface_map(client, label):
     return None
 
 
+def _build_interface_map_payload(dp, ld, dp_usage, label):
+    """Build a POST payload for /design/interface-maps from raw Apstra API objects.
+
+    dp:       device profile dict from Apstra API
+    ld:       logical device dict from Apstra API
+    dp_usage: list of (port_id, transform_id) tuples in port order
+    label:    the interface map label
+    """
+    # Flatten LD port groups into a sequential list of port descriptors
+    ld_ports = []
+    position = 1
+    for panel_idx, panel in enumerate(ld.get("panels", []), start=1):
+        for pg_idx, pg in enumerate(panel.get("port_groups", []), start=1):
+            roles = pg.get("roles", [])
+            speed = pg.get("speed", {"value": 1, "unit": "G"})
+            for i in range(pg.get("count", 0)):
+                ld_ports.append(
+                    {
+                        "position": position,
+                        "roles": roles,
+                        "speed": speed,
+                        "panel_id": panel_idx,
+                        "pg_id": pg_idx,
+                        "pg_port_id": i + 1,
+                    }
+                )
+                position += 1
+
+    # Build DP transform lookup: (port_id, transform_id) -> transform dict
+    dp_transform_lookup = {}
+    for port in dp.get("ports", []):
+        for t in port.get("transformations", []):
+            dp_transform_lookup[(port["port_id"], t["transformation_id"])] = t
+
+    interfaces = []
+    ld_port_idx = 0
+    for port_id, transform_id in dp_usage:
+        transform = dp_transform_lookup.get((port_id, transform_id))
+        if not transform:
+            continue
+        for intf in transform.get("interfaces", []):
+            if ld_port_idx >= len(ld_ports):
+                break
+            lp = ld_ports[ld_port_idx]
+            interfaces.append(
+                {
+                    "name": intf["name"],
+                    "roles": lp["roles"],
+                    "position": lp["position"],
+                    "state": "active",
+                    "mapping": [
+                        port_id,
+                        transform_id,
+                        lp["panel_id"],
+                        lp["pg_id"],
+                        lp["pg_port_id"],
+                    ],
+                    "speed": intf["speed"],
+                    "setting": {"param": intf.get("setting", "")},
+                }
+            )
+            ld_port_idx += 1
+
+    return {
+        "label": label,
+        "device_profile_id": dp["id"],
+        "logical_device_id": ld["id"],
+        "interfaces": interfaces,
+    }
+
+
 def _create_interface_map(client, label, spec):
-    """Create a design interface map via the AOS SDK generator + API.
+    """Create a design interface map.
 
     spec keys:
       logical_device  — existing LD name (e.g. "simple_dc_vjunos_switch_96x1")
@@ -583,11 +650,6 @@ def _create_interface_map(client, label, spec):
       dp_usage        — optional list of [port_id, transform_id] pairs;
                         auto-generated from default transforms if omitted
     """
-    if _sdk_gen_interface_map is None:
-        raise Exception(
-            "The 'aos.sdk.interface_map' package is required for interface_map creation."
-        )
-
     dp_id = spec.get("device_profile")
     ld_id = spec.get("logical_device")
 
@@ -610,7 +672,7 @@ def _create_interface_map(client, label, spec):
                     dp_usage.append((port["port_id"], transform["transformation_id"]))
                     break
 
-    payload = _sdk_gen_interface_map(dp, ld, dp_usage, label=label)
+    payload = _build_interface_map_payload(dp, ld, dp_usage, label)
     client.request("/design/interface-maps", method="POST", data=payload)
     return _get_interface_map(client, label)
 
@@ -697,15 +759,6 @@ def main():
     name = id_param.get("name")
     spec = module.params.get("body")
     state = module.params["state"]
-
-    if (
-        design_type == "interface_map"
-        and state != "queried"
-        and _sdk_gen_interface_map is None
-    ):
-        module.fail_json(
-            msg="The 'aos.sdk.interface_map' package is required for interface_map operations but not installed."
-        )
 
     if not design_type or design_type not in (
         "logical_device",

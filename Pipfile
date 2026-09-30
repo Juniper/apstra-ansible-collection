@@ -4,7 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-aos-sdk = {file = "build/wheels/aos_sdk-6.1.1-py3-none-any.whl"}
+aos-sdk-api = "==6.1.2"
 requests-oauthlib = "*"
 jsonpatch = "*"
 jmespath = "*"
