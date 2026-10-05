@@ -5,7 +5,9 @@
 This repository contains the Juniper Apstra Ansible Collection, which provides a set of Ansible modules and roles for network management via the Juniper Apstra platform.
 
 - [Juniper Apstra Ansible Collection](#juniper-apstra-ansible-collection)
-  - [Installation and Usage](#installation-and-usage)
+  - [Development Environment Setup](#development-environment-setup)
+    - [Mac OS X](#mac-os-x)
+    - [Linux-based Systems](#linux-based-systems)
   - [Getting Started (New to Ansible?)](#getting-started-new-to-ansible)
     - [What Is Ansible?](#what-is-ansible)
     - [Key Concepts](#key-concepts)
@@ -14,13 +16,10 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
     - [Step 3 — Write Your First Playbook](#step-3--write-your-first-playbook)
     - [Step 4 — Run It](#step-4--run-it)
     - [Step 5 — Explore More Modules](#step-5--explore-more-modules)
+  - [Full Collection Documentation](#full-collection-documentation)
   - [Contributing](#contributing)
-  - [Development Environment](#development-environment)
-    - [Setup](#setup)
-      - [Mac OS X](#mac-os-x)
-      - [Linux-based Systems](#linux-based-systems)
-      - [All Systems](#all-systems)
-    - [Usage](#usage)
+  - [Development Workflow](#development-workflow)
+    - [Activate the Environment](#activate-the-environment)
     - [Test Configuration](#test-configuration)
     - [Image Build](#image-build)
     - [Image Publish](#image-publish)
@@ -31,9 +30,59 @@ This repository contains the Juniper Apstra Ansible Collection, which provides a
   - [License](#license)
   - [Community and Support](#community-and-support)
 
-## Installation and Usage
+---
 
-See [README](ansible_collections/juniper/apstra/README.md).
+## Development Environment Setup
+
+The following tools are recommended for development of this collection:
+1. [brew.sh](https://brew.sh/) -- Only needed for _Mac OS X_
+1. [pyenv](https://github.com/pyenv/pyenv/blob/master/README.md)
+2. [pipenv](https://pipenv.pypa.io/en/latest/)
+3. [pre-commit](https://github.com/pre-commit/pre-commit)
+
+> **CPU Instruction Set Requirement:** The Ansible Execution Environment image requires a host CPU that supports the **x86-64-v2** microarchitecture level or higher (Intel Nehalem / AMD Bulldozer and later). Attempting to run the image on an older CPU will result in the error: `Fatal glibc error: CPU does not support x86-64-v2`.
+
+### Mac OS X
+
+1. If you're on a Mac and don't have brew, install it:
+    ```bash
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    ```
+2. If you have an ARM-based Mac, make sure the following is in your ~/.zprofile:
+   ```bash
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+   ```
+   For Intel-based Mac, you may have to add this to ~/.zprofile instead:
+   ```bash
+    eval "$(/usr/local/bin/brew shellenv)"
+   ```
+
+3. Run the following command to install pyenv:
+   ```bash
+   brew install xz pyenv
+   ```
+
+4. Add this to your ~/.zprofile and restart your shell:
+    ```bash
+    export PYENV_ROOT="$HOME/.pyenv"
+    [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+    eval "$(pyenv init -)"
+    ```
+
+### Linux-based Systems
+
+1. Install pyenv:
+
+    ```bash
+    curl https://pyenv.run | bash
+    ```
+
+2. To set it up in your shell follow these instructions: https://github.com/pyenv/pyenv?tab=readme-ov-file#b-set-up-your-shell-environment-for-pyenv
+
+3. On _Ubuntu_, you'll need to install some packages to build Python properly:
+      ```bash
+      sudo apt -y install build-essential liblzma-dev libbz2-dev zlib1g zlib1g-dev libssl-dev libcrypt-dev libffi-dev libsqlite3-dev
+      ```
 
 ---
 
@@ -56,6 +105,8 @@ Ansible is an agentless automation tool. You write **playbooks** — plain YAML 
 | **Register** | Saves a task's output to a variable for use in later tasks |
 
 ### Step 1 — Install Ansible and This Collection
+
+When installing directly from this repository, `make setup` installs the Apstra SDK (`aos-sdk-api`) automatically; no manual download is required. Its version is pinned to `6.1.2` in `Pipfile`; update it to match your Apstra server version before running setup.
 
 ```bash
 # Install Ansible (Python 3.12 recommended)
@@ -181,105 +232,51 @@ See [ansible_collections/juniper/apstra/README.md](ansible_collections/juniper/a
 
 ---
 
+## Full Collection Documentation
+
+See [README](ansible_collections/juniper/apstra/README.md).
+
 ## Contributing
 
 If you would like to contribute to this project, please open an issue or submit a pull request on the [GitHub repository](https://github.com/Juniper/apstra-ansible-collection). See [Contributing to Ansible-maintained collections](https://docs.ansible.com/ansible/devel/community/contributing_maintained_collections.html) for general guidelines.
 
-## Development Environment
+## Development Workflow
 
-The following tools are recommended for development of this collection:
-1. [brew.sh](https://brew.sh/) -- Only needed for _Mac OS X_
-1. [pyenv](https://github.com/pyenv/pyenv/blob/master/README.md)
-2. [pipenv](https://pipenv.pypa.io/en/latest/)
-3. [pre-commit](https://github.com/pre-commit/pre-commit)
+### Activate the Environment
 
-> **CPU Instruction Set Requirement:** The Ansible Execution Environment image requires a host CPU that supports the **x86-64-v2** microarchitecture level or higher (Intel Nehalem / AMD Bulldozer and later). Attempting to run the image on an older CPU will result in the error: `Fatal glibc error: CPU does not support x86-64-v2`.
+From the repository root, install the development dependencies and activate the Pipenv environment:
 
-### Setup
+```bash
+pipenv install --dev
+pipenv shell
+```
 
-#### Mac OS X
+The environment includes Ansible, the Apstra SDK, and development tools configured in `Pipfile`.
 
-1. If you're on a Mac and don't have brew, install it:
-    ```bash
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    ```
-2. If you have an ARM-based Mac, make sure the following is in your ~/.zprofile:
-   ```bash
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-   ```
-   For Intel-based Mac, you may have to add this to ~/.zprofile instead:
-   ```bash
-    eval "$(/usr/local/bin/brew shellenv)"
-   ```
+Alternatively, run individual commands without activating a shell:
 
-3. Run the following command to install pyenv:
-   ```bash
-   brew install xz pyenv
-   ```
+```bash
+pipenv run make test
+```
 
-4. Add this to your ~/.zprofile and restart your shell:
-    ```bash
-    export PYENV_ROOT="$HOME/.pyenv"
-    [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv init -)"
-    ```
-
-#### Linux-based Systems
-
-1. Install pyenv:
-
-    ```bash
-    curl https://pyenv.run | bash
-    ```
-
-2. To set it up in your shell follow these instructions: https://github.com/pyenv/pyenv?tab=readme-ov-file#b-set-up-your-shell-environment-for-pyenv
-
-3. On _Ubuntu_, you'll need to install some packages to build Python properly:
-      ```bash
-      sudo apt -y install build-essential liblzma-dev libbz2-dev zlib1g zlib1g-dev libssl-dev libcrypt-dev libffi-dev libsqlite3-dev
-      ```
-
-#### All Systems
-
-1. The Apstra SDK (`aos-sdk-api`) is available on [PyPI](https://pypi.org/project/aos-sdk-api/) and is installed automatically when you run `make setup`. No manual download is required.
-
-   The SDK version is pinned in `Pipfile`:
-   ```toml
-   [packages]
-   aos-sdk-api = "==6.1.2"
-   ```
-   Update this version to match your Apstra server version before running `make setup`.
-
-2. Run the setup `make` target:
-   ```bash
-   make setup
-   ```
-
-3. Optional: Follow [pipenv command completion setup instructions](https://pipenv.pypa.io/en/stable/shell.html#shell-completion). Only do it if pipenv is installed in your global Python interpreter.
-
-### Usage
-
-To use the development environment after setting everything up, simply run the commands:
-
-  ```bash
-  pipenv install --dev
-  pipenv shell
-  ```
-
-This will start a new interactive prompt in which the known supported version of Ansible and required dependencies to use the Apstra SDK is installed.
+Optional: Enable [Pipenv shell completion](https://pipenv.pypa.io/en/stable/shell.html#shell-completion) if Pipenv is installed globally.
 
 ### Test Configuration
 
-To run tests, you should have an Apstra 5.0 (or later) instance in the lab.
+To run integration tests, you need access to an Apstra lab instance supported by this collection. See the [Apstra version compatibility matrix](ansible_collections/juniper/apstra/README.md#apstra-version-compatibility).
 
-At the root of your 'apstra-ansible-collection' repo, create a .env file. Put the authentication files you need in there. `pipenv` will set these when the pipenv is initialized. Here is an example.
+Create a `.env` file in the repository root with your lab URL and credentials. Pipenv automatically loads these variables when you use `pipenv run` or `pipenv shell`.
+
+Example:
 
 ```bash
-APSTRA_API_URL="https://apstra-34d9c451-d688-408b-826d-581b963c086e.aws.apstra.com/api"
+APSTRA_API_URL="https://<your-apstra-host>/api"
 APSTRA_USERNAME="admin"
-APSTRA_PASSWORD="TenaciousFlyingfish1#"
+APSTRA_PASSWORD="your-password"
 APSTRA_VERIFY_CERTIFICATES=0
 ```
+
+Do not commit your `.env` file or credentials to version control.
 
 ### Image Build
 
