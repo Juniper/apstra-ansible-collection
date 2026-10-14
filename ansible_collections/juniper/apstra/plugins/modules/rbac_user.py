@@ -21,27 +21,6 @@ description:
   - Users are identified by C(username); the module looks up the
     user UUID automatically.
 options:
-  api_url:
-    description: Apstra API URL. Defaults to C(APSTRA_API_URL) env var.
-    type: str
-    required: false
-  verify_certificates:
-    description: Verify TLS certificates.
-    type: bool
-    required: false
-    default: true
-  username:
-    description: Apstra username for SDK login. Defaults to C(APSTRA_USERNAME) env var.
-    type: str
-    required: false
-  password:
-    description: Apstra password for SDK login. Defaults to C(APSTRA_PASSWORD) env var.
-    type: str
-    required: false
-  auth_token:
-    description: Pre-existing auth token. Defaults to C(APSTRA_AUTH_TOKEN) env var.
-    type: str
-    required: false
   id:
     description: Optional id dict; usually omitted because the user is identified by C(body.username).
     type: dict
@@ -61,6 +40,8 @@ options:
     required: false
     choices: ["present", "absent"]
     default: "present"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """

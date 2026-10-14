@@ -19,32 +19,6 @@ description:
 version_added: "0.1.0"
 author: "Edwin Jacques (@edwinpjacques)"
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra api (APSTRA_API_URL).
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified (APSTRA_VERIFY_CERTIFICATES).
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The username for authentication (APSTRA_USERNAME).
-    type: str
-    required: false
-  password:
-    description:
-      - The password for authentication (APSTRA_PASSWORD).
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated (APSTRA_AUTH_TOKEN).
-    type: str
-    required: false
   gather_network_facts:
     description:
       - List of network objects to gather facts about.
@@ -71,6 +45,8 @@ options:
       - If set to true, the module will return a list of available network objects.
     type: bool
     default: false
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 requirements:
   - "python >= 3.10"
   - "apstra-client >= 1.0.0"

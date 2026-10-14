@@ -29,32 +29,6 @@ description:
     template text, negation template text, and optional filename.
 
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra api.
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The username for authentication.
-    type: str
-    required: false
-  password:
-    description:
-      - The password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated.
-    type: str
-    required: false
   type:
     description:
       - The type of configlet to manage.
@@ -88,6 +62,8 @@ options:
     type: str
     choices: ["present", "absent"]
     default: "present"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """

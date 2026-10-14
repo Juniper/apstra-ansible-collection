@@ -31,32 +31,6 @@ description:
   - Changes to the banned list are recorded in the event log.
 
 options:
-  api_url:
-    description: Apstra API URL. Defaults to C(APSTRA_API_URL) env var.
-    type: str
-    required: false
-
-  verify_certificates:
-    description: Verify TLS certificates.
-    type: bool
-    required: false
-    default: true
-
-  username:
-    description: Apstra username for SDK login. Defaults to C(APSTRA_USERNAME) env var.
-    type: str
-    required: false
-
-  password:
-    description: Apstra password for SDK login. Defaults to C(APSTRA_PASSWORD) env var.
-    type: str
-    required: false
-
-  auth_token:
-    description: Pre-existing auth token. Defaults to C(APSTRA_AUTH_TOKEN) env var.
-    type: str
-    required: false
-
   ip_subnet:
     description:
       - IP address or subnet CIDR notation to remove from the ban list.
@@ -77,6 +51,8 @@ options:
     required: false
     choices: ["absent", "query"]
     default: "query"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """

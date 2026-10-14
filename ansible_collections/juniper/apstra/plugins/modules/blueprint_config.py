@@ -25,32 +25,6 @@ description:
     or an explicit list of device names.
   - Optionally saves rendered configs to local files (one file per device).
 options:
-  api_url:
-    description:
-      - The URL used to access the Apstra api.
-    type: str
-    required: false
-  verify_certificates:
-    description:
-      - If set to false, SSL certificates will not be verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description:
-      - The username for authentication.
-    type: str
-    required: false
-  password:
-    description:
-      - The password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description:
-      - The authentication token to use if already authenticated.
-    type: str
-    required: false
   id:
     description:
       - Dictionary containing the blueprint identifier.
@@ -94,6 +68,8 @@ options:
     type: str
     choices: ["collected"]
     default: "collected"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 requirements:
   - "python >= 3.10"
   - "aos-sdk >= 0.1.0"

@@ -31,27 +31,6 @@ description:
     the module will still succeed at the API level.
 
 options:
-  api_url:
-    description: The URL used to access the Apstra API.
-    type: str
-    required: false
-  verify_certificates:
-    description: If false, SSL certificates are not verified.
-    type: bool
-    required: false
-    default: True
-  username:
-    description: Apstra username for authentication.
-    type: str
-    required: false
-  password:
-    description: Apstra password for authentication.
-    type: str
-    required: false
-  auth_token:
-    description: Authentication token (if already authenticated).
-    type: str
-    required: false
   id:
     description:
       - Identifies the upgrade group to operate on.
@@ -117,6 +96,8 @@ options:
     required: false
     choices: ["present", "absent", "gathered", "impact_report"]
     default: "present"
+extends_documentation_fragment:
+  - juniper.apstra.apstra_client
 """
 
 EXAMPLES = """
